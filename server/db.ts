@@ -46,39 +46,39 @@ export function getDb(customEnv?: Record<string, any>): Client {
 export const db = getDb();
 
 /**
- * Initializes Turso database schemas and indexes
+ * Initializes Turso database schemas and indexes, automatically migrating missing columns
  */
 export async function initDb(customEnv?: Record<string, any>) {
   const client = getDb(customEnv);
+  const tables = ['turso_decks', 'turso_binders', 'turso_collection'];
 
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS turso_decks (
-      id TEXT PRIMARY KEY,
-      vault_id TEXT NOT NULL,
-      data TEXT NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-  `);
-  
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS turso_binders (
-      id TEXT PRIMARY KEY,
-      vault_id TEXT NOT NULL,
-      data TEXT NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-  `);
+  for (const table of tables) {
+    // 1. Create table if not exists
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        id TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+    `);
 
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS turso_collection (
-      id TEXT PRIMARY KEY,
-      vault_id TEXT NOT NULL,
-      data TEXT NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-  `);
-  
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_decks_vault ON turso_decks(vault_id);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_binders_vault ON turso_binders(vault_id);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_collection_vault ON turso_collection(vault_id);`);
+    // 2. Verify and add updated_at column if table was created in an older schema version
+    try {
+      const info = await client.execute(`PRAGMA table_info(${table})`);
+      const hasUpdatedAt = info.rows.some((col: any) => col.name === 'updated_at');
+      if (!hasUpdatedAt) {
+        await client.execute(`ALTER TABLE ${table} ADD COLUMN updated_at INTEGER DEFAULT 0`);
+      }
+    } catch (err: any) {
+      console.warn(`Warning checking/updating column on ${table}:`, err.message || err);
+    }
+
+    // 3. Create index for fast vault queries
+    try {
+      await client.execute(`CREATE INDEX IF NOT EXISTS idx_${table}_vault ON ${table}(vault_id);`);
+    } catch (err: any) {
+      console.warn(`Warning creating index on ${table}:`, err.message || err);
+    }
+  }
 }

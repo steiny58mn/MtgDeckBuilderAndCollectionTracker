@@ -62,11 +62,27 @@ async function startServer() {
          return res.status(400).json({ error: 'Invalid collection' });
       }
       
-      await db.execute({
-        sql: `INSERT INTO ${tableName} (id, vault_id, data, updated_at) VALUES (?, ?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id, updated_at = excluded.updated_at`,
-        args: [docId, vaultId, JSON.stringify(data), Date.now()]
-      });
+      const insertSql = `INSERT INTO ${tableName} (id, vault_id, data, updated_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id, updated_at = excluded.updated_at`;
+      
+      try {
+        await db.execute({
+          sql: insertSql,
+          args: [docId, vaultId, JSON.stringify(data), Date.now()]
+        });
+      } catch (insertError: any) {
+        // If the table was missing the updated_at column, run auto-migration and retry
+        if (insertError?.message?.includes('no column named updated_at')) {
+          await db.execute(`ALTER TABLE ${tableName} ADD COLUMN updated_at INTEGER DEFAULT 0`).catch(() => {});
+          await db.execute({
+            sql: insertSql,
+            args: [docId, vaultId, JSON.stringify(data), Date.now()]
+          });
+        } else {
+          throw insertError;
+        }
+      }
+
       res.json({ success: true });
     } catch (e: any) {
       console.error(`Turso write error on ${collectionId}/${docId}:`, e);
