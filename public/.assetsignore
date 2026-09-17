@@ -1,0 +1,4 @@
+# Ignore server-side files and workers from static assets upload
+_worker.js
+server.cjs
+server.cjs.map
