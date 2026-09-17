@@ -11,6 +11,17 @@ async function startServer() {
   // Increase payload limits for large deck objects
   app.use(express.json({ limit: '10mb' }));
 
+  // CORS middleware allowing full REST methods
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    next();
+  });
+
   // Print startup config info
   const initialConfig = getTursoConfig();
   console.log(`[Turso DB] 🚀 Server starting on port ${PORT}...`);
@@ -77,8 +88,8 @@ async function startServer() {
   });
 
   // 2. Write operations
-  // Save a document (deck, binder, or card)
-  app.post('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
+  // Save a document (deck, binder, or card) - supports POST, PUT, and PATCH
+  const handleSaveDocument = async (req: express.Request, res: express.Response) => {
     const { vaultId, collectionId, docId } = req.params;
     const data = req.body;
     const start = Date.now();
@@ -111,13 +122,17 @@ async function startServer() {
       }
 
       const itemName = data?.name || docId;
-      console.log(`[Turso DB API] 💾 POST /api/storage/${vaultId}/${collectionId}/${docId} ("${itemName}") -> Success (${Date.now() - start}ms)`);
+      console.log(`[Turso DB API] 💾 ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} ("${itemName}") -> Success (${Date.now() - start}ms)`);
       res.json({ success: true });
     } catch (e: any) {
-      console.error(`[Turso DB API] ❌ POST /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
+      console.error(`[Turso DB API] ❌ ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
       res.status(500).json({ error: e.message || 'Failed to write to Turso database' });
     }
-  });
+  };
+
+  app.post('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
+  app.put('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
+  app.patch('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
 
   // Delete a document
   app.delete('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {

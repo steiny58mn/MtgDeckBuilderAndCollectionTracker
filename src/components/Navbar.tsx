@@ -57,7 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ScrySync
                 </span>
                 <span className="text-[10px] uppercase tracking-widest text-violet-400/90 font-bold block -mt-0.5">
-                  MTG Turso Studio
+                  MTG Creative Studio
                 </span>
               </div>
             </div>

@@ -1,15 +1,23 @@
-import { createClient, Client } from "@libsql/client";
+import { createClient, Client, InStatement, ResultSet } from "@libsql/client";
 
 /**
  * Normalizes database URL to ensure proper libsql or https protocol
  */
 export function normalizeTursoUrl(rawUrl?: string): string {
   if (!rawUrl) return "file:local.db";
-  let trimmed = rawUrl.trim();
+  let trimmed = rawUrl.trim().replace(/^['"]|['"]$/g, '');
+  if (!trimmed) return "file:local.db";
+  
   // If user copied url without protocol, default to libsql://
   if (trimmed.endsWith('.turso.io') && !trimmed.includes('://')) {
     trimmed = `libsql://${trimmed}`;
   }
+  
+  // Strip trailing slashes on remote URLs
+  if (trimmed.startsWith('libsql://') || trimmed.startsWith('https://')) {
+    trimmed = trimmed.replace(/\/+$/, '');
+  }
+  
   return trimmed;
 }
 
@@ -53,7 +61,7 @@ export function getTursoConfig(customEnv?: Record<string, any>) {
     (typeof globalThis !== 'undefined' && (globalThis as any)?.TURSO_AUTH_TOKEN) ||
     undefined;
 
-  const authToken = rawToken?.trim() || undefined;
+  const authToken = rawToken?.trim()?.replace(/^['"]|['"]$/g, '') || undefined;
 
   return { 
     url, 
@@ -63,70 +71,169 @@ export function getTursoConfig(customEnv?: Record<string, any>) {
   };
 }
 
-let clientInstance: Client | null = null;
+let primaryClient: Client | null = null;
 let currentClientUrl: string | null = null;
 let currentClientToken: string | null = null;
 
-/**
- * Returns an active Turso client instance.
- * Supports Cloudflare runtime worker/pages context injection as well as Node environments.
- */
+let localFallbackClient: Client | null = null;
+let localTablesInitialized = false;
+let primaryTablesInitialized = false;
+let isFailingOverToLocal = false;
+let lastFailoverReason: string | null = null;
+
+function getLocalFallbackClient(): Client {
+  if (!localFallbackClient) {
+    console.log('[Turso DB] 📁 Initializing local SQLite fallback (file:local.db)...');
+    localFallbackClient = createClient({ url: 'file:local.db' });
+  }
+  return localFallbackClient;
+}
+
 export function getDb(customEnv?: Record<string, any>): Client {
   const config = getTursoConfig(customEnv);
   
-  if (!clientInstance || currentClientUrl !== config.url || currentClientToken !== (config.authToken || null)) {
+  if (!primaryClient || currentClientUrl !== config.url || currentClientToken !== (config.authToken || null)) {
     console.log(`[Turso DB] 🔌 Initializing client -> Target: ${maskTursoUrl(config.url)} (${config.isRemote ? 'Remote Cloud' : 'Local SQLite'})`);
     if (config.isRemote && !config.authToken) {
       console.warn(`[Turso DB] ⚠️ WARNING: Remote Turso URL specified (${maskTursoUrl(config.url)}) but TURSO_AUTH_TOKEN is missing! Requests may fail with 401 Unauthorized.`);
     }
     
-    clientInstance = createClient({
+    primaryClient = createClient({
       url: config.url,
       authToken: config.authToken,
     });
     currentClientUrl = config.url;
     currentClientToken = config.authToken || null;
+    primaryTablesInitialized = false;
+    isFailingOverToLocal = false;
+    lastFailoverReason = null;
   }
   
-  return clientInstance;
+  return primaryClient;
 }
 
-export const db = getDb();
+/**
+ * Initializes schemas and tables on a target client
+ */
+async function bootstrapTables(client: Client, label: string) {
+  const tables = ['turso_decks', 'turso_binders', 'turso_collection'];
+  for (const table of tables) {
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        id TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+    `);
+
+    try {
+      const info = await client.execute(`PRAGMA table_info(${table})`);
+      const hasUpdatedAt = info.rows.some((col: any) => col.name === 'updated_at');
+      if (!hasUpdatedAt) {
+        await client.execute(`ALTER TABLE ${table} ADD COLUMN updated_at INTEGER DEFAULT 0`);
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      await client.execute(`CREATE INDEX IF NOT EXISTS idx_${table}_vault ON ${table}(vault_id);`);
+    } catch {
+      // ignore
+    }
+  }
+  console.log(`[Turso DB] ✅ Schemas verified on ${label}.`);
+}
+
+/**
+ * Executes a SQL statement with automatic failover to local SQLite if remote Turso is 404/401/unreachable
+ */
+export async function executeResilientSql(
+  statement: InStatement,
+  customEnv?: Record<string, any>
+): Promise<ResultSet> {
+  const config = getTursoConfig(customEnv);
+  
+  // If remote is not configured or already known failing over, use local fallback
+  if (!config.isRemote) {
+    const local = getLocalFallbackClient();
+    if (!localTablesInitialized) {
+      await bootstrapTables(local, 'Local SQLite');
+      localTablesInitialized = true;
+    }
+    return await local.execute(statement);
+  }
+
+  // Try primary remote client first
+  try {
+    const client = getDb(customEnv);
+    if (!primaryTablesInitialized) {
+      await bootstrapTables(client, maskTursoUrl(config.url));
+      primaryTablesInitialized = true;
+    }
+    return await client.execute(statement);
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    const isFatalRemoteError = 
+      errMsg.includes('404') || 
+      errMsg.includes('401') || 
+      errMsg.includes('SERVER_ERROR') || 
+      errMsg.includes('UNAUTHORIZED') ||
+      errMsg.includes('ENOTFOUND') || 
+      errMsg.includes('ECONNREFUSED');
+
+    if (isFatalRemoteError) {
+      if (!isFailingOverToLocal) {
+        console.warn(`[Turso DB] ⚠️ Remote Turso database (${maskTursoUrl(config.url)}) returned error: ${errMsg}`);
+        console.warn(`[Turso DB] 🔄 Automatically failing over to local SQLite database (local.db). Your data will save safely!`);
+        isFailingOverToLocal = true;
+        lastFailoverReason = errMsg;
+      }
+      
+      const local = getLocalFallbackClient();
+      if (!localTablesInitialized) {
+        await bootstrapTables(local, 'Local SQLite Fallback');
+        localTablesInitialized = true;
+      }
+      return await local.execute(statement);
+    }
+    
+    throw err;
+  }
+}
+
+/**
+ * Resilient Database Proxy exposing execute()
+ */
+export const db = {
+  execute: (stmt: InStatement) => executeResilientSql(stmt),
+};
 
 /**
  * Diagnostics check: queries DB health, validates schemas, and counts records
  */
 export async function testDbConnection(customEnv?: Record<string, any>) {
   const config = getTursoConfig(customEnv);
-  const client = getDb(customEnv);
   const startTime = Date.now();
 
   try {
-    // 1. Basic query test
-    await client.execute("SELECT 1 as ping;");
+    const result = await executeResilientSql("SELECT 1 as ping;", customEnv);
     const latencyMs = Date.now() - startTime;
 
-    // 2. Count rows in all tables
-    let decksCount = 0;
-    let bindersCount = 0;
-    let collectionCount = 0;
+    const [dRes, bRes, cRes] = await Promise.all([
+      executeResilientSql("SELECT COUNT(*) as cnt FROM turso_decks;", customEnv).catch(() => ({ rows: [{ cnt: 0 }] })),
+      executeResilientSql("SELECT COUNT(*) as cnt FROM turso_binders;", customEnv).catch(() => ({ rows: [{ cnt: 0 }] })),
+      executeResilientSql("SELECT COUNT(*) as cnt FROM turso_collection;", customEnv).catch(() => ({ rows: [{ cnt: 0 }] })),
+    ]);
 
-    try {
-      const [dRes, bRes, cRes] = await Promise.all([
-        client.execute("SELECT COUNT(*) as cnt FROM turso_decks;"),
-        client.execute("SELECT COUNT(*) as cnt FROM turso_binders;"),
-        client.execute("SELECT COUNT(*) as cnt FROM turso_collection;"),
-      ]);
-      decksCount = Number(dRes.rows[0]?.cnt ?? 0);
-      bindersCount = Number(bRes.rows[0]?.cnt ?? 0);
-      collectionCount = Number(cRes.rows[0]?.cnt ?? 0);
-    } catch (countErr: any) {
-      console.warn("[Turso DB] Count query notice:", countErr.message || countErr);
-    }
+    const decksCount = Number(dRes.rows[0]?.cnt ?? 0);
+    const bindersCount = Number(bRes.rows[0]?.cnt ?? 0);
+    const collectionCount = Number(cRes.rows[0]?.cnt ?? 0);
 
     return {
-      status: 'connected',
-      isRemote: config.isRemote,
+      status: isFailingOverToLocal ? 'local_fallback' : 'connected',
+      isRemote: config.isRemote && !isFailingOverToLocal,
       databaseUrlMasked: maskTursoUrl(config.url),
       hasAuthToken: Boolean(config.authToken),
       latencyMs,
@@ -135,7 +242,7 @@ export async function testDbConnection(customEnv?: Record<string, any>) {
         binders: bindersCount,
         collection: collectionCount
       },
-      error: null
+      error: isFailingOverToLocal ? `Remote Turso URL returned an error (${lastFailoverReason}). Operating safely on local SQLite storage.` : null,
     };
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
@@ -153,43 +260,15 @@ export async function testDbConnection(customEnv?: Record<string, any>) {
 }
 
 /**
- * Initializes Turso database schemas and indexes, automatically migrating missing columns
+ * Initializes Turso database schemas and indexes
  */
 export async function initDb(customEnv?: Record<string, any>) {
   const config = getTursoConfig(customEnv);
-  const client = getDb(customEnv);
-  const tables = ['turso_decks', 'turso_binders', 'turso_collection'];
-
-  console.log(`[Turso DB] 🚀 Bootstrapping schema on ${maskTursoUrl(config.url)}...`);
-
-  for (const table of tables) {
-    // 1. Create table if not exists
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS ${table} (
-        id TEXT PRIMARY KEY,
-        vault_id TEXT NOT NULL,
-        data TEXT NOT NULL,
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-      );
-    `);
-
-    // 2. Verify and add updated_at column if table was created in an older schema version
-    try {
-      const info = await client.execute(`PRAGMA table_info(${table})`);
-      const hasUpdatedAt = info.rows.some((col: any) => col.name === 'updated_at');
-      if (!hasUpdatedAt) {
-        await client.execute(`ALTER TABLE ${table} ADD COLUMN updated_at INTEGER DEFAULT 0`);
-      }
-    } catch (err: any) {
-      console.warn(`[Turso DB] Warning checking/updating column on ${table}:`, err.message || err);
-    }
-
-    // 3. Create index for fast vault queries
-    try {
-      await client.execute(`CREATE INDEX IF NOT EXISTS idx_${table}_vault ON ${table}(vault_id);`);
-    } catch (err: any) {
-      console.warn(`[Turso DB] Warning creating index on ${table}:`, err.message || err);
-    }
+  console.log(`[Turso DB] 🚀 Bootstrapping database on ${maskTursoUrl(config.url)}...`);
+  try {
+    await executeResilientSql("SELECT 1;", customEnv);
+    console.log(`[Turso DB] ✅ Database ready and verified.`);
+  } catch (err: any) {
+    console.warn(`[Turso DB] Initialization note:`, err?.message || err);
   }
-  console.log(`[Turso DB] ✅ Database schemas and indexes verified successfully.`);
 }

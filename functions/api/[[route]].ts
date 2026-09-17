@@ -84,8 +84,8 @@ function jsonResponse(data: any, status = 200) {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
     },
   });
 }
@@ -104,10 +104,15 @@ type PagesFunction<Env = unknown, P extends string = string, Data extends Record
   context: EventContext<Env, P, Data>
 ) => Response | Promise<Response>;
 
-export const onRequest: PagesFunction<Env> = async (context) => {
+async function handleApiRequest(context: EventContext<Env, string, Record<string, unknown>>): Promise<Response> {
   const { request, env } = context;
   const url = new URL(request.url);
-  const path = url.pathname;
+  let path = url.pathname;
+
+  // Normalize path if leading /api is omitted in subrouter
+  if (!path.startsWith('/api')) {
+    path = `/api${path.startsWith('/') ? path : `/${path}`}`;
+  }
 
   // Handle CORS Preflight
   if (request.method === 'OPTIONS') {
@@ -115,8 +120,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
       },
     });
   }
@@ -175,7 +180,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 
   // 3. GET /api/storage/:vaultId/all
-  const allMatch = path.match(/^\/api\/storage\/([^/]+)\/all$/);
+  const allMatch = path.match(/^\/api\/storage\/([^/]+)\/all\/?$/);
   if (allMatch && request.method === 'GET') {
     const vaultId = allMatch[1];
     const start = Date.now();
@@ -200,10 +205,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // 4. POST /api/storage/:vaultId/:collectionId/:docId
-  const postMatch = path.match(/^\/api\/storage\/([^/]+)\/([^/]+)\/([^/]+)$/);
-  if (postMatch && request.method === 'POST') {
-    const [, vaultId, collectionId, docId] = postMatch;
+  // 4. POST / PUT / PATCH /api/storage/:vaultId/:collectionId/:docId
+  const docMatch = path.match(/^\/api\/storage\/([^/]+)\/([^/]+)\/([^/]+)\/?$/);
+  if (docMatch && (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH')) {
+    const [, vaultId, collectionId, docId] = docMatch;
     const start = Date.now();
     try {
       const tableName = `turso_${collectionId}`;
@@ -232,8 +237,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 
   // 5. DELETE /api/storage/:vaultId/:collectionId/:docId
-  if (postMatch && request.method === 'DELETE') {
-    const [, vaultId, collectionId, docId] = postMatch;
+  if (docMatch && request.method === 'DELETE') {
+    const [, vaultId, collectionId, docId] = docMatch;
     const start = Date.now();
     try {
       const tableName = `turso_${collectionId}`;
@@ -261,13 +266,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     const scryfallSubPath = path.replace('/api/scryfall', '');
     const scryfallUrl = `https://api.scryfall.com${scryfallSubPath}${url.search}`;
     try {
-      const body = request.method === 'POST' ? await request.text() : undefined;
+      const body = (request.method === 'POST' || request.method === 'PUT') ? await request.text() : undefined;
       const res = await fetch(scryfallUrl, {
         method: request.method,
         headers: {
           'User-Agent': 'MTGCloudflarePagesDeckBuilder/1.0',
           'Accept': 'application/json',
-          ...(request.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+          ...(request.method === 'POST' || request.method === 'PUT' ? { 'Content-Type': 'application/json' } : {}),
         },
         body,
       });
@@ -285,5 +290,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
   }
 
-  return jsonResponse({ error: 'Not found' }, 404);
-};
+  return jsonResponse({ error: 'Endpoint not found on Cloudflare Pages Function router' }, 404);
+}
+
+// Export all Cloudflare Pages method handlers
+export const onRequest: PagesFunction<Env> = handleApiRequest;
+export const onRequestGet: PagesFunction<Env> = handleApiRequest;
+export const onRequestPost: PagesFunction<Env> = handleApiRequest;
+export const onRequestPut: PagesFunction<Env> = handleApiRequest;
+export const onRequestPatch: PagesFunction<Env> = handleApiRequest;
+export const onRequestDelete: PagesFunction<Env> = handleApiRequest;
+export const onRequestOptions: PagesFunction<Env> = handleApiRequest;

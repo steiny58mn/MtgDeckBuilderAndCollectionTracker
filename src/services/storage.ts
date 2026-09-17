@@ -843,8 +843,11 @@ export class StorageService {
         this.setStatus('synced');
       } else {
         const errorBody = await res.text().catch(() => '');
-        console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} ${res.statusText} when saving deck. Body:`, errorBody);
-        console.warn(`[Turso DB] ℹ️ Deck "${updated.name}" remains saved in browser local cache.`);
+        if (res.status === 405) {
+          console.warn(`[Turso DB] ⚠️ Server returned HTTP 405 (Method Not Allowed) when saving deck "${updated.name}". If hosted on Cloudflare Pages, make sure Cloudflare Pages Functions are enabled. The deck is safely saved in local storage.`);
+        } else {
+          console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} ${res.statusText} when saving deck. Body:`, errorBody);
+        }
         this.setStatus('local');
       }
     } catch (e: any) {
