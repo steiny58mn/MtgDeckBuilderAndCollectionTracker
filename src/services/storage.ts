@@ -903,12 +903,21 @@ export class StorageService {
         body: JSON.stringify(updated),
       });
       if (res.ok) {
-        console.log(`[Turso DB] ✅ Successfully persisted deck "${updated.name}" to Turso database!`);
-        this.setStatus('synced');
+        const body = await res.json().catch(() => ({}));
+        if (body.remote) {
+          console.log(`[Turso DB] ✅ Successfully persisted deck "${updated.name}" to Turso cloud database (Table: ${body.table || 'turso_decks'}, Vault: ${vaultId})!`);
+          this.setStatus('synced');
+        } else if (body.localOnly) {
+          console.warn(`[Turso DB] ⚠️ Saved locally only. Cloudflare Worker is missing TURSO_DATABASE_URL / TURSO_AUTH_TOKEN secrets. Reason: ${body.error || 'Not configured'}`);
+          this.setStatus('local');
+        } else {
+          console.log(`[Turso DB] ✅ Saved deck "${updated.name}"`);
+          this.setStatus('synced');
+        }
       } else {
         const errorBody = await res.text().catch(() => '');
         if (res.status === 405) {
-          console.warn(`[Turso DB] ⚠️ Server returned HTTP 405 (Method Not Allowed) when saving deck "${updated.name}". If hosted on Cloudflare Pages, make sure Cloudflare Pages Functions are enabled. The deck is safely saved in local storage.`);
+          console.warn(`[Turso DB] ⚠️ Server returned HTTP 405 (Method Not Allowed) when saving deck "${updated.name}". The deck is safely saved in local storage.`);
         } else {
           console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} ${res.statusText} when saving deck. Body:`, errorBody);
         }
@@ -916,7 +925,7 @@ export class StorageService {
       }
     } catch (e: any) {
       console.error(`[Turso DB] ❌ Network error when connecting to /api/storage/${vaultId}/decks/${updated.id}:`, e);
-      console.warn(`[Turso DB] ℹ️ Deck "${updated.name}" is stored locally. If on Cloudflare Pages, verify Functions or Environment Secrets.`);
+      console.warn(`[Turso DB] ℹ️ Deck "${updated.name}" is stored locally.`);
       this.setStatus('local');
     }
   }

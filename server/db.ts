@@ -1,12 +1,57 @@
 import { createClient, Client, InStatement, ResultSet } from "@libsql/client";
 
 /**
+ * Checks if a Turso database URL is a dummy/example placeholder (e.g. your-database-name)
+ */
+export function isPlaceholderTursoUrl(url?: string): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase().trim();
+  return (
+    lower.includes('your-database-name') ||
+    lower.includes('your-db-name') ||
+    lower.includes('your_database_name') ||
+    lower.includes('your_db_name') ||
+    lower.includes('your-database') ||
+    lower.includes('your_database') ||
+    lower.includes('your-db') ||
+    lower.includes('your_db') ||
+    lower.includes('your-org') ||
+    lower.includes('example.turso.io') ||
+    lower.includes('<your') ||
+    lower.includes('[your') ||
+    lower.includes('placeholder') ||
+    lower === 'libsql://' ||
+    lower === 'https://' ||
+    lower === 'file:local.db'
+  );
+}
+
+/**
+ * Checks if a Turso auth token is a dummy/example placeholder
+ */
+export function isPlaceholderTursoToken(token?: string): boolean {
+  if (!token) return false;
+  const lower = token.toLowerCase().trim();
+  return (
+    lower.includes('your-turso-auth-token') ||
+    lower.includes('your-auth-token') ||
+    lower.includes('your_auth_token') ||
+    lower.includes('your-token') ||
+    lower.includes('your_token') ||
+    lower.includes('<your') ||
+    lower.includes('[your') ||
+    lower.includes('example') ||
+    lower.includes('placeholder')
+  );
+}
+
+/**
  * Normalizes database URL to ensure proper libsql or https protocol
  */
 export function normalizeTursoUrl(rawUrl?: string): string {
   if (!rawUrl) return "file:local.db";
   let trimmed = rawUrl.trim().replace(/^['"]|['"]$/g, '');
-  if (!trimmed) return "file:local.db";
+  if (!trimmed || isPlaceholderTursoUrl(trimmed)) return "file:local.db";
   
   // If user copied url without protocol, default to libsql://
   if (trimmed.endsWith('.turso.io') && !trimmed.includes('://')) {
@@ -53,8 +98,6 @@ export function getTursoConfig(customEnv?: Record<string, any>) {
     (typeof globalThis !== 'undefined' && (globalThis as any)?.TURSO_DATABASE_URL) ||
     undefined;
 
-  const url = normalizeTursoUrl(rawUrl);
-
   const rawToken = 
     customEnv?.TURSO_AUTH_TOKEN ||
     (typeof process !== 'undefined' && process.env?.TURSO_AUTH_TOKEN) ||
@@ -62,12 +105,31 @@ export function getTursoConfig(customEnv?: Record<string, any>) {
     undefined;
 
   const authToken = rawToken?.trim()?.replace(/^['"]|['"]$/g, '') || undefined;
+  const isUrlPlaceholder = isPlaceholderTursoUrl(rawUrl);
+  const isTokenPlaceholder = isPlaceholderTursoToken(authToken);
+  const isPlaceholder = Boolean(isUrlPlaceholder || isTokenPlaceholder);
+
+  // If credentials are empty or placeholders, default safely to local SQLite
+  if (isPlaceholder || !rawUrl) {
+    return {
+      url: 'file:local.db',
+      authToken: undefined,
+      isRemote: false,
+      isConfigured: false,
+      isPlaceholder,
+      rawPlaceholderUrl: rawUrl,
+    };
+  }
+
+  const url = normalizeTursoUrl(rawUrl);
 
   return { 
     url, 
     authToken,
     isRemote: url.startsWith('libsql://') || url.startsWith('https://'),
-    isConfigured: Boolean(rawUrl && rawToken)
+    isConfigured: Boolean(rawUrl && authToken && !isPlaceholder),
+    isPlaceholder: false,
+    rawPlaceholderUrl: undefined,
   };
 }
 
@@ -155,8 +217,8 @@ export async function executeResilientSql(
 ): Promise<ResultSet> {
   const config = getTursoConfig(customEnv);
   
-  // If remote is not configured or already known failing over, use local fallback
-  if (!config.isRemote) {
+  // If remote is not configured, is a placeholder, or already failing over, use local fallback
+  if (!config.isRemote || isFailingOverToLocal) {
     const local = getLocalFallbackClient();
     if (!localTablesInitialized) {
       await bootstrapTables(local, 'Local SQLite');
@@ -185,8 +247,7 @@ export async function executeResilientSql(
 
     if (isFatalRemoteError) {
       if (!isFailingOverToLocal) {
-        console.warn(`[Turso DB] ⚠️ Remote Turso database (${maskTursoUrl(config.url)}) returned error: ${errMsg}`);
-        console.warn(`[Turso DB] 🔄 Automatically failing over to local SQLite database (local.db). Your data will save safely!`);
+        console.info(`[Turso DB] ℹ️ Remote Turso endpoint (${maskTursoUrl(config.url)}) returned: ${errMsg}. Operating safely on local SQLite storage.`);
         isFailingOverToLocal = true;
         lastFailoverReason = errMsg;
       }
@@ -231,10 +292,13 @@ export async function testDbConnection(customEnv?: Record<string, any>) {
     const bindersCount = Number(bRes.rows[0]?.cnt ?? 0);
     const collectionCount = Number(cRes.rows[0]?.cnt ?? 0);
 
+    const isPlaceholder = config.isPlaceholder;
+
     return {
-      status: isFailingOverToLocal ? 'local_fallback' : 'connected',
-      isRemote: config.isRemote && !isFailingOverToLocal,
-      databaseUrlMasked: maskTursoUrl(config.url),
+      status: isPlaceholder ? 'local_storage' : isFailingOverToLocal ? 'local_fallback' : (config.isRemote ? 'connected' : 'local_storage'),
+      isRemote: config.isRemote && !isFailingOverToLocal && !isPlaceholder,
+      isPlaceholder,
+      databaseUrlMasked: maskTursoUrl(config.rawPlaceholderUrl || config.url),
       hasAuthToken: Boolean(config.authToken),
       latencyMs,
       counts: {
@@ -242,11 +306,14 @@ export async function testDbConnection(customEnv?: Record<string, any>) {
         binders: bindersCount,
         collection: collectionCount
       },
-      error: isFailingOverToLocal ? `Remote Turso URL returned an error (${lastFailoverReason}). Operating safely on local SQLite storage.` : null,
+      error: isPlaceholder 
+        ? 'Example placeholder credentials detected (e.g. your-database-name). Operating securely with local SQLite storage. When ready to sync to the cloud, set your real Turso database URL in Settings.'
+        : isFailingOverToLocal 
+        ? `Remote Turso URL returned an error (${lastFailoverReason}). Operating safely on local SQLite storage.` 
+        : null,
     };
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
-    console.error("[Turso DB] ❌ Connection test failed:", err);
     return {
       status: 'error',
       isRemote: config.isRemote,
@@ -264,11 +331,15 @@ export async function testDbConnection(customEnv?: Record<string, any>) {
  */
 export async function initDb(customEnv?: Record<string, any>) {
   const config = getTursoConfig(customEnv);
-  console.log(`[Turso DB] 🚀 Bootstrapping database on ${maskTursoUrl(config.url)}...`);
+  if (config.isPlaceholder) {
+    console.log(`[Turso DB] ℹ️ Placeholder credentials detected ("${config.rawPlaceholderUrl}"). Initializing local SQLite database (file:local.db)...`);
+  } else {
+    console.log(`[Turso DB] 🚀 Bootstrapping database on ${maskTursoUrl(config.url)}...`);
+  }
   try {
     await executeResilientSql("SELECT 1;", customEnv);
     console.log(`[Turso DB] ✅ Database ready and verified.`);
   } catch (err: any) {
-    console.warn(`[Turso DB] Initialization note:`, err?.message || err);
+    console.info(`[Turso DB] Database note:`, err?.message || err);
   }
 }

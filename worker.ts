@@ -13,8 +13,30 @@ interface Env {
   [key: string]: any;
 }
 
+function isPlaceholder(val?: string | null): boolean {
+  if (!val) return true;
+  const lower = val.toLowerCase().trim();
+  return (
+    lower.includes('your-database-name') ||
+    lower.includes('your-db-name') ||
+    lower.includes('your_database_name') ||
+    lower.includes('your_db_name') ||
+    lower.includes('your-database') ||
+    lower.includes('your_database') ||
+    lower.includes('your-db') ||
+    lower.includes('your_db') ||
+    lower.includes('your-org') ||
+    lower.includes('example.turso.io') ||
+    lower.includes('<your') ||
+    lower.includes('[your') ||
+    lower.includes('your-turso-auth-token') ||
+    lower.includes('your-auth-token') ||
+    lower.includes('placeholder')
+  );
+}
+
 function normalizeTursoUrl(rawUrl?: string): string | null {
-  if (!rawUrl) return null;
+  if (!rawUrl || isPlaceholder(rawUrl)) return null;
   let trimmed = rawUrl.trim().replace(/^['"]|['"]$/g, '');
   if (!trimmed) return null;
   
@@ -47,6 +69,34 @@ function maskTursoUrl(url?: string | null): string {
   }
 }
 
+function findEnvVar(env: Env, keys: string[]): string | undefined {
+  if (env && typeof env === 'object') {
+    for (const key of keys) {
+      if (env[key]) return String(env[key]);
+    }
+    // Case-insensitive check
+    const lowerKeys = keys.map(k => k.toLowerCase());
+    for (const [envKey, val] of Object.entries(env)) {
+      if (val && lowerKeys.includes(envKey.toLowerCase())) {
+        return String(val);
+      }
+    }
+  }
+  // Check globalThis
+  const g = globalThis as any;
+  if (g) {
+    for (const key of keys) {
+      if (g[key]) return String(g[key]);
+    }
+    if (g.process && g.process.env) {
+      for (const key of keys) {
+        if (g.process.env[key]) return String(g.process.env[key]);
+      }
+    }
+  }
+  return undefined;
+}
+
 function getDbClient(env: Env): { 
   client: Client | null; 
   url: string | null; 
@@ -54,13 +104,19 @@ function getDbClient(env: Env): {
   isRemote: boolean; 
   isConfigured: boolean;
   tokenLength: number;
+  detectedEnvKeys: string[];
   error?: string;
 } {
-  const url = normalizeTursoUrl(env.TURSO_DATABASE_URL);
-  const authToken = env.TURSO_AUTH_TOKEN?.trim()?.replace(/^['"]|['"]$/g, '') || undefined;
+  const rawUrl = findEnvVar(env, ['TURSO_DATABASE_URL', 'TURSO_URL', 'TURSO_DB_URL', 'DATABASE_URL', 'VITE_TURSO_DATABASE_URL']);
+  const rawAuthToken = findEnvVar(env, ['TURSO_AUTH_TOKEN', 'TURSO_TOKEN', 'AUTH_TOKEN', 'VITE_TURSO_AUTH_TOKEN']);
+
+  const url = normalizeTursoUrl(rawUrl);
+  const authToken = rawAuthToken?.trim()?.replace(/^['"]|['"]$/g, '') || undefined;
   const tokenLength = authToken ? authToken.length : 0;
+  const detectedEnvKeys = Object.keys(env || {}).filter(k => k !== 'ASSETS');
 
   if (!url) {
+    const isPlaceholderUrl = isPlaceholder(rawUrl);
     return {
       client: null,
       url: null,
@@ -68,7 +124,10 @@ function getDbClient(env: Env): {
       isRemote: false,
       isConfigured: false,
       tokenLength,
-      error: 'TURSO_DATABASE_URL is not set or empty in Cloudflare Pages Environment Variables.',
+      detectedEnvKeys,
+      error: isPlaceholderUrl
+        ? `TURSO_DATABASE_URL is set to a placeholder ("${maskTursoUrl(rawUrl)}"). Please update with your real Turso database URL in Cloudflare Worker Secrets.`
+        : `TURSO_DATABASE_URL is not detected in Cloudflare Worker environment variables. (Detected variables: [${detectedEnvKeys.join(', ') || 'none'}])`,
     };
   }
 
@@ -81,6 +140,7 @@ function getDbClient(env: Env): {
       isRemote: true,
       isConfigured: Boolean(url && authToken),
       tokenLength,
+      detectedEnvKeys,
     };
   } catch (err: any) {
     return {
@@ -90,6 +150,7 @@ function getDbClient(env: Env): {
       isRemote: true,
       isConfigured: false,
       tokenLength,
+      detectedEnvKeys,
       error: err?.message || 'Failed to initialize Turso client',
     };
   }
@@ -338,7 +399,13 @@ export default {
 
       const dbState = getDbClient(env);
       if (!dbState.client) {
-        return jsonResponse({ success: true, localOnly: true });
+        console.warn(`[Cloudflare Worker] Write skipped for ${collectionId}/${docId}: TURSO_DATABASE_URL not set in Cloudflare Worker environment variables.`);
+        return jsonResponse({ 
+          success: false, 
+          localOnly: true, 
+          error: 'TURSO_DATABASE_URL is not configured in Cloudflare Worker Secrets.',
+          troubleshooting: 'Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Cloudflare Dashboard -> Workers & Pages -> deckbuilder -> Settings -> Variables & Secrets.'
+        }, 200);
       }
 
       try {
@@ -353,9 +420,15 @@ export default {
           args: [docId, vaultId, JSON.stringify(data), Date.now()],
         });
 
-        return jsonResponse({ success: true });
+        console.log(`[Cloudflare Worker] 💾 Saved ${collectionId}/${docId} to Turso Vault ${vaultId} in ${Date.now() - start}ms`);
+        return jsonResponse({ success: true, remote: true, table: tableName, vaultId, docId });
       } catch (e: any) {
-        return jsonResponse({ success: true, warning: e.message || 'Remote write failed; saved locally' });
+        console.error(`[Cloudflare Worker] Turso write error for ${collectionId}/${docId}:`, e);
+        return jsonResponse({ 
+          success: false, 
+          error: e.message || 'Remote Turso database write failed',
+          details: String(e)
+        }, 500);
       }
     }
 

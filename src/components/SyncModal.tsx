@@ -271,7 +271,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
               <span className="text-[10px] text-slate-400 block font-medium">2. TURSO_DATABASE_URL</span>
               <div className="mt-1 flex items-center gap-1.5">
-                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present ? (
+                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.isPlaceholder ? (
+                  <>
+                    <Database className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span className="font-bold text-sky-400 truncate">Local Mode (Placeholder)</span>
+                  </>
+                ) : fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span className="font-bold text-emerald-400 truncate">Detected</span>
@@ -284,7 +289,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 )}
               </div>
               <span className="text-[10px] text-slate-400 font-mono truncate mt-0.5" title={fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'None'}>
-                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'Not Set'}
+                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.isPlaceholder 
+                  ? 'Placeholder Example' 
+                  : (fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'Not Set')}
               </span>
             </div>
 
@@ -292,7 +299,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
               <span className="text-[10px] text-slate-400 block font-medium">3. TURSO_AUTH_TOKEN</span>
               <div className="mt-1 flex items-center gap-1.5">
-                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.present ? (
+                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.isPlaceholder ? (
+                  <>
+                    <Database className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span className="font-bold text-sky-400 truncate">Placeholder Token</span>
+                  </>
+                ) : fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.present ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span className="font-bold text-emerald-400 truncate">Present ({fnCheckResult.environmentVariables.TURSO_AUTH_TOKEN.length} ch)</span>
@@ -305,7 +317,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 )}
               </div>
               <span className="text-[10px] text-slate-500 truncate mt-0.5">
-                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.looksLikeJWT ? 'Valid JWT Format' : 'JWT Token'}
+                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.isPlaceholder
+                  ? 'Local Storage Fallback'
+                  : fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.looksLikeJWT ? 'Valid JWT Format' : 'JWT Token'}
               </span>
             </div>
           </div>
@@ -315,6 +329,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             <div className={`p-3 rounded-lg border text-xs space-y-2 ${
               diagResult?.status === 'connected' 
                 ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200' 
+                : diagResult?.status === 'local_storage'
+                ? 'bg-sky-950/20 border-sky-500/30 text-sky-200'
                 : 'bg-amber-950/20 border-amber-500/30 text-amber-200'
             }`}>
               <div className="flex items-center justify-between">
@@ -323,6 +339,11 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     <>
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                       <span>Live Database Connected ({diagResult.latencyMs}ms ping)</span>
+                    </>
+                  ) : diagResult?.status === 'local_storage' ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-sky-400" />
+                      <span>Local SQLite Storage Active</span>
                     </>
                   ) : (
                     <>

@@ -11,8 +11,30 @@ interface Env {
   [key: string]: any;
 }
 
+function isPlaceholder(val?: string | null): boolean {
+  if (!val) return true;
+  const lower = val.toLowerCase().trim();
+  return (
+    lower.includes('your-database-name') ||
+    lower.includes('your-db-name') ||
+    lower.includes('your_database_name') ||
+    lower.includes('your_db_name') ||
+    lower.includes('your-database') ||
+    lower.includes('your_database') ||
+    lower.includes('your-db') ||
+    lower.includes('your_db') ||
+    lower.includes('your-org') ||
+    lower.includes('example.turso.io') ||
+    lower.includes('<your') ||
+    lower.includes('[your') ||
+    lower.includes('your-turso-auth-token') ||
+    lower.includes('your-auth-token') ||
+    lower.includes('placeholder')
+  );
+}
+
 function normalizeTursoUrl(rawUrl?: string): string | null {
-  if (!rawUrl) return null;
+  if (!rawUrl || isPlaceholder(rawUrl)) return null;
   let trimmed = rawUrl.trim().replace(/^['"]|['"]$/g, '');
   if (!trimmed) return null;
   
@@ -357,8 +379,12 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
 
     const dbState = getDbClient(env);
     if (!dbState.client) {
-      // Acknowledge save so client continues seamlessly with local persistence
-      return jsonResponse({ success: true, localOnly: true });
+      console.warn(`[Cloudflare Function] Write skipped for ${collectionId}/${docId}: TURSO_DATABASE_URL not configured.`);
+      return jsonResponse({ 
+        success: false, 
+        localOnly: true, 
+        error: 'TURSO_DATABASE_URL is not configured in Cloudflare environment variables.',
+      }, 200);
     }
 
     try {
@@ -374,10 +400,10 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
       });
 
       console.log(`[Cloudflare Function] 💾 Saved ${collectionId}/${docId} to Vault ${vaultId} in ${Date.now() - start}ms`);
-      return jsonResponse({ success: true });
+      return jsonResponse({ success: true, remote: true, table: tableName, vaultId, docId });
     } catch (e: any) {
-      console.warn(`[Cloudflare Function] Write notice for ${collectionId}/${docId}:`, e?.message || e);
-      return jsonResponse({ success: true, warning: e.message || 'Remote write failed; saved locally' });
+      console.error(`[Cloudflare Function] Write error for ${collectionId}/${docId}:`, e);
+      return jsonResponse({ success: false, error: e.message || 'Remote write failed' }, 500);
     }
   }
 

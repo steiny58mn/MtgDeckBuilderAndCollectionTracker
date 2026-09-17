@@ -25,13 +25,18 @@ async function startServer() {
   // Print startup config info
   const initialConfig = getTursoConfig();
   console.log(`[Turso DB] 🚀 Server starting on port ${PORT}...`);
-  console.log(`[Turso DB] 🔗 Target Database: ${maskTursoUrl(initialConfig.url)}`);
-  console.log(`[Turso DB] 🔑 Auth Token Status: ${initialConfig.authToken ? 'Configured ✅' : 'Not Set ⚠️'}`);
-  console.log(`[Turso DB] 🌐 Mode: ${initialConfig.isRemote ? 'Remote Turso Cloud (libsql)' : 'Local SQLite Fallback (local.db)'}`);
+  if (initialConfig.isPlaceholder) {
+    console.log(`[Turso DB] ℹ️ Placeholder credentials detected ("${initialConfig.rawPlaceholderUrl}").`);
+    console.log(`[Turso DB] 🌐 Mode: Local SQLite Storage (file:local.db)`);
+  } else {
+    console.log(`[Turso DB] 🔗 Target Database: ${maskTursoUrl(initialConfig.url)}`);
+    console.log(`[Turso DB] 🔑 Auth Token Status: ${initialConfig.authToken ? 'Configured ✅' : 'Not Set ⚠️'}`);
+    console.log(`[Turso DB] 🌐 Mode: ${initialConfig.isRemote ? 'Remote Turso Cloud (libsql)' : 'Local SQLite Storage (local.db)'}`);
+  }
 
   // Initialize Turso DB
   await initDb().catch((err) => {
-    console.error('[Turso DB] ❌ DB Initialization Warning:', err.message || err);
+    console.info('[Turso DB] DB Initialization Notice:', err.message || err);
   });
 
   // Functions compilation & diagnostics inspection check
@@ -48,22 +53,27 @@ async function startServer() {
         allDetectedKeys: Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('LC_')),
         TURSO_DATABASE_URL: {
           present: Boolean(process.env.TURSO_DATABASE_URL),
-          masked: maskTursoUrl(config.url),
+          isPlaceholder: config.isPlaceholder,
+          masked: maskTursoUrl(config.rawPlaceholderUrl || config.url),
           formatValid: Boolean(config.url),
         },
         TURSO_AUTH_TOKEN: {
           present: Boolean(process.env.TURSO_AUTH_TOKEN),
+          isPlaceholder: config.isPlaceholder,
           length: process.env.TURSO_AUTH_TOKEN ? process.env.TURSO_AUTH_TOKEN.trim().length : 0,
           looksLikeJWT: Boolean(process.env.TURSO_AUTH_TOKEN?.trim().startsWith('ey')),
         },
       },
       databaseStatus: {
-        isConfigured: config.isRemote && Boolean(config.authToken),
+        isConfigured: config.isRemote && Boolean(config.authToken) && !config.isPlaceholder,
         isRemote: config.isRemote,
+        isPlaceholder: config.isPlaceholder,
       },
-      troubleshooting: config.isRemote && Boolean(config.authToken)
+      troubleshooting: config.isPlaceholder
+        ? 'Example placeholder credentials detected ("your-database-name"). Storing data safely in local SQLite mode until custom credentials are provided.'
+        : config.isRemote && Boolean(config.authToken)
         ? 'Backend is connected to remote Turso database.'
-        : 'Running in local SQLite mode or missing TURSO_AUTH_TOKEN in secrets.',
+        : 'Running in local SQLite mode.',
     });
   });
 
@@ -73,10 +83,11 @@ async function startServer() {
     res.json({
       status: 'ok',
       backend: 'turso',
-      isCloudConfigured: config.isRemote && Boolean(config.authToken),
-      databaseUrlMasked: maskTursoUrl(config.url),
+      isCloudConfigured: config.isRemote && Boolean(config.authToken) && !config.isPlaceholder,
+      databaseUrlMasked: maskTursoUrl(config.rawPlaceholderUrl || config.url),
       hasAuthToken: Boolean(config.authToken),
       isRemote: config.isRemote,
+      isPlaceholder: config.isPlaceholder,
     });
   });
 
@@ -156,7 +167,8 @@ async function startServer() {
 
       const itemName = data?.name || docId;
       console.log(`[Turso DB API] 💾 ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} ("${itemName}") -> Success (${Date.now() - start}ms)`);
-      res.json({ success: true });
+      const dbConfig = getTursoConfig();
+      res.json({ success: true, remote: dbConfig.isRemote, table: tableName, vaultId, docId });
     } catch (e: any) {
       console.error(`[Turso DB API] ❌ ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
       res.status(500).json({ error: e.message || 'Failed to write to Turso database' });
