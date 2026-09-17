@@ -11,17 +11,27 @@ function sanitizeCardName(name: string): string {
 }
 
 export function getCommanderData(commanderName: string): Promise<EdhrecCommanderStats | null> {
+  if (!commanderName || commanderName.trim() === '') {
+    return Promise.resolve(null);
+  }
+
   const sanitized = sanitizeCardName(commanderName);
   if (edhrecCache.has(sanitized)) {
     return edhrecCache.get(sanitized)!;
   }
 
-  const promise = fetch(`https://json.edhrec.com/pages/commanders/${sanitized}.json`)
-    .then((res) => {
+  // Use proxy route to bypass browser CORS and 403 restrictions
+  const proxyUrl = `/api/edhrec/pages/commanders/${sanitized}.json`;
+
+  const promise = fetch(proxyUrl)
+    .then(async (res) => {
       if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return null;
       return res.json();
     })
     .then((data) => {
+      if (!data) return null;
       const numDecks = data?.container?.json_dict?.card?.num_decks || 0;
       const cardMap = new Map<string, number>();
       

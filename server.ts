@@ -164,7 +164,7 @@ async function startServer() {
       const response = await fetch(targetUrl, {
         method: req.method,
         headers: {
-          'User-Agent': 'AIStudioDeckBuilder/1.0',
+          'User-Agent': 'MTGCreativeStudio/1.0',
           'Accept': 'application/json',
           ...(req.method === 'POST' ? { 'Content-Type': 'application/json' } : {})
         },
@@ -178,6 +178,40 @@ async function startServer() {
     } catch (error: any) {
       console.error('[Scryfall Proxy Error]:', error);
       res.status(500).json({ error: 'Failed to proxy request to Scryfall', details: error.message });
+    }
+  });
+
+  // Proxy route for EDHREC API to prevent browser CORS and 403 blocks
+  app.use('/api/edhrec', async (req, res) => {
+    try {
+      const targetUrl = `https://json.edhrec.com${req.url}`;
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://edhrec.com/',
+        }
+      });
+      
+      if (!response.ok) {
+        return res.status(response.status).json({
+          container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+          status: response.status,
+          message: 'EDHREC data not available for this card',
+        });
+      }
+
+      const data = await response.text();
+      res.status(200);
+      res.set('Content-Type', 'application/json');
+      res.send(data);
+    } catch (error: any) {
+      console.warn('[EDHREC Proxy Notice]:', error?.message || error);
+      res.status(200).json({
+        container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+        error: error.message,
+      });
     }
   });
 

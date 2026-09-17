@@ -290,6 +290,43 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
     }
   }
 
+  // 7. EDHREC API Proxy (/api/edhrec/*)
+  if (path.startsWith('/api/edhrec')) {
+    const edhrecSubPath = path.replace('/api/edhrec', '');
+    const edhrecUrl = `https://json.edhrec.com${edhrecSubPath}${url.search}`;
+    try {
+      const res = await fetch(edhrecUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://edhrec.com/',
+        },
+      });
+
+      if (!res.ok) {
+        return jsonResponse({
+          container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+          status: res.status,
+        });
+      }
+
+      const data = await res.text();
+      return new Response(data, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch (e: any) {
+      console.warn('[Cloudflare Function] EDHREC Proxy Notice:', e);
+      return jsonResponse({
+        container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+      });
+    }
+  }
+
   return jsonResponse({ error: 'Endpoint not found on Cloudflare Pages Function router' }, 404);
 }
 

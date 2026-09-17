@@ -522,6 +522,11 @@ export class StorageService {
     try {
       const res = await fetch('/api/storage/status');
       if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          console.warn('[Turso DB] ℹ️ /api/storage/status returned non-JSON response (likely static HTML fallback).');
+          return { isCloudConfigured: false, backend: 'local' };
+        }
         const data = await res.json();
         console.log('[Turso DB] 📡 Storage status from backend:', data);
         return data;
@@ -552,6 +557,14 @@ export class StorageService {
       console.log('[Turso DB] 🔍 Querying /api/storage/diagnostics for live connection check...');
       const res = await fetch('/api/storage/diagnostics');
       if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          return {
+            status: 'unreachable',
+            latencyMs: Date.now() - start,
+            error: 'Backend returned HTML instead of JSON. Ensure Cloudflare Pages Functions are deployed.',
+          };
+        }
         const data = await res.json();
         console.log('[Turso DB Diagnostics] ✅ Diagnostics completed:', data);
         return data;
@@ -588,6 +601,10 @@ export class StorageService {
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Server returned HTTP ${res.status} ${res.statusText} - ${errText.slice(0, 100)}`);
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`API endpoint returned HTML/SPA fallback instead of JSON. Ensure Cloudflare Functions are enabled for ${window.location.hostname}.`);
       }
       const data = await res.json();
       const { decks = [], binders = [], collection = [] } = data;
