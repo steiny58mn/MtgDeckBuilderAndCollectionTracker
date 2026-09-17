@@ -509,6 +509,53 @@ export class StorageService {
   }
 
   /**
+   * Test whether Cloudflare Functions are compiled and check secrets detection
+   */
+  public static async checkFunctionsCompilation(): Promise<{
+    functionsCompiled: boolean;
+    engine?: string;
+    timestamp?: string;
+    isHtmlFallback?: boolean;
+    environmentVariables?: {
+      allDetectedKeys: string[];
+      TURSO_DATABASE_URL: { present: boolean; masked: string; formatValid: boolean };
+      TURSO_AUTH_TOKEN: { present: boolean; length: number; looksLikeJWT: boolean };
+    };
+    databaseStatus?: { isConfigured: boolean; isRemote?: boolean; error?: string | null };
+    troubleshooting?: string;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch('/api/functions-check');
+      const contentType = res.headers.get('content-type') || '';
+      const xEngine = res.headers.get('x-engine') || '';
+      const isCompiledHeader = res.headers.get('x-functions-compiled') === 'true';
+
+      if (!contentType.includes('application/json')) {
+        return {
+          functionsCompiled: false,
+          isHtmlFallback: true,
+          error: 'Cloudflare Pages returned HTML/SPA fallback instead of executing Functions. The /functions directory was not compiled for this deployment.',
+          troubleshooting: 'In Cloudflare Pages, make sure you are deploying from a Git repository or using `wrangler pages deploy dist` with functions enabled, and that the /functions directory is in your repository root.',
+        };
+      }
+
+      const data = await res.json();
+      return {
+        ...data,
+        functionsCompiled: isCompiledHeader || data.functionsCompiled === true,
+        engine: xEngine || data.engine || 'Cloudflare Pages Functions',
+      };
+    } catch (e: any) {
+      return {
+        functionsCompiled: false,
+        error: e.message || 'Failed to fetch /api/functions-check',
+        troubleshooting: 'Check network connectivity or Cloudflare Pages deployment status.',
+      };
+    }
+  }
+
+  /**
    * Fetch health and cloud status from backend without exposing tokens
    */
   public static async checkBackendStatus(): Promise<{
@@ -1030,13 +1077,46 @@ export class StorageService {
 // Attach developer helpers to window for easy browser DevTools console debugging
 if (typeof window !== 'undefined') {
   (window as any).StorageService = StorageService;
+  (window as any).checkCloudflareFunctions = async () => {
+    console.log('%c[Cloudflare Pages Functions & Secrets Inspector]', 'color: #38bdf8; font-size: 14px; font-weight: bold;');
+    console.log('Testing /api/functions-check endpoint...');
+    const result = await StorageService.checkFunctionsCompilation();
+    
+    if (result.functionsCompiled) {
+      console.log('%c✅ Functions Status: COMPILED & ACTIVE', 'color: #4ade80; font-weight: bold;');
+      console.log(`⚡ Engine: ${result.engine}`);
+      console.log(`🕒 Server Timestamp: ${result.timestamp}`);
+      console.log('%c🔑 Secrets & Environment Variables:', 'color: #c084fc; font-weight: bold;');
+      console.table({
+        'TURSO_DATABASE_URL': {
+          Present: result.environmentVariables?.TURSO_DATABASE_URL.present ? '✅ Yes' : '❌ No',
+          Value: result.environmentVariables?.TURSO_DATABASE_URL.masked || 'None',
+        },
+        'TURSO_AUTH_TOKEN': {
+          Present: result.environmentVariables?.TURSO_AUTH_TOKEN.present ? '✅ Yes' : '❌ No',
+          Value: result.environmentVariables?.TURSO_AUTH_TOKEN.present 
+            ? `Length: ${result.environmentVariables.TURSO_AUTH_TOKEN.length} chars (JWT: ${result.environmentVariables.TURSO_AUTH_TOKEN.looksLikeJWT})` 
+            : 'Missing in Cloudflare',
+        },
+      });
+      console.log('All Environment Keys detected in Worker:', result.environmentVariables?.allDetectedKeys);
+      console.log('Database Status:', result.databaseStatus);
+    } else {
+      console.warn('%c❌ Functions Status: NOT COMPILED (Static HTML Fallback)', 'color: #f87171; font-weight: bold;');
+      console.error('Error Details:', result.error);
+      console.info('%c💡 Solution:', 'color: #facc15; font-weight: bold;', result.troubleshooting);
+    }
+
+    return result;
+  };
+
   (window as any).testTurso = async () => {
-    console.log('%c[Turso DB Diagnostics] Running comprehensive test...', 'color: #c084fc; font-weight: bold;');
+    console.log('%c[Turso DB Full Diagnostics Test]', 'color: #c084fc; font-size: 14px; font-weight: bold;');
+    const fnCheck = await (window as any).checkCloudflareFunctions();
     const status = await StorageService.checkBackendStatus();
-    console.log('[Turso Status]:', status);
     const diag = await StorageService.runDiagnostics();
-    console.log('[Turso Diagnostics]:', diag);
+    console.log('%c📊 Diagnostics Summary:', 'color: #34d399; font-weight: bold;', diag);
     console.log(`[Active Vault ID]: ${getCurrentVaultId()}`);
-    return { status, diag, vaultId: getCurrentVaultId() };
+    return { fnCheck, status, diag, vaultId: getCurrentVaultId() };
   };
 }

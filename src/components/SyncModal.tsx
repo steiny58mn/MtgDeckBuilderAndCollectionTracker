@@ -15,7 +15,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Terminal,
-  Info
+  Info,
+  Cpu,
+  Layers
 } from 'lucide-react';
 import { getCurrentVaultId, setCurrentVaultId, generateVaultId, SyncStatus, StorageService } from '../services/storage';
 
@@ -41,6 +43,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [testingDiag, setTestingDiag] = useState(false);
   const [diagResult, setDiagResult] = useState<any>(null);
+  const [fnCheckResult, setFnCheckResult] = useState<any>(null);
   const [showDiagPanel, setShowDiagPanel] = useState(false);
   const [backendInfo, setBackendInfo] = useState<{ 
     isCloudConfigured: boolean; 
@@ -58,6 +61,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     if (isOpen) {
       StorageService.checkBackendStatus().then((status) => {
         setBackendInfo(status);
+      });
+      StorageService.checkFunctionsCompilation().then((res) => {
+        setFnCheckResult(res);
       });
     }
   }, [isOpen]);
@@ -86,12 +92,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setTestingDiag(true);
     setShowDiagPanel(true);
     try {
-      const res = await StorageService.runDiagnostics();
-      setDiagResult(res);
-      if (res.status === 'connected') {
+      const [fnRes, diagRes] = await Promise.all([
+        StorageService.checkFunctionsCompilation(),
+        StorageService.runDiagnostics(),
+      ]);
+      setFnCheckResult(fnRes);
+      setDiagResult(diagRes);
+      if (diagRes.status === 'connected') {
         onNotify?.('Database connection test passed!', 'success');
       } else {
-        onNotify?.('Database connection test flagged an issue. See details.', 'info');
+        onNotify?.('Database connection test completed with notices.', 'info');
       }
     } catch (e: any) {
       setDiagResult({ status: 'error', error: e.message || String(e) });
@@ -165,7 +175,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   : syncStatus === 'syncing'
                   ? 'Syncing with Turso...'
                   : syncStatus === 'local'
-                  ? (backendInfo.isRemote ? 'Cloud Connected (Local Cache)' : 'Local SQLite / Cache Active')
+                  ? (backendInfo.isRemote ? 'Cloud Connected (Local Cache)' : 'Local Storage Active')
                   : 'Offline Cache'}
               </span>
             </div>
@@ -217,12 +227,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           </p>
         </div>
 
-        {/* Database Connection Status & Diagnostics Button */}
+        {/* Cloudflare Functions & Secrets Inspector */}
         <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-violet-400" />
-              <span className="text-xs font-semibold text-slate-200">Database Connection Status</span>
+              <Cpu className="w-4 h-4 text-violet-400" />
+              <span className="text-xs font-semibold text-slate-200">Cloudflare Functions & Secrets Inspector</span>
             </div>
             <button
               onClick={handleRunDiagnostics}
@@ -230,53 +240,119 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/30 text-violet-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3 h-3 ${testingDiag ? 'animate-spin' : ''}`} />
-              {testingDiag ? 'Testing...' : 'Test DB Connection'}
+              {testingDiag ? 'Inspecting...' : 'Inspect Live DB & Secrets'}
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800/60">
-              <span className="text-[10px] text-slate-400 block">Target Database</span>
-              <span className="font-mono text-slate-200 truncate block mt-0.5" title={backendInfo.databaseUrlMasked || 'file:local.db'}>
-                {backendInfo.databaseUrlMasked || (backendInfo.isRemote ? 'Remote Turso' : 'Local SQLite')}
+          {/* Key status cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            {/* Functions Compilation Check */}
+            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
+              <span className="text-[10px] text-slate-400 block font-medium">1. Functions Compiled</span>
+              <div className="mt-1 flex items-center gap-1.5">
+                {fnCheckResult?.functionsCompiled ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-emerald-400 truncate">Compiled</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="font-bold text-amber-400 truncate">{fnCheckResult?.isHtmlFallback ? 'HTML Fallback' : 'Checking...'}</span>
+                  </>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-500 truncate mt-0.5">
+                {fnCheckResult?.engine || 'Testing router...'}
               </span>
             </div>
-            <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800/60">
-              <span className="text-[10px] text-slate-400 block">Auth Token</span>
-              <span className={`font-semibold block mt-0.5 ${backendInfo.hasAuthToken ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {backendInfo.hasAuthToken ? 'Present (Configured)' : 'Missing in Secrets'}
+
+            {/* TURSO_DATABASE_URL */}
+            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
+              <span className="text-[10px] text-slate-400 block font-medium">2. TURSO_DATABASE_URL</span>
+              <div className="mt-1 flex items-center gap-1.5">
+                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-emerald-400 truncate">Detected</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="font-bold text-amber-400 truncate">Missing in Secrets</span>
+                  </>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono truncate mt-0.5" title={fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'None'}>
+                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'Not Set'}
+              </span>
+            </div>
+
+            {/* TURSO_AUTH_TOKEN */}
+            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
+              <span className="text-[10px] text-slate-400 block font-medium">3. TURSO_AUTH_TOKEN</span>
+              <div className="mt-1 flex items-center gap-1.5">
+                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.present ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-emerald-400 truncate">Present ({fnCheckResult.environmentVariables.TURSO_AUTH_TOKEN.length} ch)</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="font-bold text-amber-400 truncate">Missing in Secrets</span>
+                  </>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-500 truncate mt-0.5">
+                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.looksLikeJWT ? 'Valid JWT Format' : 'JWT Token'}
               </span>
             </div>
           </div>
 
           {/* Diagnostics output if requested */}
-          {showDiagPanel && diagResult && (
-            <div className={`p-3 rounded-lg border text-xs space-y-1.5 ${
-              diagResult.status === 'connected' 
+          {showDiagPanel && (diagResult || fnCheckResult) && (
+            <div className={`p-3 rounded-lg border text-xs space-y-2 ${
+              diagResult?.status === 'connected' 
                 ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200' 
                 : 'bg-amber-950/20 border-amber-500/30 text-amber-200'
             }`}>
-              <div className="flex items-center gap-1.5 font-bold">
-                {diagResult.status === 'connected' ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Connected to {diagResult.isRemote ? 'Turso Cloud Database' : 'Local SQLite Database'} ({diagResult.latencyMs}ms)</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                    <span>Connection Issue Detected</span>
-                  </>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-bold">
+                  {diagResult?.status === 'connected' ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Live Database Connected ({diagResult.latencyMs}ms ping)</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-amber-400" />
+                      <span>Diagnostics Notice</span>
+                    </>
+                  )}
+                </div>
+                {diagResult?.counts && (
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {diagResult.counts.decks} decks &bull; {diagResult.counts.binders} binders
+                  </span>
                 )}
               </div>
-              {diagResult.counts && (
-                <p className="text-[11px] text-slate-300">
-                  Database contains: <strong>{diagResult.counts.decks}</strong> decks, <strong>{diagResult.counts.binders}</strong> binders, <strong>{diagResult.counts.collection}</strong> cards total in DB.
-                </p>
-              )}
-              {diagResult.error && (
-                <div className="mt-1 p-2 rounded bg-black/40 border border-amber-500/20 font-mono text-[10px] text-amber-300 break-all">
+
+              {diagResult?.error && (
+                <div className="p-2 rounded bg-black/50 border border-amber-500/30 font-mono text-[10px] text-amber-300 break-all">
                   {diagResult.error}
+                </div>
+              )}
+
+              {fnCheckResult?.troubleshooting && !fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present && (
+                <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2.5 rounded border border-slate-800 space-y-1">
+                  <span className="font-semibold text-fuchsia-300 block">How to configure secrets in Cloudflare Pages:</span>
+                  <ol className="list-decimal list-inside space-y-0.5 text-slate-400 text-[11px]">
+                    <li>Open <strong>Cloudflare Dashboard &rarr; Workers &amp; Pages &rarr; Your Project</strong></li>
+                    <li>Go to <strong>Settings &rarr; Environment Variables</strong></li>
+                    <li>Add <code className="text-fuchsia-300 font-mono">TURSO_DATABASE_URL</code> and <code className="text-fuchsia-300 font-mono">TURSO_AUTH_TOKEN</code></li>
+                    <li>Click <strong>Deployments &rarr; Redeploy latest</strong> to apply the secrets</li>
+                  </ol>
                 </div>
               )}
             </div>
@@ -323,21 +399,18 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           </div>
         </form>
 
-        {/* Cloudflare Secrets & Browser Console Debugging Note */}
+        {/* Browser Console Debugging Note */}
         <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-2 text-[11px] text-slate-400">
           <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Cloudflare Deployment & Console Debugging</span>
+            <span>Browser DevTools Console Diagnostics</span>
           </div>
           <ul className="space-y-1 list-disc list-inside leading-relaxed text-slate-400 text-[11px]">
             <li>
-              <strong>Cloudflare Secrets:</strong> Ensure <code className="text-fuchsia-300 font-mono">TURSO_DATABASE_URL</code> and <code className="text-fuchsia-300 font-mono">TURSO_AUTH_TOKEN</code> are added to Cloudflare Pages/Workers under <em>Settings &gt; Environment Variables</em>.
+              Type <code className="text-sky-300 font-mono">checkCloudflareFunctions()</code> in Console (<kbd className="px-1 py-0.5 bg-slate-800 rounded text-[10px]">F12</kbd>) to check if Functions compiled and secrets exist.
             </li>
             <li>
-              <strong>Browser DevTools:</strong> Open your browser Console (<kbd className="px-1 py-0.5 bg-slate-800 rounded text-[10px]">F12</kbd> &rarr; Console) to view real-time <code className="text-fuchsia-300 font-mono">[Turso DB]</code> save and sync logs.
-            </li>
-            <li>
-              <strong>Instant Console Test:</strong> Type <code className="text-emerald-300 font-mono">testTurso()</code> in the browser console at any time to run a direct connection test.
+              Type <code className="text-emerald-300 font-mono">testTurso()</code> to test live remote database ping, latency, and vault counts.
             </li>
           </ul>
         </div>

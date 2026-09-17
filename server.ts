@@ -34,6 +34,39 @@ async function startServer() {
     console.error('[Turso DB] ❌ DB Initialization Warning:', err.message || err);
   });
 
+  // Functions compilation & diagnostics inspection check
+  app.get(['/api/functions-check', '/api/health'], (req, res) => {
+    const config = getTursoConfig();
+    res.set('X-Engine', 'Node-Express-Server');
+    res.set('X-Functions-Compiled', 'true');
+    res.json({
+      functionsCompiled: true,
+      engine: 'Node.js Express Server (Dev/Container)',
+      timestamp: new Date().toISOString(),
+      urlPath: req.path,
+      environmentVariables: {
+        allDetectedKeys: Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('LC_')),
+        TURSO_DATABASE_URL: {
+          present: Boolean(process.env.TURSO_DATABASE_URL),
+          masked: maskTursoUrl(config.url),
+          formatValid: Boolean(config.url),
+        },
+        TURSO_AUTH_TOKEN: {
+          present: Boolean(process.env.TURSO_AUTH_TOKEN),
+          length: process.env.TURSO_AUTH_TOKEN ? process.env.TURSO_AUTH_TOKEN.trim().length : 0,
+          looksLikeJWT: Boolean(process.env.TURSO_AUTH_TOKEN?.trim().startsWith('ey')),
+        },
+      },
+      databaseStatus: {
+        isConfigured: config.isRemote && Boolean(config.authToken),
+        isRemote: config.isRemote,
+      },
+      troubleshooting: config.isRemote && Boolean(config.authToken)
+        ? 'Backend is connected to remote Turso database.'
+        : 'Running in local SQLite mode or missing TURSO_AUTH_TOKEN in secrets.',
+    });
+  });
+
   // Storage Backend Health & Configuration Status Check
   app.get('/api/storage/status', (req, res) => {
     const config = getTursoConfig();

@@ -8,6 +8,7 @@ import { createClient, Client } from "@libsql/client/web";
 interface Env {
   TURSO_DATABASE_URL?: string;
   TURSO_AUTH_TOKEN?: string;
+  [key: string]: any;
 }
 
 function normalizeTursoUrl(rawUrl?: string): string | null {
@@ -50,10 +51,12 @@ function getDbClient(env: Env): {
   authToken?: string; 
   isRemote: boolean; 
   isConfigured: boolean;
+  tokenLength: number;
   error?: string;
 } {
   const url = normalizeTursoUrl(env.TURSO_DATABASE_URL);
   const authToken = env.TURSO_AUTH_TOKEN?.trim()?.replace(/^['"]|['"]$/g, '') || undefined;
+  const tokenLength = authToken ? authToken.length : 0;
 
   if (!url) {
     return {
@@ -62,7 +65,8 @@ function getDbClient(env: Env): {
       authToken: undefined,
       isRemote: false,
       isConfigured: false,
-      error: 'TURSO_DATABASE_URL is not set in Cloudflare Pages Environment Variables.',
+      tokenLength,
+      error: 'TURSO_DATABASE_URL is not set or empty in Cloudflare Pages Environment Variables.',
     };
   }
 
@@ -74,6 +78,7 @@ function getDbClient(env: Env): {
       authToken,
       isRemote: true,
       isConfigured: Boolean(url && authToken),
+      tokenLength,
     };
   } catch (err: any) {
     return {
@@ -82,6 +87,7 @@ function getDbClient(env: Env): {
       authToken,
       isRemote: true,
       isConfigured: false,
+      tokenLength,
       error: err?.message || 'Failed to initialize Turso client',
     };
   }
@@ -109,7 +115,7 @@ async function ensureTables(client: Client) {
   initializedDb = true;
 }
 
-function jsonResponse(data: any, status = 200) {
+function jsonResponse(data: any, status = 200, customHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -117,6 +123,9 @@ function jsonResponse(data: any, status = 200) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+      'X-Engine': 'Cloudflare-Pages-Functions',
+      'X-Functions-Compiled': 'true',
+      ...customHeaders,
     },
   });
 }
@@ -145,6 +154,17 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
     path = `/api${path.startsWith('/') ? path : `/${path}`}`;
   }
 
+  // Debug Logging in Cloudflare Dashboard Functions stream
+  const rawDbUrl = env.TURSO_DATABASE_URL ? String(env.TURSO_DATABASE_URL).trim() : '';
+  const rawToken = env.TURSO_AUTH_TOKEN ? String(env.TURSO_AUTH_TOKEN).trim() : '';
+  const allEnvKeys = Object.keys(env || {});
+
+  console.log(`[Cloudflare Functions Engine] ⚡ ${request.method} ${path}`);
+  console.log(`[Cloudflare Functions Env Check]:`);
+  console.log(`  - TURSO_DATABASE_URL: ${rawDbUrl ? `PRESENT (${maskTursoUrl(rawDbUrl)})` : 'MISSING / UNDEFINED'}`);
+  console.log(`  - TURSO_AUTH_TOKEN: ${rawToken ? `PRESENT (Length: ${rawToken.length} chars, JWT: ${rawToken.startsWith('ey')})` : 'MISSING / UNDEFINED'}`);
+  console.log(`  - All Environment Keys detected in Cloudflare Worker context: [${allEnvKeys.join(', ')}]`);
+
   // Handle CORS Preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, {
@@ -153,7 +173,44 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+        'X-Engine': 'Cloudflare-Pages-Functions',
+        'X-Functions-Compiled': 'true',
       },
+    });
+  }
+
+  // 0. GET /api/functions-check or /api/health (Direct compilation test & Secrets Inspector)
+  if ((path === '/api/functions-check' || path === '/api/health') && request.method === 'GET') {
+    const dbState = getDbClient(env);
+    return jsonResponse({
+      functionsCompiled: true,
+      engine: 'Cloudflare Pages Functions (V8 Edge Worker)',
+      timestamp: new Date().toISOString(),
+      urlPath: path,
+      environmentVariables: {
+        allDetectedKeys: allEnvKeys,
+        TURSO_DATABASE_URL: {
+          present: Boolean(rawDbUrl),
+          masked: maskTursoUrl(rawDbUrl),
+          formatValid: Boolean(dbState.url),
+        },
+        TURSO_AUTH_TOKEN: {
+          present: Boolean(rawToken),
+          length: rawToken.length,
+          looksLikeJWT: rawToken.startsWith('ey'),
+        },
+      },
+      databaseStatus: {
+        isConfigured: dbState.isConfigured,
+        isRemote: dbState.isRemote,
+        error: dbState.error || null,
+      },
+      troubleshooting: !dbState.isConfigured
+        ? 'Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN under Cloudflare Pages Dashboard -> Settings -> Environment variables, then trigger a redeploy.'
+        : 'Cloudflare Pages Functions are successfully compiled and secrets are detected!',
+    }, 200, {
+      'X-Turso-Url-Present': String(Boolean(rawDbUrl)),
+      'X-Turso-Token-Present': String(Boolean(rawToken)),
     });
   }
 
@@ -164,13 +221,19 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
       status: 'ok',
       backend: 'turso',
       environment: 'cloudflare-pages',
+      functionsCompiled: true,
       isCloudConfigured: dbState.isConfigured,
       databaseUrlMasked: maskTursoUrl(dbState.url),
       hasAuthToken: Boolean(dbState.authToken),
+      tokenLength: dbState.tokenLength,
       isRemote: dbState.isRemote,
+      detectedEnvKeys: allEnvKeys,
       note: dbState.isConfigured 
         ? 'Turso Cloud database connected on Cloudflare Pages Functions' 
         : 'Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Cloudflare Pages Settings -> Environment variables for live cloud sync.',
+    }, 200, {
+      'X-Turso-Url-Present': String(Boolean(rawDbUrl)),
+      'X-Turso-Token-Present': String(Boolean(rawToken)),
     });
   }
 
@@ -183,9 +246,11 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
       return jsonResponse({
         status: 'warning',
         environment: 'cloudflare-pages',
+        functionsCompiled: true,
         isRemote: false,
         databaseUrlMasked: maskTursoUrl(dbState.url),
-        hasAuthToken: false,
+        hasAuthToken: Boolean(dbState.authToken),
+        tokenLength: dbState.tokenLength,
         latencyMs: Date.now() - start,
         counts: { decks: 0, binders: 0, collection: 0 },
         error: dbState.error || 'TURSO_DATABASE_URL is not configured in Cloudflare Pages environment variables. Local browser storage is active.',
@@ -206,9 +271,11 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
       return jsonResponse({
         status: 'connected',
         environment: 'cloudflare-pages',
+        functionsCompiled: true,
         isRemote: true,
         databaseUrlMasked: maskTursoUrl(dbState.url),
         hasAuthToken: Boolean(dbState.authToken),
+        tokenLength: dbState.tokenLength,
         latencyMs,
         counts: {
           decks: Number(dRes.rows[0]?.cnt ?? 0),
@@ -222,12 +289,14 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
       return jsonResponse({
         status: 'local_fallback',
         environment: 'cloudflare-pages',
+        functionsCompiled: true,
         isRemote: false,
         databaseUrlMasked: maskTursoUrl(dbState.url),
         hasAuthToken: Boolean(dbState.authToken),
+        tokenLength: dbState.tokenLength,
         latencyMs: Date.now() - start,
         counts: { decks: 0, binders: 0, collection: 0 },
-        error: `Remote Turso connection failed (${err?.message || err}). Browser local storage will be used.`,
+        error: `Remote Turso connection failed (${err?.message || err}). Verify auth token and database URL permissions in Turso.`,
       });
     }
   }
@@ -363,6 +432,8 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
         headers: {
           'Content-Type': res.headers.get('content-type') || 'application/json',
           'Access-Control-Allow-Origin': '*',
+          'X-Engine': 'Cloudflare-Pages-Functions',
+          'X-Functions-Compiled': 'true',
         },
       });
     } catch (e: any) {
@@ -398,6 +469,8 @@ async function handleApiRequest(context: EventContext<Env, string, Record<string
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
+          'X-Engine': 'Cloudflare-Pages-Functions',
+          'X-Functions-Compiled': 'true',
         },
       });
     } catch (e: any) {
