@@ -604,7 +604,7 @@ export class StorageService {
       }
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        throw new Error(`API endpoint returned HTML/SPA fallback instead of JSON. Ensure Cloudflare Functions are enabled for ${window.location.hostname}.`);
+        throw new Error(`API endpoint is not active or returned static HTML. Operating with local browser storage. (To enable Cloudflare Pages Functions, deploy the /functions directory with TURSO_DATABASE_URL and TURSO_AUTH_TOKEN configured in Cloudflare Pages settings)`);
       }
       const data = await res.json();
       const { decks = [], binders = [], collection = [] } = data;
