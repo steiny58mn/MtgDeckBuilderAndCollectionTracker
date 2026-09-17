@@ -514,16 +514,63 @@ export class StorageService {
   public static async checkBackendStatus(): Promise<{
     isCloudConfigured: boolean;
     backend: string;
+    databaseUrlMasked?: string;
+    isRemote?: boolean;
+    hasAuthToken?: boolean;
+    environment?: string;
   }> {
     try {
       const res = await fetch('/api/storage/status');
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        console.log('[Turso DB] 📡 Storage status from backend:', data);
+        return data;
+      } else {
+        console.warn(`[Turso DB] ⚠️ Backend /api/storage/status returned HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // ignore
+    } catch (e: any) {
+      console.error('[Turso DB] ❌ Could not reach /api/storage/status backend. If running pure static Cloudflare Pages without functions, /api endpoints will not respond.', e);
     }
     return { isCloudConfigured: false, backend: 'turso' };
+  }
+
+  /**
+   * Run full database diagnostics query test
+   */
+  public static async runDiagnostics(): Promise<{
+    status: 'connected' | 'error' | 'unreachable';
+    isRemote?: boolean;
+    databaseUrlMasked?: string;
+    hasAuthToken?: boolean;
+    latencyMs?: number;
+    counts?: { decks: number; binders: number; collection: number };
+    error?: string | null;
+    environment?: string;
+  }> {
+    const start = Date.now();
+    try {
+      console.log('[Turso DB] 🔍 Querying /api/storage/diagnostics for live connection check...');
+      const res = await fetch('/api/storage/diagnostics');
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[Turso DB Diagnostics] ✅ Diagnostics completed:', data);
+        return data;
+      }
+      const errText = await res.text();
+      console.error(`[Turso DB Diagnostics] ❌ HTTP ${res.status}:`, errText);
+      return {
+        status: 'error',
+        latencyMs: Date.now() - start,
+        error: `Server returned HTTP ${res.status}: ${errText.slice(0, 150)}`,
+      };
+    } catch (e: any) {
+      console.error('[Turso DB Diagnostics] ❌ Failed to reach diagnostics API:', e);
+      return {
+        status: 'unreachable',
+        latencyMs: Date.now() - start,
+        error: e.message || 'Cannot reach API backend (404 / Network error). Verify Cloudflare Pages Functions or server deployment.',
+      };
+    }
   }
 
   /**
@@ -533,17 +580,23 @@ export class StorageService {
     const vaultId = getCurrentVaultId();
     if (!vaultId) return;
 
+    console.log(`[Turso DB] 🔄 Starting sync for Vault "${vaultId}"...`);
+
     try {
       this.setStatus('syncing');
       const res = await fetch(`/api/storage/${vaultId}/all`);
       if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Server returned HTTP ${res.status} ${res.statusText} - ${errText.slice(0, 100)}`);
       }
       const data = await res.json();
       const { decks = [], binders = [], collection = [] } = data;
 
+      console.log(`[Turso DB] 📥 Vault "${vaultId}" received ${decks.length} decks, ${binders.length} binders, ${collection.length} collection items from database.`);
+
       const localDecks = loadLocalDecks();
       if (decks.length === 0 && localDecks.length > 0) {
+        console.log(`[Turso DB] ⬆️ Remote vault is empty. Pushing ${localDecks.length} local decks to Turso...`);
         await this.pushDecksToCloud(vaultId, localDecks);
       } else if (decks.length > 0) {
         saveLocalDecks(decks);
@@ -552,6 +605,7 @@ export class StorageService {
 
       const localBinders = loadLocalBinders();
       if (binders.length === 0 && localBinders.length > 0) {
+        console.log(`[Turso DB] ⬆️ Remote vault is empty. Pushing ${localBinders.length} local binders to Turso...`);
         await this.pushBindersToCloud(vaultId, localBinders);
       } else if (binders.length > 0) {
         saveLocalBinders(binders);
@@ -560,6 +614,7 @@ export class StorageService {
 
       const localCol = loadLocalCollection();
       if (collection.length === 0 && localCol.length > 0) {
+        console.log(`[Turso DB] ⬆️ Remote vault is empty. Pushing ${localCol.length} local collection cards to Turso...`);
         await this.pushCollectionToCloud(vaultId, localCol);
       } else if (collection.length > 0) {
         saveLocalCollection(collection);
@@ -567,8 +622,9 @@ export class StorageService {
       }
 
       this.setStatus('synced');
+      console.log(`[Turso DB] ✅ Vault "${vaultId}" sync complete!`);
     } catch (err: any) {
-      console.warn('Turso sync warning:', err.message || err);
+      console.warn(`[Turso DB] ⚠️ Turso sync warning (falling back to local cache):`, err.message || err);
       this.setStatus('local');
     }
   }
@@ -636,7 +692,7 @@ export class StorageService {
         });
       }
     } catch (e) {
-      console.error('Failed to push binders to Turso', e);
+      console.error('[Turso DB] ❌ Failed to push binders to Turso', e);
     }
   }
 
@@ -650,7 +706,7 @@ export class StorageService {
         });
       }
     } catch (e) {
-      console.error('Failed to push decks to Turso', e);
+      console.error('[Turso DB] ❌ Failed to push decks to Turso', e);
     }
   }
 
@@ -664,7 +720,7 @@ export class StorageService {
         });
       }
     } catch (e) {
-      console.error('Failed to push collection to Turso', e);
+      console.error('[Turso DB] ❌ Failed to push collection to Turso', e);
     }
   }
 
@@ -687,16 +743,25 @@ export class StorageService {
     saveLocalBinders(local);
     this.binderListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 💾 Saving Binder "${updated.name}" (${updated.id}) to Vault ${vaultId}...`);
+
     try {
-      const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
+      const res = await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
-      this.setStatus('synced');
+      if (res.ok) {
+        console.log(`[Turso DB] ✅ Successfully saved Binder "${updated.name}" to Turso database.`);
+        this.setStatus('synced');
+      } else {
+        const errText = await res.text().catch(() => '');
+        console.error(`[Turso DB] ❌ Failed saving binder (HTTP ${res.status}): ${errText}`);
+        this.setStatus('local');
+      }
     } catch (e) {
-      console.error('Failed to save binder to Turso', e);
+      console.error('[Turso DB] ❌ Network error while saving binder to Turso (falling back to local cache):', e);
       this.setStatus('local');
     }
   }
@@ -725,12 +790,20 @@ export class StorageService {
     saveLocalBinders(local);
     this.binderListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 🗑️ Deleting Binder ${binderId} from Vault ${vaultId}...`);
+
     try {
-      const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/binders/${binderId}`, { method: 'DELETE' });
-      this.setStatus('synced');
+      const res = await fetch(`/api/storage/${vaultId}/binders/${binderId}`, { method: 'DELETE' });
+      if (res.ok) {
+        console.log(`[Turso DB] ✅ Binder ${binderId} deleted from Turso.`);
+        this.setStatus('synced');
+      } else {
+        console.error(`[Turso DB] ❌ Failed deleting binder (HTTP ${res.status})`);
+        this.setStatus('local');
+      }
     } catch (e) {
-      console.error('Failed to delete binder from Turso', e);
+      console.error('[Turso DB] ❌ Network error while deleting binder from Turso', e);
       this.setStatus('local');
     }
   }
@@ -755,21 +828,28 @@ export class StorageService {
     saveLocalDecks(local);
     this.deckListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 💾 Saving deck "${updated.name}" (${updated.id}) with ${updated.cards.length} cards to Vault "${vaultId}"...`);
+
     try {
       this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
       const res = await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
       if (res.ok) {
+        console.log(`[Turso DB] ✅ Successfully persisted deck "${updated.name}" to Turso database!`);
         this.setStatus('synced');
       } else {
+        const errorBody = await res.text().catch(() => '');
+        console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} ${res.statusText} when saving deck. Body:`, errorBody);
+        console.warn(`[Turso DB] ℹ️ Deck "${updated.name}" remains saved in browser local cache.`);
         this.setStatus('local');
       }
-    } catch (e) {
-      console.error('Failed to save deck to Turso', e);
+    } catch (e: any) {
+      console.error(`[Turso DB] ❌ Network error when connecting to /api/storage/${vaultId}/decks/${updated.id}:`, e);
+      console.warn(`[Turso DB] ℹ️ Deck "${updated.name}" is stored locally. If on Cloudflare Pages, verify Functions or Environment Secrets.`);
       this.setStatus('local');
     }
   }
@@ -782,17 +862,22 @@ export class StorageService {
     saveLocalDecks(local);
     this.deckListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 🗑️ Deleting deck ${deckId} from Vault "${vaultId}"...`);
+
     try {
       this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
       const res = await fetch(`/api/storage/${vaultId}/decks/${deckId}`, { method: 'DELETE' });
       if (res.ok) {
+        console.log(`[Turso DB] ✅ Successfully deleted deck ${deckId} from Turso database.`);
         this.setStatus('synced');
       } else {
+        const errorBody = await res.text().catch(() => '');
+        console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} when deleting deck:`, errorBody);
         this.setStatus('local');
       }
     } catch (e) {
-      console.error('Failed to delete deck from Turso', e);
+      console.error('[Turso DB] ❌ Network error when deleting deck from Turso', e);
       this.setStatus('local');
     }
   }
@@ -811,21 +896,26 @@ export class StorageService {
     saveLocalCollection(local);
     this.colListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 💾 Saving Collection Card "${card.name}" (${card.id}) to Vault "${vaultId}"...`);
+
     try {
       this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
       const res = await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(card),
       });
       if (res.ok) {
+        console.log(`[Turso DB] ✅ Successfully saved "${card.name}" to Turso collection.`);
         this.setStatus('synced');
       } else {
+        const errorBody = await res.text().catch(() => '');
+        console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} when saving card:`, errorBody);
         this.setStatus('local');
       }
     } catch (e) {
-      console.error('Failed to save collection card to Turso', e);
+      console.error('[Turso DB] ❌ Network error when saving collection card to Turso', e);
       this.setStatus('local');
     }
   }
@@ -838,17 +928,22 @@ export class StorageService {
     saveLocalCollection(local);
     this.colListeners.forEach((cb) => cb(local));
 
+    const vaultId = getCurrentVaultId();
+    console.log(`[Turso DB] 🗑️ Deleting Collection Card ${cardId} from Vault "${vaultId}"...`);
+
     try {
       this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
       const res = await fetch(`/api/storage/${vaultId}/collection/${cardId}`, { method: 'DELETE' });
       if (res.ok) {
+        console.log(`[Turso DB] ✅ Successfully deleted card ${cardId} from Turso collection.`);
         this.setStatus('synced');
       } else {
+        const errorBody = await res.text().catch(() => '');
+        console.error(`[Turso DB] ❌ Server responded with HTTP ${res.status} when deleting card:`, errorBody);
         this.setStatus('local');
       }
     } catch (e) {
-      console.error('Failed to delete collection card from Turso', e);
+      console.error('[Turso DB] ❌ Network error when deleting collection card from Turso', e);
       this.setStatus('local');
     }
   }
@@ -910,4 +1005,18 @@ export class StorageService {
     this.setStatus('synced');
     return updatedList;
   }
+}
+
+// Attach developer helpers to window for easy browser DevTools console debugging
+if (typeof window !== 'undefined') {
+  (window as any).StorageService = StorageService;
+  (window as any).testTurso = async () => {
+    console.log('%c[Turso DB Diagnostics] Running comprehensive test...', 'color: #c084fc; font-weight: bold;');
+    const status = await StorageService.checkBackendStatus();
+    console.log('[Turso Status]:', status);
+    const diag = await StorageService.runDiagnostics();
+    console.log('[Turso Diagnostics]:', diag);
+    console.log(`[Active Vault ID]: ${getCurrentVaultId()}`);
+    return { status, diag, vaultId: getCurrentVaultId() };
+  };
 }

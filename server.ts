@@ -2,37 +2,61 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, initDb, getTursoConfig } from './server/db.js';
+import { db, initDb, getTursoConfig, testDbConnection, maskTursoUrl } from './server/db.js';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   
-  // Need to increase payload limits for large deck objects
+  // Increase payload limits for large deck objects
   app.use(express.json({ limit: '10mb' }));
+
+  // Print startup config info
+  const initialConfig = getTursoConfig();
+  console.log(`[Turso DB] 🚀 Server starting on port ${PORT}...`);
+  console.log(`[Turso DB] 🔗 Target Database: ${maskTursoUrl(initialConfig.url)}`);
+  console.log(`[Turso DB] 🔑 Auth Token Status: ${initialConfig.authToken ? 'Configured ✅' : 'Not Set ⚠️'}`);
+  console.log(`[Turso DB] 🌐 Mode: ${initialConfig.isRemote ? 'Remote Turso Cloud (libsql)' : 'Local SQLite Fallback (local.db)'}`);
 
   // Initialize Turso DB
   await initDb().catch((err) => {
-    console.error('Turso DB Initialization Warning:', err.message || err);
+    console.error('[Turso DB] ❌ DB Initialization Warning:', err.message || err);
   });
 
   // Storage Backend Health & Configuration Status Check
-  // Note: Never leaks TURSO_AUTH_TOKEN or full credentials to the client.
   app.get('/api/storage/status', (req, res) => {
     const config = getTursoConfig();
-    const isCloud = Boolean(config.url && config.url.startsWith('libsql://'));
     res.json({
       status: 'ok',
       backend: 'turso',
-      isCloudConfigured: isCloud,
+      isCloudConfigured: config.isRemote && Boolean(config.authToken),
+      databaseUrlMasked: maskTursoUrl(config.url),
       hasAuthToken: Boolean(config.authToken),
+      isRemote: config.isRemote,
     });
+  });
+
+  // Comprehensive Diagnostics Endpoint
+  app.get('/api/storage/diagnostics', async (req, res) => {
+    console.log('[Turso DB Diagnostics] 🔍 Running database health & connectivity check...');
+    try {
+      const result = await testDbConnection();
+      console.log(`[Turso DB Diagnostics] Result: ${result.status} (Latency: ${result.latencyMs}ms, Decks: ${result.counts.decks})`);
+      res.json(result);
+    } catch (err: any) {
+      console.error('[Turso DB Diagnostics] ❌ Failed to run connection test:', err);
+      res.status(500).json({
+        status: 'error',
+        error: err.message || 'Diagnostic query failed',
+      });
+    }
   });
 
   // Turso API routes
   // 1. GET all data for a vault
   app.get('/api/storage/:vaultId/all', async (req, res) => {
     const { vaultId } = req.params;
+    const start = Date.now();
     try {
       const [decksRes, bindersRes, collectionRes] = await Promise.all([
         db.execute({ sql: 'SELECT data FROM turso_decks WHERE vault_id = ?', args: [vaultId] }),
@@ -44,21 +68,24 @@ async function startServer() {
       const binders = bindersRes.rows.map(r => JSON.parse(r.data as string));
       const collection = collectionRes.rows.map(r => JSON.parse(r.data as string));
       
+      console.log(`[Turso DB API] 📥 GET /api/storage/${vaultId}/all -> ${decks.length} decks, ${binders.length} binders, ${collection.length} collection items (${Date.now() - start}ms)`);
       res.json({ decks, binders, collection });
     } catch (e: any) {
-      console.error('Turso GET all error:', e);
+      console.error(`[Turso DB API] ❌ GET /api/storage/${vaultId}/all error (${Date.now() - start}ms):`, e);
       res.status(500).json({ error: e.message || 'Failed to fetch vault data from Turso' });
     }
   });
 
   // 2. Write operations
-  // Save a document
+  // Save a document (deck, binder, or card)
   app.post('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
     const { vaultId, collectionId, docId } = req.params;
     const data = req.body;
+    const start = Date.now();
     try {
       const tableName = `turso_${collectionId}`;
       if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
+         console.warn(`[Turso DB API] ⚠️ Invalid collection requested: ${collectionId}`);
          return res.status(400).json({ error: 'Invalid collection' });
       }
       
@@ -83,9 +110,11 @@ async function startServer() {
         }
       }
 
+      const itemName = data?.name || docId;
+      console.log(`[Turso DB API] 💾 POST /api/storage/${vaultId}/${collectionId}/${docId} ("${itemName}") -> Success (${Date.now() - start}ms)`);
       res.json({ success: true });
     } catch (e: any) {
-      console.error(`Turso write error on ${collectionId}/${docId}:`, e);
+      console.error(`[Turso DB API] ❌ POST /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
       res.status(500).json({ error: e.message || 'Failed to write to Turso database' });
     }
   });
@@ -93,6 +122,7 @@ async function startServer() {
   // Delete a document
   app.delete('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
     const { vaultId, collectionId, docId } = req.params;
+    const start = Date.now();
     try {
       const tableName = `turso_${collectionId}`;
       if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
@@ -103,9 +133,10 @@ async function startServer() {
         sql: `DELETE FROM ${tableName} WHERE id = ? AND vault_id = ?`,
         args: [docId, vaultId]
       });
+      console.log(`[Turso DB API] 🗑️ DELETE /api/storage/${vaultId}/${collectionId}/${docId} -> Success (${Date.now() - start}ms)`);
       res.json({ success: true });
     } catch (e: any) {
-      console.error(`Turso delete error on ${collectionId}/${docId}:`, e);
+      console.error(`[Turso DB API] ❌ DELETE /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
       res.status(500).json({ error: e.message || 'Failed to delete from Turso database' });
     }
   });
@@ -113,7 +144,6 @@ async function startServer() {
   // Proxy route for Scryfall API to bypass browser CORS / Adblockers
   app.use('/api/scryfall', async (req, res) => {
     try {
-      // Reconstruct the target URL
       const targetUrl = `https://api.scryfall.com${req.url}`;
       
       const response = await fetch(targetUrl, {
@@ -131,7 +161,7 @@ async function startServer() {
       res.set('Content-Type', response.headers.get('content-type') || 'application/json');
       res.send(data);
     } catch (error: any) {
-      console.error('Scryfall Proxy Error:', error);
+      console.error('[Scryfall Proxy Error]:', error);
       res.status(500).json({ error: 'Failed to proxy request to Scryfall', details: error.message });
     }
   });
@@ -152,7 +182,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Server] 🌐 MTG Deck & Collection App running on http://localhost:${PORT}`);
   });
 }
 
