@@ -4,8 +4,6 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './lib/firebase';
 import { 
   Deck, 
   CollectionCard, 
@@ -36,7 +34,6 @@ export default function App() {
   const [activeBinder, setActiveBinder] = useState<Binder | null>(null);
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   
   // Modals
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
@@ -60,15 +57,7 @@ export default function App() {
     }, 4500);
   };
 
-  // Auth state listener
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // Subscribe to real-time Cloud Firestore & local cache
+  // Subscribe to real-time Turso Database & local cache
   useEffect(() => {
     const unsubDecks = StorageService.subscribeDecks((updatedDecks) => {
       setDecks(updatedDecks);
@@ -550,7 +539,6 @@ export default function App() {
           setActiveTab('decks');
         }}
         syncStatus={syncStatus}
-        currentUser={currentUser}
         onOpenSyncModal={() => setShowSyncModal(true)}
       />
 
@@ -671,7 +659,6 @@ export default function App() {
         isOpen={showSyncModal}
         onClose={() => setShowSyncModal(false)}
         syncStatus={syncStatus}
-        currentUser={currentUser}
         onVaultChanged={handleVaultChanged}
         onNotify={(msg, type) => showToast(msg, type)}
       />

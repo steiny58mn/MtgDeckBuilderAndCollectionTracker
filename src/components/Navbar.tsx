@@ -6,11 +6,9 @@ import {
   Cloud, 
   Sparkles, 
   Check, 
-  Smartphone,
-  ChevronRight,
-  User as UserIcon
+  Database,
+  Key
 } from 'lucide-react';
-import { User } from 'firebase/auth';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
 import { SyncStatus, getCurrentVaultId } from '../services/storage';
 
@@ -23,7 +21,6 @@ interface NavbarProps {
   activeDeck: Deck | null;
   onSelectActiveDeck: (deck: Deck) => void;
   syncStatus: SyncStatus;
-  currentUser?: User | null;
   onOpenSyncModal: () => void;
 }
 
@@ -36,7 +33,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeDeck,
   onSelectActiveDeck,
   syncStatus,
-  currentUser,
   onOpenSyncModal,
 }) => {
   const currentVaultId = getCurrentVaultId();
@@ -61,7 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ScrySync
                 </span>
                 <span className="text-[10px] uppercase tracking-widest text-violet-400/90 font-bold block -mt-0.5">
-                  MTG Cloud Studio
+                  MTG Turso Studio
                 </span>
               </div>
             </div>
@@ -70,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <nav className="hidden md:flex items-center gap-1 ml-6">
               <button
                 onClick={() => onTabChange('decks')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'decks'
                     ? 'bg-slate-800 text-fuchsia-400 shadow-sm border border-slate-700/80'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -82,7 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               
               <button
                 onClick={() => onTabChange('collection')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'collection'
                     ? 'bg-slate-800 text-fuchsia-400 shadow-sm border border-slate-700/80'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -94,7 +90,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <button
                 onClick={() => onTabChange('search')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'search'
                     ? 'bg-slate-800 text-fuchsia-400 shadow-sm border border-slate-700/80'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -107,45 +103,34 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Sync Button */}
+            {/* Turso Cloud Vault Sync Button */}
             <button
               onClick={onOpenSyncModal}
-              className="flex items-center gap-2 bg-slate-900 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm"
-              title="Manage Cloud Sync"
+              className="flex items-center gap-2 bg-slate-900 border border-slate-700 hover:border-fuchsia-500/50 hover:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+              title="Manage Turso Cloud Vault Sync"
             >
-              {syncStatus.status === 'syncing' ? (
+              {syncStatus === 'syncing' ? (
                 <div className="w-3.5 h-3.5 border-2 border-slate-500 border-t-fuchsia-500 rounded-full animate-spin" />
-              ) : syncStatus.status === 'error' ? (
+              ) : syncStatus === 'error' ? (
                 <Cloud className="w-3.5 h-3.5 text-rose-500" />
-              ) : syncStatus.status === 'success' ? (
-                <Check className="w-3.5 h-3.5 text-emerald-500" />
+              ) : syncStatus === 'synced' ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <Cloud className="w-3.5 h-3.5 text-slate-400" />
+                <Database className="w-3.5 h-3.5 text-fuchsia-400" />
               )}
               
               <span className="hidden sm:inline-block">
                 {currentVaultId ? (
-                  <span className="text-slate-300">Vault: <span className="text-emerald-400">{currentVaultId.substring(0, 6)}</span></span>
+                  <span className="text-slate-300">Vault: <span className="text-fuchsia-400 font-mono">{currentVaultId}</span></span>
                 ) : (
-                  <span className="text-slate-400">Offline Mode</span>
+                  <span className="text-slate-400">Turso Local</span>
                 )}
               </span>
               
-              {currentVaultId && syncStatus.lastSynced && (
-                <Sparkles className="w-3 h-3 text-fuchsia-500 ml-0.5 hidden sm:inline-block" />
+              {currentVaultId && syncStatus === 'synced' && (
+                <Sparkles className="w-3 h-3 text-emerald-400 ml-0.5 hidden sm:inline-block" />
               )}
             </button>
-
-            {/* Profile Avatar (Placeholder) */}
-            {currentUser && (
-              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 cursor-pointer overflow-hidden">
-                {currentUser.photoURL ? (
-                  <img src={currentUser.photoURL} alt={currentUser.displayName || ''} className="w-full h-full object-cover" />
-                ) : (
-                  <UserIcon className="w-4 h-4 text-slate-400" />
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -153,7 +138,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex md:hidden items-center justify-around py-2 border-t border-slate-800/80">
           <button
             onClick={() => onTabChange('decks')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold ${
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
               activeTab === 'decks' ? 'text-fuchsia-400' : 'text-slate-400'
             }`}
           >
@@ -163,7 +148,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => onTabChange('collection')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold ${
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
               activeTab === 'collection' ? 'text-fuchsia-400' : 'text-slate-400'
             }`}
           >
@@ -173,7 +158,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => onTabChange('search')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold ${
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
               activeTab === 'search' ? 'text-fuchsia-400' : 'text-slate-400'
             }`}
           >

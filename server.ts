@@ -1,7 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, initDb } from './server/db.js';
+import { db, initDb, getTursoConfig } from './server/db.js';
 
 async function startServer() {
   const app = express();
@@ -11,7 +12,22 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
 
   // Initialize Turso DB
-  await initDb().catch(console.error);
+  await initDb().catch((err) => {
+    console.error('Turso DB Initialization Warning:', err.message || err);
+  });
+
+  // Storage Backend Health & Configuration Status Check
+  // Note: Never leaks TURSO_AUTH_TOKEN or full credentials to the client.
+  app.get('/api/storage/status', (req, res) => {
+    const config = getTursoConfig();
+    const isCloud = Boolean(config.url && config.url.startsWith('libsql://'));
+    res.json({
+      status: 'ok',
+      backend: 'turso',
+      isCloudConfigured: isCloud,
+      hasAuthToken: Boolean(config.authToken),
+    });
+  });
 
   // Turso API routes
   // 1. GET all data for a vault
@@ -30,8 +46,8 @@ async function startServer() {
       
       res.json({ decks, binders, collection });
     } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
+      console.error('Turso GET all error:', e);
+      res.status(500).json({ error: e.message || 'Failed to fetch vault data from Turso' });
     }
   });
 
@@ -47,14 +63,14 @@ async function startServer() {
       }
       
       await db.execute({
-        sql: `INSERT INTO ${tableName} (id, vault_id, data) VALUES (?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id`,
-        args: [docId, vaultId, JSON.stringify(data)]
+        sql: `INSERT INTO ${tableName} (id, vault_id, data, updated_at) VALUES (?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id, updated_at = excluded.updated_at`,
+        args: [docId, vaultId, JSON.stringify(data), Date.now()]
       });
       res.json({ success: true });
     } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
+      console.error(`Turso write error on ${collectionId}/${docId}:`, e);
+      res.status(500).json({ error: e.message || 'Failed to write to Turso database' });
     }
   });
 
@@ -73,8 +89,8 @@ async function startServer() {
       });
       res.json({ success: true });
     } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
+      console.error(`Turso delete error on ${collectionId}/${docId}:`, e);
+      res.status(500).json({ error: e.message || 'Failed to delete from Turso database' });
     }
   });
 

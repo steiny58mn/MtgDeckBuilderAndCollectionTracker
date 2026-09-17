@@ -1,12 +1,13 @@
+import 'dotenv/config';
 import { initDb } from './db.js';
 
 async function runMigration() {
-  console.log('Running database schema migrations...');
+  console.log('Running database schema migrations for Turso...');
   try {
     await initDb();
-    console.log('Migrations completed successfully.');
+    console.log('Turso schema migrations completed successfully.');
   } catch (error) {
-    console.error('Migration failed:', error);
+    console.error('Turso migration failed:', error);
     process.exit(1);
   }
 }
