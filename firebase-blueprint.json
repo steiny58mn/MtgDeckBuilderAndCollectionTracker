@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "Deck": {
+      "title": "Deck",
+      "description": "A Magic: The Gathering deck list with cards, format, and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique deck identifier" },
+        "name": { "type": "string", "description": "Deck title name" },
+        "description": { "type": "string", "description": "Optional notes or deck strategy description" },
+        "format": { "type": "string", "description": "Format such as commander, standard, modern, pioneer, legacy, pauper" },
+        "cards": { "type": "array", "description": "List of deck card items" },
+        "commanderId": { "type": "string", "description": "Optional commander card scryfallId" },
+        "coverCardUrl": { "type": "string", "description": "Optional card art crop URL" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in epoch ms" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp in epoch ms" }
+      },
+      "required": ["id", "name", "format", "cards", "createdAt", "updatedAt"]
+    },
+    "CollectionCard": {
+      "title": "CollectionCard",
+      "description": "A card stored in the user inventory collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique collection card entry ID" },
+        "scryfallId": { "type": "string", "description": "Scryfall card UUID" },
+        "name": { "type": "string", "description": "Card face name" },
+        "quantity": { "type": "number", "description": "Owned quantity count" },
+        "condition": { "type": "string", "description": "Card physical condition: NM, LP, MP, HP, DMG" },
+        "isFoil": { "type": "boolean", "description": "Whether the physical card is foil" },
+        "binderId": { "type": "string", "description": "Binder ID containing this card" },
+        "dateAdded": { "type": "number", "description": "Timestamp when added in epoch ms" }
+      },
+      "required": ["id", "scryfallId", "name", "quantity", "dateAdded"]
+    },
+    "Binder": {
+      "title": "Binder",
+      "description": "A named binder for organizing physical MTG collection cards",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique binder ID" },
+        "name": { "type": "string", "description": "Display name of the binder" },
+        "description": { "type": "string", "description": "Optional description notes" },
+        "cardCount": { "type": "number", "description": "Computed total quantity count in binder" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "name", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/sync_vaults/{vaultId}/decks/{deckId}": {
+      "schema": "Deck",
+      "description": "Decks stored inside a sync vault"
+    },
+    "/sync_vaults/{vaultId}/collection/{cardId}": {
+      "schema": "CollectionCard",
+      "description": "Cards stored in a sync vault collection"
+    },
+    "/sync_vaults/{vaultId}/binders/{binderId}": {
+      "schema": "Binder",
+      "description": "Binders stored in a sync vault"
+    }
+  }
+}

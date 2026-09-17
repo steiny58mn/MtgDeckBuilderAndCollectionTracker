@@ -1,0 +1,6 @@
+{
+  "name": "MTG Deck & Collection Manager",
+  "description": "Build custom Magic: The Gathering decks, track your card binder collection, and monitor real-time Scryfall market pricing with cloud cross-device sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
