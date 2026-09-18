@@ -2,7 +2,7 @@ type Unsubscribe = () => void;
 
 import { Deck, CollectionCard, DeckCard, Binder } from '../types/mtg';
 import { fetchBatchCardPrices } from './scryfall';
-import { API_BASE_URL, getRemoteDecks, getRemoteCollection, getTursoStatus, TursoStatusResponse } from './api';
+import { getRemoteDecks, getRemoteCollection } from './api';
 
 const VAULT_KEY_STORAGE = 'mtg_cloud_vault_id';
 const LOCAL_DECKS_KEY = 'mtg_local_decks_cache';
@@ -630,44 +630,44 @@ export class StorageService {
   }
 
   private static async pushBindersToTurso(vaultId: string, binders: Binder[]) {
-    try {
-      for (const binder of binders) {
+    for (const binder of binders) {
+      try {
         await fetch(`/api/storage/${vaultId}/binders/${binder.id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(binder),
         });
+      } catch (e) {
+        // Silent local fallback
       }
-    } catch (e) {
-      console.error('Failed to push binders to Turso', e);
     }
   }
 
   private static async pushDecksToTurso(vaultId: string, decks: Deck[]) {
-    try {
-      for (const deck of decks) {
+    for (const deck of decks) {
+      try {
         await fetch(`/api/storage/${vaultId}/decks/${deck.id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(deck),
         });
+      } catch (e) {
+        // Silent local fallback
       }
-    } catch (e) {
-      console.error('Failed to push decks to Turso', e);
     }
   }
 
   private static async pushCollectionToTurso(vaultId: string, cards: CollectionCard[]) {
-    try {
-      for (const card of cards) {
+    for (const card of cards) {
+      try {
         await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(card),
         });
+      } catch (e) {
+        // Silent local fallback
       }
-    } catch (e) {
-      console.error('Failed to push collection to Turso', e);
     }
   }
 
@@ -691,14 +691,16 @@ export class StorageService {
 
     try {
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
+      const res = await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
-      this.setStatus('synced');
+      if (res.ok) {
+        this.setStatus('synced');
+      }
     } catch (e) {
-      console.error('Failed to save binder to Turso', e);
+      // Local cache remains intact
     }
   }
 
@@ -730,7 +732,7 @@ export class StorageService {
       const vaultId = getCurrentVaultId();
       await fetch(`/api/storage/${vaultId}/binders/${binderId}`, { method: 'DELETE' });
     } catch (e) {
-      console.error('Failed to delete binder from Turso', e);
+      // Local cache remains intact
     }
   }
 
@@ -756,15 +758,17 @@ export class StorageService {
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, {
+      const res = await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
-      this.setStatus('synced');
+      if (res.ok) {
+        this.setStatus('synced');
+      }
     } catch (e) {
-      console.error('Failed to save deck to Turso', e);
-      this.setStatus('offline');
+      // Local cache remains intact
+      this.setStatus('local');
     }
   }
 
@@ -779,11 +783,12 @@ export class StorageService {
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/decks/${deckId}`, { method: 'DELETE' });
-      this.setStatus('synced');
+      const res = await fetch(`/api/storage/${vaultId}/decks/${deckId}`, { method: 'DELETE' });
+      if (res.ok) {
+        this.setStatus('synced');
+      }
     } catch (e) {
-      console.error('Failed to delete deck from Turso', e);
-      this.setStatus('offline');
+      this.setStatus('local');
     }
   }
 
@@ -804,15 +809,16 @@ export class StorageService {
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
+      const res = await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(card),
       });
-      this.setStatus('synced');
+      if (res.ok) {
+        this.setStatus('synced');
+      }
     } catch (e) {
-      console.error('Failed to save collection card to Turso', e);
-      this.setStatus('offline');
+      this.setStatus('local');
     }
   }
 
@@ -827,11 +833,12 @@ export class StorageService {
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/collection/${cardId}`, { method: 'DELETE' });
-      this.setStatus('synced');
+      const res = await fetch(`/api/storage/${vaultId}/collection/${cardId}`, { method: 'DELETE' });
+      if (res.ok) {
+        this.setStatus('synced');
+      }
     } catch (e) {
-      console.error('Failed to delete collection card from Turso', e);
-      this.setStatus('offline');
+      this.setStatus('local');
     }
   }
 
