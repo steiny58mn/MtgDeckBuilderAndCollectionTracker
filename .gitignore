@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+.dev.vars
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm

@@ -402,10 +402,21 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           });
         }
       } else if (sortBy === 'commander_decks') {
-        // Fetch deck counts for all returned cards
+        // Fetch deck counts for potential commander cards
         const deckCounts = new Map<string, number>();
         await Promise.all(
           processedData.map(async (card) => {
+            const isPotentialCommander = 
+              card.type_line?.includes('Legendary') && 
+              (card.type_line?.includes('Creature') || 
+               card.oracle_text?.toLowerCase().includes('can be your commander') || 
+               card.type_line?.includes('Background'));
+
+            if (!isPotentialCommander) {
+              deckCounts.set(card.id, 0);
+              return;
+            }
+
             try {
               const stats = await getCommanderData(card.name);
               if (stats) {
