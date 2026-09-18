@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, initDb } from './server/db.js';
+import { db, initDb } from './server/db';
 
 const REMOTE_API_BASE = process.env.API_BASE_URL || 'https://mtgappsapi.azurewebsites.net';
 

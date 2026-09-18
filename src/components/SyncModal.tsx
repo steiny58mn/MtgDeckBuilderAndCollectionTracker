@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Copy, Check, Smartphone, Monitor, X, RefreshCw, Server, ShieldCheck, Activity } from 'lucide-react';
 import { getCurrentVaultId, setCurrentVaultId, SyncStatus, StorageService } from '../services/storage';
-import { getTursoStatus, TursoStatusResponse, API_BASE_URL } from '../services/api';
+import { getTursoStatus, TursoStatusResponse, getApiBaseUrl } from '../services/api';
 
 interface SyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   syncStatus: SyncStatus;
   onVaultChanged: () => void;
+  onOpenDiagnostics?: () => void;
   onNotify?: (msg: string, type: 'info' | 'success') => void;
 }
 
@@ -16,6 +17,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   onClose,
   syncStatus,
   onVaultChanged,
+  onOpenDiagnostics,
   onNotify,
 }) => {
   const currentVault = getCurrentVaultId();
@@ -80,6 +82,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     }, 500);
   };
 
+  const activeBaseUrl = getApiBaseUrl();
+
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
@@ -131,21 +135,36 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               <Server className="w-4 h-4 text-fuchsia-400" />
               <span className="text-xs font-bold text-slate-200">Backend API & Turso Status</span>
             </div>
-            <button
-              onClick={checkTursoHealth}
-              disabled={isLoadingStatus}
-              className="text-[11px] text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 transition-colors cursor-pointer"
-            >
-              <RefreshCw className={`w-3 h-3 ${isLoadingStatus ? 'animate-spin' : ''}`} />
-              Check Status
-            </button>
+            <div className="flex items-center gap-2">
+              {onOpenDiagnostics && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenDiagnostics();
+                  }}
+                  className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Activity className="w-3 h-3" />
+                  Diagnostics
+                </button>
+              )}
+              <button
+                onClick={checkTursoHealth}
+                disabled={isLoadingStatus}
+                className="text-[11px] text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingStatus ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800/80">
-              <span className="text-[10px] text-slate-500 block uppercase font-mono">Endpoint</span>
-              <span className="text-slate-300 font-mono text-[11px] truncate block" title={API_BASE_URL}>
-                mtgappsapi
+              <span className="text-[10px] text-slate-500 block uppercase font-mono">Target API</span>
+              <span className="text-slate-300 font-mono text-[11px] truncate block" title={activeBaseUrl || '(relative)'}>
+                {activeBaseUrl || '(relative proxy)'}
               </span>
             </div>
             <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800/80">

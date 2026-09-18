@@ -21,6 +21,7 @@ import { CollectionManager } from './components/CollectionManager';
 import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
 import { SyncModal } from './components/SyncModal';
+import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
 import { BinderList } from './components/BinderList';
 import { getCardImageUrl } from './services/scryfall';
 import { getDeckCommander, isCardLegalInCommander } from './utils/deckUtils';
@@ -38,6 +39,7 @@ export default function App() {
   // Modals
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [globalToast, setGlobalToast] = useState<{
     message: string;
     type: 'success' | 'info';
@@ -538,6 +540,7 @@ export default function App() {
         }}
         syncStatus={syncStatus}
         onOpenSyncModal={() => setShowSyncModal(true)}
+        onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
       />
 
       {/* Main Content Area */}
@@ -655,6 +658,14 @@ export default function App() {
         onClose={() => setShowSyncModal(false)}
         syncStatus={syncStatus}
         onVaultChanged={handleVaultChanged}
+        onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
+        onNotify={(msg, type) => showToast(msg, type)}
+      />
+
+      {/* API Diagnostics Modal */}
+      <ApiDiagnosticsModal
+        isOpen={showDiagnosticsModal}
+        onClose={() => setShowDiagnosticsModal(false)}
         onNotify={(msg, type) => showToast(msg, type)}
       />
 

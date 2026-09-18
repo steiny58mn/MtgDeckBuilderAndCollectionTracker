@@ -4,8 +4,7 @@ import {
   Bookmark, 
   Search, 
   Database,
-  Sparkles, 
-  Check, 
+  Activity,
   RefreshCw
 } from 'lucide-react';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
@@ -21,6 +20,7 @@ interface NavbarProps {
   onSelectActiveDeck: (deck: Deck) => void;
   syncStatus: SyncStatus;
   onOpenSyncModal: () => void;
+  onOpenDiagnostics: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -33,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectActiveDeck,
   syncStatus,
   onOpenSyncModal,
+  onOpenDiagnostics,
 }) => {
   const currentVaultId = getCurrentVaultId();
 
@@ -101,7 +102,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             </nav>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Diagnostics Button */}
+            <button
+              onClick={onOpenDiagnostics}
+              className="flex items-center gap-1.5 bg-slate-900/90 border border-violet-500/30 hover:border-violet-400 hover:bg-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-violet-300 transition-all shadow-sm cursor-pointer"
+              title="Open API Connection Diagnostics"
+            >
+              <Activity className="w-3.5 h-3.5 text-violet-400" />
+              <span className="hidden lg:inline-block">API Diagnostics</span>
+            </button>
+
             {/* Turso Sync Status Button */}
             <button
               onClick={onOpenSyncModal}
@@ -158,6 +169,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Search className="w-4 h-4" />
             <span>Search</span>
+          </button>
+
+          <button
+            onClick={onOpenDiagnostics}
+            className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold text-violet-400"
+          >
+            <Activity className="w-4 h-4" />
+            <span>Diag</span>
           </button>
         </div>
       </div>

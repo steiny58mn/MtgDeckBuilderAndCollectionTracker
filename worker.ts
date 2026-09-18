@@ -1,13 +1,15 @@
 /**
  * Cloudflare Worker (_worker.js / worker.ts)
- * Lightweight Edge Proxy for Scryfall & EDHREC APIs, with static asset serving.
- * Backend DB storage has been decoupled to the external MtgTools API.
+ * Lightweight Edge Proxy for Scryfall, EDHREC, and MtgApps API endpoints.
  */
 
 interface Env {
   ASSETS?: { fetch: (request: Request) => Promise<Response> };
+  API_BASE_URL?: string;
   [key: string]: any;
 }
+
+const REMOTE_API_BASE = 'https://mtgappsapi.azurewebsites.net';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -37,9 +39,9 @@ export default {
       return new Response(
         JSON.stringify({
           status: 'online',
-          engine: 'Cloudflare Worker',
+          engine: 'Cloudflare Worker Edge Proxy',
           timestamp: new Date().toISOString(),
-          message: 'Frontend edge proxy is active. Data is stored locally or synchronized via external MtgTools API.',
+          remoteApiBase: env.API_BASE_URL || REMOTE_API_BASE,
         }),
         {
           headers: {
@@ -51,7 +53,44 @@ export default {
       );
     }
 
-    // 3. Scryfall API Proxy (prevents CORS & adblocker issues in browser)
+    // 3. Remote MtgTools & DeckBuilder API Proxy
+    if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder')) {
+      const targetBase = env.API_BASE_URL || REMOTE_API_BASE;
+      const targetUrl = `${targetBase}${url.pathname}${url.search}`;
+
+      try {
+        const headers: Record<string, string> = {
+          'Accept': 'application/json',
+        };
+        const contentType = request.headers.get('content-type');
+        if (contentType) headers['Content-Type'] = contentType;
+
+        const remoteRes = await fetch(targetUrl, {
+          method: request.method,
+          headers,
+          body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined,
+        });
+
+        const data = await remoteRes.text();
+        return new Response(data, {
+          status: remoteRes.status,
+          headers: {
+            'Content-Type': remoteRes.headers.get('content-type') || 'application/json',
+            ...corsHeaders,
+          },
+        });
+      } catch (err: any) {
+        return new Response(
+          JSON.stringify({ error: 'Failed to proxy request to Azure API', details: err.message }),
+          {
+            status: 502,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          }
+        );
+      }
+    }
+
+    // 4. Scryfall API Proxy (prevents CORS & adblocker issues in browser)
     if (url.pathname.startsWith('/api/scryfall')) {
       const targetPath = url.pathname.replace(/^\/api\/scryfall/, '');
       const targetUrl = `https://api.scryfall.com${targetPath}${url.search}`;
@@ -84,7 +123,7 @@ export default {
       }
     }
 
-    // 4. EDHREC API Proxy
+    // 5. EDHREC API Proxy
     if (url.pathname.startsWith('/api/edhrec')) {
       const targetPath = url.pathname.replace(/^\/api\/edhrec/, '');
       const targetUrl = `https://json.edhrec.com${targetPath}${url.search}`;
@@ -135,7 +174,7 @@ export default {
       }
     }
 
-    // 5. Static Assets (SPA fallback)
+    // 6. Static Assets (SPA fallback)
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
