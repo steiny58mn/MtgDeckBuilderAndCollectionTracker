@@ -1,32 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Cloud, 
-  Copy, 
-  Check, 
-  Smartphone, 
-  Monitor, 
-  X, 
-  RefreshCw, 
-  Database, 
-  Key, 
-  ShieldCheck, 
+import {
+  X,
+  Database,
+  Key,
+  Copy,
+  Check,
   Plus,
-  Activity,
-  AlertTriangle,
+  RefreshCw,
   CheckCircle2,
-  Terminal,
-  Info,
-  Cpu,
-  Layers
+  AlertTriangle,
+  Download,
+  Upload,
+  Globe,
+  HardDrive,
+  Activity,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
-import { getCurrentVaultId, setCurrentVaultId, generateVaultId, SyncStatus, StorageService } from '../services/storage';
+import {
+  StorageService,
+  SyncStatus,
+  getCurrentVaultId,
+  setCurrentVaultId,
+  generateVaultId,
+  getRemoteApiUrl,
+  setRemoteApiUrl,
+} from '../services/storage';
 
 interface SyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   syncStatus: SyncStatus;
   onVaultChanged: () => void;
-  onNotify?: (msg: string, type: 'info' | 'success') => void;
+  onNotify?: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const SyncModal: React.FC<SyncModalProps> = ({
@@ -36,35 +42,32 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   onVaultChanged,
   onNotify,
 }) => {
-  const currentVault = getCurrentVaultId();
-  const [copied, setCopied] = useState(false);
+  const [currentVault, setCurrentVault] = useState(getCurrentVaultId());
   const [inputVaultKey, setInputVaultKey] = useState('');
+  const [copied, setCopied] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [testingDiag, setTestingDiag] = useState(false);
-  const [diagResult, setDiagResult] = useState<any>(null);
-  const [fnCheckResult, setFnCheckResult] = useState<any>(null);
-  const [showDiagPanel, setShowDiagPanel] = useState(false);
-  const [backendInfo, setBackendInfo] = useState<{ 
-    isCloudConfigured: boolean; 
-    backend: string;
-    databaseUrlMasked?: string;
-    isRemote?: boolean;
-    hasAuthToken?: boolean;
-    environment?: string;
-  }>({
-    isCloudConfigured: false,
-    backend: 'turso',
-  });
+
+  // Diagnostics & Connection testing
+  const [apiUrl, setApiUrl] = useState(getRemoteApiUrl());
+  const [isTestingConn, setIsTestingConn] = useState(false);
+  const [connResult, setConnResult] = useState<{
+    status: 'connected' | 'warning' | 'unreachable' | 'local_only';
+    latencyMs: number;
+    httpStatus?: number;
+    targetUrl: string;
+    details?: any;
+    error?: string;
+  } | null>(null);
+
+  // Storage metrics
+  const [storageStats, setStorageStats] = useState(StorageService.getStorageDiagnostics());
 
   useEffect(() => {
     if (isOpen) {
-      StorageService.checkBackendStatus().then((status) => {
-        setBackendInfo(status);
-      });
-      StorageService.checkFunctionsCompilation().then((res) => {
-        setFnCheckResult(res);
-      });
+      const v = getCurrentVaultId();
+      setCurrentVault(v);
+      setApiUrl(getRemoteApiUrl());
+      setStorageStats(StorageService.getStorageDiagnostics());
     }
   }, [isOpen]);
 
@@ -76,45 +79,13 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleManualSync = async () => {
-    try {
-      setIsSyncing(true);
-      await StorageService.forceSync();
-      onNotify?.('Synced successfully with Turso database!', 'success');
-    } catch (err: any) {
-      onNotify?.(`Sync completed: ${err.message || 'Updated'}`, 'info');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleRunDiagnostics = async () => {
-    setTestingDiag(true);
-    setShowDiagPanel(true);
-    try {
-      const [fnRes, diagRes] = await Promise.all([
-        StorageService.checkFunctionsCompilation(),
-        StorageService.runDiagnostics(),
-      ]);
-      setFnCheckResult(fnRes);
-      setDiagResult(diagRes);
-      if (diagRes.status === 'connected') {
-        onNotify?.('Database connection test passed!', 'success');
-      } else {
-        onNotify?.('Database connection test completed with notices.', 'info');
-      }
-    } catch (e: any) {
-      setDiagResult({ status: 'error', error: e.message || String(e) });
-    } finally {
-      setTestingDiag(false);
-    }
-  };
-
   const handleCreateNewVault = () => {
     const newVault = generateVaultId();
     setCurrentVaultId(newVault);
+    setCurrentVault(newVault);
     onVaultChanged();
-    onNotify?.(`Created and switched to new Vault: ${newVault}`, 'success');
+    setStorageStats(StorageService.getStorageDiagnostics());
+    onNotify?.(`Created new Vault: ${newVault}`, 'success');
   };
 
   const handleJoinVault = (e: React.FormEvent) => {
@@ -124,21 +95,84 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
     setIsSwitching(true);
     setCurrentVaultId(cleanKey);
+    setCurrentVault(cleanKey);
     setTimeout(() => {
       setIsSwitching(false);
       onVaultChanged();
-      onNotify?.(`Connected to Turso Vault ${cleanKey}`, 'success');
+      setStorageStats(StorageService.getStorageDiagnostics());
+      onNotify?.(`Switched to Vault ${cleanKey}`, 'success');
       onClose();
-    }, 400);
+    }, 300);
+  };
+
+  const handleTestConnection = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsTestingConn(true);
+    try {
+      setRemoteApiUrl(apiUrl);
+      const res = await StorageService.testConnection(apiUrl);
+      setConnResult(res);
+      if (res.status === 'connected') {
+        onNotify?.(`Database connection verified! (${res.latencyMs}ms)`, 'success');
+      } else if (res.status === 'warning') {
+        onNotify?.(`Endpoint responded with HTTP ${res.httpStatus}`, 'info');
+      } else if (res.status === 'local_only') {
+        onNotify?.('Client-side storage active.', 'info');
+      } else {
+        onNotify?.(`Connection failed: ${res.error || 'Unreachable'}`, 'error');
+      }
+    } catch (err: any) {
+      setConnResult({
+        status: 'unreachable',
+        latencyMs: 0,
+        targetUrl: apiUrl,
+        error: err.message || 'Failed to ping target URL',
+      });
+    } finally {
+      setIsTestingConn(false);
+      setStorageStats(StorageService.getStorageDiagnostics());
+    }
+  };
+
+  const handleExportBackup = () => {
+    const jsonStr = StorageService.exportVaultJson();
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mtg-vault-${currentVault}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify?.('Vault backup exported successfully!', 'success');
+  };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const res = StorageService.importVaultJson(content);
+      if (res.success) {
+        setCurrentVault(getCurrentVaultId());
+        setStorageStats(StorageService.getStorageDiagnostics());
+        onVaultChanged();
+        onNotify?.(res.message, 'success');
+      } else {
+        onNotify?.(`Import failed: ${res.message}`, 'error');
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
       onClick={onClose}
     >
-      <div 
-        className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100 space-y-5 max-h-[90vh] overflow-y-auto"
+      <div
+        className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100 space-y-5 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -150,33 +184,29 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600/30 to-fuchsia-500/30 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-400">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-violet-500/30 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-400">
             <Database className="w-5 h-5" />
           </div>
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              Turso Database Sync
+              Storage &amp; Database Connection Hub
             </h3>
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <span
                 className={`w-2 h-2 rounded-full ${
                   syncStatus === 'synced'
-                    ? 'bg-emerald-400 animate-pulse'
+                    ? 'bg-emerald-400'
                     : syncStatus === 'syncing'
                     ? 'bg-fuchsia-400 animate-spin'
-                    : syncStatus === 'local'
-                    ? 'bg-sky-400'
-                    : 'bg-slate-500'
+                    : 'bg-sky-400'
                 }`}
               />
-              <span className="capitalize">
+              <span>
                 {syncStatus === 'synced'
-                  ? 'Turso Cloud Synced'
+                  ? 'Remote Database Synchronized'
                   : syncStatus === 'syncing'
-                  ? 'Syncing with Turso...'
-                  : syncStatus === 'local'
-                  ? (backendInfo.isRemote ? 'Cloud Connected (Local Cache)' : 'Local Storage Active')
-                  : 'Offline Cache'}
+                  ? 'Verifying Connection...'
+                  : 'Client-Side Storage Active'}
               </span>
             </div>
           </div>
@@ -187,25 +217,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-fuchsia-400" />
-              Active Cloud Vault Key
+              Active Vault Identifier
             </span>
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleManualSync}
-                disabled={isSyncing}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                title="Force refresh data from Turso"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-fuchsia-400' : ''}`} />
-                {isSyncing ? 'Syncing...' : 'Sync'}
-              </button>
               <button
                 onClick={handleCreateNewVault}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
                 title="Generate a new isolated vault"
               >
                 <Plus className="w-3 h-3" />
-                New
+                New Vault
               </button>
             </div>
           </div>
@@ -222,185 +243,166 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               {copied ? 'Copied' : 'Copy Key'}
             </button>
           </div>
-          <p className="text-[11px] text-slate-400 leading-normal">
-            Enter this Vault Key on your phone, tablet, or another browser to sync your decks, binders, and collection across devices.
-          </p>
+
+          {/* Local Storage Stats */}
+          <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+            <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block">Decks</span>
+              <span className="text-sm font-bold text-slate-200">{storageStats.counts.decks}</span>
+            </div>
+            <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block">Binders</span>
+              <span className="text-sm font-bold text-slate-200">{storageStats.counts.binders}</span>
+            </div>
+            <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block">Collection</span>
+              <span className="text-sm font-bold text-slate-200">{storageStats.counts.collectionCards}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Cloudflare Functions & Secrets Inspector */}
-        <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-3">
+        {/* Database & API Connection Diagnostics Panel */}
+        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-violet-400" />
-              <span className="text-xs font-semibold text-slate-200">Cloudflare Functions & Secrets Inspector</span>
+              <Activity className="w-4 h-4 text-sky-400" />
+              <span className="text-xs font-semibold text-slate-200">
+                Database / API Connection Diagnostics
+              </span>
             </div>
-            <button
-              onClick={handleRunDiagnostics}
-              disabled={testingDiag}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/30 text-violet-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-800 border border-slate-700 text-slate-300">
+              Connection Debugger
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            Verify connectivity to your backend API solution (such as your multi-database{' '}
+            <code className="text-fuchsia-300 font-mono">MtgToolsForMtgNexus</code> API or any database endpoint).
+          </p>
+
+          <form onSubmit={handleTestConnection} className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)}
+                placeholder="e.g. http://localhost:5000 or https://api.mtgnexus.com"
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-sky-500"
+              />
+              <button
+                type="submit"
+                disabled={isTestingConn}
+                className="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3 h-3 ${isTestingConn ? 'animate-spin' : ''}`} />
+                {isTestingConn ? 'Pinging...' : 'Test Connection'}
+              </button>
+            </div>
+          </form>
+
+          {/* Connection Test Diagnostics Result */}
+          {connResult && (
+            <div
+              className={`p-3 rounded-lg border text-xs space-y-2 ${
+                connResult.status === 'connected'
+                  ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200'
+                  : connResult.status === 'warning'
+                  ? 'bg-amber-950/20 border-amber-500/40 text-amber-200'
+                  : connResult.status === 'local_only'
+                  ? 'bg-slate-900 border-slate-800 text-slate-300'
+                  : 'bg-rose-950/20 border-rose-500/40 text-rose-200'
+              }`}
             >
-              <RefreshCw className={`w-3 h-3 ${testingDiag ? 'animate-spin' : ''}`} />
-              {testingDiag ? 'Inspecting...' : 'Inspect Live DB & Secrets'}
-            </button>
-          </div>
-
-          {/* Key status cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-            {/* Functions Compilation Check */}
-            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
-              <span className="text-[10px] text-slate-400 block font-medium">1. Functions Compiled</span>
-              <div className="mt-1 flex items-center gap-1.5">
-                {fnCheckResult?.functionsCompiled ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="font-bold text-emerald-400 truncate">Compiled</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="font-bold text-amber-400 truncate">{fnCheckResult?.isHtmlFallback ? 'HTML Fallback' : 'Checking...'}</span>
-                  </>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-500 truncate mt-0.5">
-                {fnCheckResult?.engine || 'Testing router...'}
-              </span>
-            </div>
-
-            {/* TURSO_DATABASE_URL */}
-            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
-              <span className="text-[10px] text-slate-400 block font-medium">2. TURSO_DATABASE_URL</span>
-              <div className="mt-1 flex items-center gap-1.5">
-                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.isPlaceholder ? (
-                  <>
-                    <Database className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span className="font-bold text-sky-400 truncate">Local Mode (Placeholder)</span>
-                  </>
-                ) : fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="font-bold text-emerald-400 truncate">Detected</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="font-bold text-amber-400 truncate">Missing in Secrets</span>
-                  </>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-400 font-mono truncate mt-0.5" title={fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'None'}>
-                {fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.isPlaceholder 
-                  ? 'Placeholder Example' 
-                  : (fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.masked || 'Not Set')}
-              </span>
-            </div>
-
-            {/* TURSO_AUTH_TOKEN */}
-            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/60 flex flex-col justify-between">
-              <span className="text-[10px] text-slate-400 block font-medium">3. TURSO_AUTH_TOKEN</span>
-              <div className="mt-1 flex items-center gap-1.5">
-                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.isPlaceholder ? (
-                  <>
-                    <Database className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span className="font-bold text-sky-400 truncate">Placeholder Token</span>
-                  </>
-                ) : fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.present ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="font-bold text-emerald-400 truncate">Present ({fnCheckResult.environmentVariables.TURSO_AUTH_TOKEN.length} ch)</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="font-bold text-amber-400 truncate">Missing in Secrets</span>
-                  </>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-500 truncate mt-0.5">
-                {fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.isPlaceholder
-                  ? 'Local Storage Fallback'
-                  : fnCheckResult?.environmentVariables?.TURSO_AUTH_TOKEN?.looksLikeJWT ? 'Valid JWT Format' : 'JWT Token'}
-              </span>
-            </div>
-          </div>
-
-          {/* Diagnostics output if requested */}
-          {showDiagPanel && (diagResult || fnCheckResult) && (
-            <div className={`p-3 rounded-lg border text-xs space-y-2 ${
-              diagResult?.status === 'connected' 
-                ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200' 
-                : diagResult?.status === 'local_storage'
-                ? 'bg-sky-950/20 border-sky-500/30 text-sky-200'
-                : 'bg-amber-950/20 border-amber-500/30 text-amber-200'
-            }`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 font-bold">
-                  {diagResult?.status === 'connected' ? (
+                  {connResult.status === 'connected' ? (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>Live Database Connected ({diagResult.latencyMs}ms ping)</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Connection Established ({connResult.latencyMs}ms ping)</span>
                     </>
-                  ) : diagResult?.status === 'local_storage' ? (
+                  ) : connResult.status === 'warning' ? (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-sky-400" />
-                      <span>Local SQLite Storage Active</span>
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Responded with HTTP {connResult.httpStatus}</span>
+                    </>
+                  ) : connResult.status === 'local_only' ? (
+                    <>
+                      <HardDrive className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span>Client Local Storage Active</span>
                     </>
                   ) : (
                     <>
-                      <AlertTriangle className="w-4 h-4 text-amber-400" />
-                      <span>Diagnostics Notice</span>
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Endpoint Unreachable</span>
                     </>
                   )}
                 </div>
-                {diagResult?.counts && (
-                  <span className="text-[10px] font-mono text-slate-400">
-                    {diagResult.counts.decks} decks &bull; {diagResult.counts.binders} binders
+                {connResult.httpStatus && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/40 border border-slate-800">
+                    HTTP {connResult.httpStatus}
                   </span>
                 )}
               </div>
 
-              {diagResult?.error && (
-                <div className="p-2 rounded bg-black/50 border border-amber-500/30 font-mono text-[10px] text-amber-300 break-all">
-                  {diagResult.error}
+              {connResult.targetUrl && (
+                <div className="text-[10px] font-mono text-slate-400 truncate">
+                  Target: {connResult.targetUrl}
                 </div>
               )}
 
-              {fnCheckResult?.troubleshooting && !fnCheckResult?.environmentVariables?.TURSO_DATABASE_URL?.present && (
-                <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2.5 rounded border border-slate-800 space-y-1">
-                  <span className="font-semibold text-fuchsia-300 block">How to configure secrets in Cloudflare Pages:</span>
-                  <ol className="list-decimal list-inside space-y-0.5 text-slate-400 text-[11px]">
-                    <li>Open <strong>Cloudflare Dashboard &rarr; Workers &amp; Pages &rarr; Your Project</strong></li>
-                    <li>Go to <strong>Settings &rarr; Environment Variables</strong></li>
-                    <li>Add <code className="text-fuchsia-300 font-mono">TURSO_DATABASE_URL</code> and <code className="text-fuchsia-300 font-mono">TURSO_AUTH_TOKEN</code></li>
-                    <li>Click <strong>Deployments &rarr; Redeploy latest</strong> to apply the secrets</li>
-                  </ol>
+              {connResult.error && (
+                <div className="p-2 rounded bg-black/50 border border-rose-500/30 font-mono text-[10px] text-rose-300 break-all">
+                  {connResult.error}
                 </div>
+              )}
+
+              {connResult.details && (
+                <pre className="p-2 rounded bg-black/50 border border-slate-800 font-mono text-[10px] text-slate-300 overflow-x-auto max-h-32">
+                  {typeof connResult.details === 'string'
+                    ? connResult.details
+                    : JSON.stringify(connResult.details, null, 2)}
+                </pre>
               )}
             </div>
           )}
         </div>
 
-        {/* Device Sync Illustration */}
-        <div className="flex items-center justify-center gap-4 py-1 text-slate-400 text-xs">
-          <div className="flex flex-col items-center gap-1">
-            <Monitor className="w-5 h-5 text-slate-300" />
-            <span className="text-[11px]">Desktop</span>
+        {/* Backup & Restore Vault Data */}
+        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5 text-fuchsia-400" />
+              Backup &amp; Restore Vault Data
+            </span>
+            <span className="text-[10px] text-slate-500">Full JSON snapshots</span>
           </div>
-          <div className="flex-1 h-px bg-slate-800 relative">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="bg-slate-900 px-2 text-[10px] text-fuchsia-400/80 font-medium">Turso Distributed Sync</span>
-            </div>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <Smartphone className="w-5 h-5 text-slate-300" />
-            <span className="text-[11px]">Mobile</span>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleExportBackup}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-fuchsia-400" />
+              Export Vault JSON
+            </button>
+
+            <label className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-sky-400" />
+              Import Backup
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportBackup}
+                className="hidden"
+              />
+            </label>
           </div>
         </div>
 
-        {/* Connect to Existing Vault Form */}
+        {/* Switch Vault Form */}
         <form onSubmit={handleJoinVault} className="space-y-2 pt-2 border-t border-slate-800">
           <label className="text-xs font-semibold text-slate-300 block">
-            Switch to Another Vault Key
+            Switch to Another Vault Identifier
           </label>
           <div className="flex gap-2">
             <input
@@ -415,25 +417,21 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               disabled={!inputVaultKey.trim() || isSwitching}
               className="px-4 py-2 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer shrink-0"
             >
-              {isSwitching ? 'Linking...' : 'Connect'}
+              {isSwitching ? 'Switching...' : 'Switch Vault'}
             </button>
           </div>
         </form>
 
-        {/* Browser Console Debugging Note */}
-        <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-2 text-[11px] text-slate-400">
-          <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Browser DevTools Console Diagnostics</span>
+        {/* Developer Console Diagnostic Quick Command */}
+        <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+          <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-sky-400" />
+            Browser Console Quick Testing
           </div>
-          <ul className="space-y-1 list-disc list-inside leading-relaxed text-slate-400 text-[11px]">
-            <li>
-              Type <code className="text-sky-300 font-mono">checkCloudflareFunctions()</code> in Console (<kbd className="px-1 py-0.5 bg-slate-800 rounded text-[10px]">F12</kbd>) to check if Functions compiled and secrets exist.
-            </li>
-            <li>
-              Type <code className="text-emerald-300 font-mono">testTurso()</code> to test live remote database ping, latency, and vault counts.
-            </li>
-          </ul>
+          <p className="text-slate-400">
+            Open DevTools (<kbd className="px-1 py-0.5 bg-slate-800 rounded text-[10px]">F12</kbd>) and type{' '}
+            <code className="text-emerald-300 font-mono">testDbConnection('http://localhost:5000')</code> to test your API or database connectivity anytime.
+          </p>
         </div>
       </div>
     </div>

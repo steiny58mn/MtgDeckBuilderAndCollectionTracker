@@ -1,14 +1,14 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, initDb, getTursoConfig, testDbConnection, maskTursoUrl } from './server/db.js';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   
-  // Increase payload limits for large deck objects
+  // Increase payload limits
   app.use(express.json({ limit: '10mb' }));
 
   // CORS middleware allowing full REST methods
@@ -22,186 +22,91 @@ async function startServer() {
     next();
   });
 
-  // Print startup config info
-  const initialConfig = getTursoConfig();
-  console.log(`[Turso DB] 🚀 Server starting on port ${PORT}...`);
-  if (initialConfig.isPlaceholder) {
-    console.log(`[Turso DB] ℹ️ Placeholder credentials detected ("${initialConfig.rawPlaceholderUrl}").`);
-    console.log(`[Turso DB] 🌐 Mode: Local SQLite Storage (file:local.db)`);
-  } else {
-    console.log(`[Turso DB] 🔗 Target Database: ${maskTursoUrl(initialConfig.url)}`);
-    console.log(`[Turso DB] 🔑 Auth Token Status: ${initialConfig.authToken ? 'Configured ✅' : 'Not Set ⚠️'}`);
-    console.log(`[Turso DB] 🌐 Mode: ${initialConfig.isRemote ? 'Remote Turso Cloud (libsql)' : 'Local SQLite Storage (local.db)'}`);
-  }
+  console.log(`[Server] 🚀 Server starting on port ${PORT}...`);
+  console.log(`[Server] 🌐 Mode: Client-Side Storage with External API / Database Diagnostics`);
 
-  // Initialize Turso DB
-  await initDb().catch((err) => {
-    console.info('[Turso DB] DB Initialization Notice:', err.message || err);
-  });
-
-  // Functions compilation & diagnostics inspection check
-  app.get(['/api/functions-check', '/api/health'], (req, res) => {
-    const config = getTursoConfig();
+  // 1. Health & Server Status Endpoint
+  app.get(['/api/health', '/api/status', '/api/functions-check'], (req, res) => {
+    const configuredApiUrl = process.env.MTG_API_URL || null;
     res.set('X-Engine', 'Node-Express-Server');
-    res.set('X-Functions-Compiled', 'true');
     res.json({
-      functionsCompiled: true,
+      status: 'online',
       engine: 'Node.js Express Server (Dev/Container)',
       timestamp: new Date().toISOString(),
       urlPath: req.path,
-      environmentVariables: {
-        allDetectedKeys: Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('LC_')),
-        TURSO_DATABASE_URL: {
-          present: Boolean(process.env.TURSO_DATABASE_URL),
-          isPlaceholder: config.isPlaceholder,
-          masked: maskTursoUrl(config.rawPlaceholderUrl || config.url),
-          formatValid: Boolean(config.url),
-        },
-        TURSO_AUTH_TOKEN: {
-          present: Boolean(process.env.TURSO_AUTH_TOKEN),
-          isPlaceholder: config.isPlaceholder,
-          length: process.env.TURSO_AUTH_TOKEN ? process.env.TURSO_AUTH_TOKEN.trim().length : 0,
-          looksLikeJWT: Boolean(process.env.TURSO_AUTH_TOKEN?.trim().startsWith('ey')),
-        },
-      },
-      databaseStatus: {
-        isConfigured: config.isRemote && Boolean(config.authToken) && !config.isPlaceholder,
-        isRemote: config.isRemote,
-        isPlaceholder: config.isPlaceholder,
-      },
-      troubleshooting: config.isPlaceholder
-        ? 'Example placeholder credentials detected ("your-database-name"). Storing data safely in local SQLite mode until custom credentials are provided.'
-        : config.isRemote && Boolean(config.authToken)
-        ? 'Backend is connected to remote Turso database.'
-        : 'Running in local SQLite mode.',
+      externalApiConfigured: Boolean(configuredApiUrl),
+      configuredApiUrl: configuredApiUrl ? configuredApiUrl.replace(/\/+$/, '') : null,
+      storageMode: 'client_local_storage',
+      message: 'App is running in lightweight decoupled mode. Data is saved in client local storage, with support for connecting to MtgTools API.',
     });
   });
 
-  // Storage Backend Health & Configuration Status Check
-  app.get('/api/storage/status', (req, res) => {
-    const config = getTursoConfig();
-    res.json({
-      status: 'ok',
-      backend: 'turso',
-      isCloudConfigured: config.isRemote && Boolean(config.authToken) && !config.isPlaceholder,
-      databaseUrlMasked: maskTursoUrl(config.rawPlaceholderUrl || config.url),
-      hasAuthToken: Boolean(config.authToken),
-      isRemote: config.isRemote,
-      isPlaceholder: config.isPlaceholder,
-    });
-  });
-
-  // Comprehensive Diagnostics Endpoint
-  app.get('/api/storage/diagnostics', async (req, res) => {
-    console.log('[Turso DB Diagnostics] 🔍 Running database health & connectivity check...');
-    try {
-      const result = await testDbConnection();
-      console.log(`[Turso DB Diagnostics] Result: ${result.status} (Latency: ${result.latencyMs}ms, Decks: ${result.counts.decks})`);
-      res.json(result);
-    } catch (err: any) {
-      console.error('[Turso DB Diagnostics] ❌ Failed to run connection test:', err);
-      res.status(500).json({
-        status: 'error',
-        error: err.message || 'Diagnostic query failed',
+  // 2. Database & External API Diagnostics / Ping Endpoint
+  // Allows testing connection to any target database or API URL (e.g. MtgToolsForMtgNexus or external DB)
+  app.get('/api/diagnostics/ping', async (req, res) => {
+    const targetUrl = (req.query.url as string) || process.env.MTG_API_URL || '';
+    if (!targetUrl) {
+      return res.json({
+        status: 'standby',
+        message: 'No external URL provided to ping. Provide ?url=https://your-api or set MTG_API_URL.',
+        latencyMs: 0,
       });
     }
-  });
 
-  // Turso API routes
-  // 1. GET all data for a vault
-  app.get('/api/storage/:vaultId/all', async (req, res) => {
-    const { vaultId } = req.params;
     const start = Date.now();
     try {
-      const [decksRes, bindersRes, collectionRes] = await Promise.all([
-        db.execute({ sql: 'SELECT data FROM turso_decks WHERE vault_id = ?', args: [vaultId] }),
-        db.execute({ sql: 'SELECT data FROM turso_binders WHERE vault_id = ?', args: [vaultId] }),
-        db.execute({ sql: 'SELECT data FROM turso_collection WHERE vault_id = ?', args: [vaultId] }),
-      ]);
-      
-      const decks = decksRes.rows.map(r => JSON.parse(r.data as string));
-      const binders = bindersRes.rows.map(r => JSON.parse(r.data as string));
-      const collection = collectionRes.rows.map(r => JSON.parse(r.data as string));
-      
-      console.log(`[Turso DB API] 📥 GET /api/storage/${vaultId}/all -> ${decks.length} decks, ${binders.length} binders, ${collection.length} collection items (${Date.now() - start}ms)`);
-      res.json({ decks, binders, collection });
-    } catch (e: any) {
-      console.error(`[Turso DB API] ❌ GET /api/storage/${vaultId}/all error (${Date.now() - start}ms):`, e);
-      res.status(500).json({ error: e.message || 'Failed to fetch vault data from Turso' });
-    }
-  });
-
-  // 2. Write operations
-  // Save a document (deck, binder, or card) - supports POST, PUT, and PATCH
-  const handleSaveDocument = async (req: express.Request, res: express.Response) => {
-    const { vaultId, collectionId, docId } = req.params;
-    const data = req.body;
-    const start = Date.now();
-    try {
-      const tableName = `turso_${collectionId}`;
-      if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
-         console.warn(`[Turso DB API] ⚠️ Invalid collection requested: ${collectionId}`);
-         return res.status(400).json({ error: 'Invalid collection' });
+      let normalized = targetUrl.trim();
+      if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+        normalized = `https://${normalized}`;
       }
-      
-      const insertSql = `INSERT INTO ${tableName} (id, vault_id, data, updated_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id, updated_at = excluded.updated_at`;
-      
-      try {
-        await db.execute({
-          sql: insertSql,
-          args: [docId, vaultId, JSON.stringify(data), Date.now()]
-        });
-      } catch (insertError: any) {
-        // If the table was missing the updated_at column, run auto-migration and retry
-        if (insertError?.message?.includes('no column named updated_at')) {
-          await db.execute(`ALTER TABLE ${tableName} ADD COLUMN updated_at INTEGER DEFAULT 0`).catch(() => {});
-          await db.execute({
-            sql: insertSql,
-            args: [docId, vaultId, JSON.stringify(data), Date.now()]
-          });
-        } else {
-          throw insertError;
+
+      console.log(`[Diagnostics] 🔍 Pinging external endpoint: ${normalized}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const pingResponse = await fetch(normalized, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json, text/plain, */*' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const latencyMs = Date.now() - start;
+      const contentType = pingResponse.headers.get('content-type') || '';
+      let responseBody: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          responseBody = await pingResponse.json();
+        } catch {
+          responseBody = await pingResponse.text();
         }
+      } else {
+        const text = await pingResponse.text();
+        responseBody = text.slice(0, 300);
       }
 
-      const itemName = data?.name || docId;
-      console.log(`[Turso DB API] 💾 ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} ("${itemName}") -> Success (${Date.now() - start}ms)`);
-      const dbConfig = getTursoConfig();
-      res.json({ success: true, remote: dbConfig.isRemote, table: tableName, vaultId, docId });
-    } catch (e: any) {
-      console.error(`[Turso DB API] ❌ ${req.method} /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
-      res.status(500).json({ error: e.message || 'Failed to write to Turso database' });
-    }
-  };
-
-  app.post('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
-  app.put('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
-  app.patch('/api/storage/:vaultId/:collectionId/:docId', handleSaveDocument);
-
-  // Delete a document
-  app.delete('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
-    const { vaultId, collectionId, docId } = req.params;
-    const start = Date.now();
-    try {
-      const tableName = `turso_${collectionId}`;
-      if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
-         return res.status(400).json({ error: 'Invalid collection' });
-      }
-      
-      await db.execute({
-        sql: `DELETE FROM ${tableName} WHERE id = ? AND vault_id = ?`,
-        args: [docId, vaultId]
+      console.log(`[Diagnostics] ✅ Ping to ${normalized} returned HTTP ${pingResponse.status} (${latencyMs}ms)`);
+      return res.json({
+        status: pingResponse.ok ? 'connected' : 'warning',
+        httpStatus: pingResponse.status,
+        latencyMs,
+        targetUrl: normalized,
+        response: responseBody,
       });
-      console.log(`[Turso DB API] 🗑️ DELETE /api/storage/${vaultId}/${collectionId}/${docId} -> Success (${Date.now() - start}ms)`);
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error(`[Turso DB API] ❌ DELETE /api/storage/${vaultId}/${collectionId}/${docId} error (${Date.now() - start}ms):`, e);
-      res.status(500).json({ error: e.message || 'Failed to delete from Turso database' });
+    } catch (err: any) {
+      const latencyMs = Date.now() - start;
+      console.warn(`[Diagnostics] ❌ Ping failed for ${targetUrl}:`, err.message);
+      return res.status(502).json({
+        status: 'unreachable',
+        error: err.name === 'AbortError' ? 'Connection timed out after 10s' : err.message,
+        latencyMs,
+        targetUrl,
+      });
     }
   });
 
-  // Proxy route for Scryfall API to bypass browser CORS / Adblockers
+  // 3. Proxy route for Scryfall API to bypass browser CORS / Adblockers
   app.use('/api/scryfall', async (req, res) => {
     try {
       const targetUrl = `https://api.scryfall.com${req.url}`;
@@ -226,7 +131,7 @@ async function startServer() {
     }
   });
 
-  // Proxy route for EDHREC API to prevent browser CORS and 403 blocks
+  // 4. Proxy route for EDHREC API to prevent browser CORS and 403 blocks
   app.use('/api/edhrec', async (req, res) => {
     try {
       const targetUrl = `https://json.edhrec.com${req.url}`;
@@ -260,7 +165,7 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
+  // 5. Vite middleware for development / Static file serving for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

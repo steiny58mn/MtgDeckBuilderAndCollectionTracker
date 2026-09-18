@@ -103,11 +103,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Turso Cloud Vault Sync Button */}
+            {/* Vault & API Diagnostics Button */}
             <button
               onClick={onOpenSyncModal}
               className="flex items-center gap-2 bg-slate-900 border border-slate-700 hover:border-fuchsia-500/50 hover:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-              title="Manage Turso Cloud Vault Sync"
+              title="Manage Vault & Database Connection Diagnostics"
             >
               {syncStatus === 'syncing' ? (
                 <div className="w-3.5 h-3.5 border-2 border-slate-500 border-t-fuchsia-500 rounded-full animate-spin" />
@@ -123,7 +123,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {currentVaultId ? (
                   <span className="text-slate-300">Vault: <span className="text-fuchsia-400 font-mono">{currentVaultId}</span></span>
                 ) : (
-                  <span className="text-slate-400">Turso Local</span>
+                  <span className="text-slate-400">Local Storage</span>
                 )}
               </span>
               

@@ -57,7 +57,7 @@ export default function App() {
     }, 4500);
   };
 
-  // Subscribe to real-time Turso Database & local cache
+  // Subscribe to storage service updates & local cache
   useEffect(() => {
     const unsubDecks = StorageService.subscribeDecks((updatedDecks) => {
       setDecks(updatedDecks);
