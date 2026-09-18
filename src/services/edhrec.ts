@@ -12,7 +12,7 @@ export function sanitizeCardName(name: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // strip diacritics (accents)
     .toLowerCase()
-    .replace(/['’"`.]/g, '') // remove apostrophes, quotes, periods: "Nature's" -> "natures"
+    .replace(/['’"`.]/g, '') // remove apostrophes, quotes, periods
     .replace(/[^a-z0-9]+/g, '-') // convert remaining non-alphanumeric chars to dashes
     .replace(/^-+|-+$/g, ''); // strip leading/trailing dashes
 }
@@ -27,15 +27,16 @@ export function getCommanderData(commanderName: string): Promise<EdhrecCommander
 
   const promise = (async () => {
     try {
-      // First attempt using proxy route
-      let res = await fetch(`/api/edhrec/pages/commanders/${sanitized}.json`);
+      const res = await fetch(`/api/edhrec/pages/commanders/${sanitized}.json`);
       if (!res.ok) {
-        // Direct fallback
-        res = await fetch(`https://json.edhrec.com/pages/commanders/${sanitized}.json`);
+        return null;
       }
-      if (!res.ok) return null;
 
       const data = await res.json();
+      if (data?.notFound) {
+        return null;
+      }
+
       const numDecks = data?.container?.json_dict?.card?.num_decks || 0;
       const cardMap = new Map<string, number>();
 

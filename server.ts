@@ -48,17 +48,26 @@ async function startServer() {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json',
+          'Referer': 'https://edhrec.com/',
         },
       });
 
+      // EDHREC S3 / CloudFront returns 403/404 for non-existent commander JSONs (e.g. Lands, non-commanders)
       if (!response.ok) {
-        return res.status(response.status).json({ error: `EDHREC responded with ${response.status}` });
+        return res.json({
+          container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+          status: response.status,
+          notFound: true,
+        });
       }
 
       const data = await response.json();
       res.json(data);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to proxy request to EDHREC', details: error.message });
+      res.json({
+        container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+        error: error.message,
+      });
     }
   });
 

@@ -9,10 +9,8 @@ import {
   Copy, 
   Check, 
   X, 
-  Server, 
   Globe, 
   ShieldAlert, 
-  Terminal, 
   Save, 
   RotateCcw
 } from 'lucide-react';
@@ -21,8 +19,7 @@ import {
   DiagnosticResult, 
   getApiBaseUrl, 
   setApiBaseUrl, 
-  resetApiBaseUrl, 
-  DEFAULT_API_BASE_URL 
+  resetApiBaseUrl 
 } from '../services/api';
 
 interface ApiDiagnosticsModalProps {
@@ -91,12 +88,22 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
     runDiagnostics('');
   };
 
+  const handleUseLocalhost = () => {
+    const localUrl = 'http://localhost:5205';
+    setInputUrl(localUrl);
+    setApiBaseUrl(localUrl);
+    setCurrentBaseUrl(localUrl);
+    onNotify?.('Switched to Local C# Debug API (http://localhost:5205)', 'info');
+    runDiagnostics(localUrl);
+  };
+
   const handleUseAzure = () => {
-    setInputUrl('https://mtgappsapi.azurewebsites.net');
-    setApiBaseUrl('https://mtgappsapi.azurewebsites.net');
-    setCurrentBaseUrl('https://mtgappsapi.azurewebsites.net');
+    const azureUrl = 'https://mtgappsapi.azurewebsites.net';
+    setInputUrl(azureUrl);
+    setApiBaseUrl(azureUrl);
+    setCurrentBaseUrl(azureUrl);
     onNotify?.('Switched to direct Azure API', 'info');
-    runDiagnostics('https://mtgappsapi.azurewebsites.net');
+    runDiagnostics(azureUrl);
   };
 
   const handleCopyReport = () => {
@@ -163,7 +170,7 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 ) : null}
               </h2>
               <p className="text-xs text-slate-400">
-                Diagnose connectivity between your browser and the remote Azure API
+                Diagnose connectivity between your browser and the local/remote backend
               </p>
             </div>
           </div>
@@ -185,14 +192,22 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 <Globe className="w-3.5 h-3.5 text-violet-400" />
                 Target API Base URL
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleUseLocalhost}
+                  className="text-[11px] px-2 py-1 rounded bg-slate-900 border border-fuchsia-700/60 hover:bg-fuchsia-950/40 text-fuchsia-300 font-mono transition-colors cursor-pointer"
+                  title="Local C# Debugging (localhost:5205)"
+                >
+                  Localhost:5205
+                </button>
                 <button
                   type="button"
                   onClick={handleUseAzure}
                   className="text-[11px] px-2 py-1 rounded bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors cursor-pointer"
                   title="Direct to Azure Web App"
                 >
-                  Direct Azure API
+                  Azure API
                 </button>
                 <button
                   type="button"
@@ -200,7 +215,7 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                   className="text-[11px] px-2 py-1 rounded bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors cursor-pointer"
                   title="Use same-origin relative paths (/mtgtools)"
                 >
-                  Relative Proxy
+                  Vite Proxy
                 </button>
                 <button
                   type="button"
@@ -218,7 +233,7 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 type="text"
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://mtgappsapi.azurewebsites.net (or leave empty for relative)"
+                placeholder="http://localhost:5205 or https://mtgappsapi.azurewebsites.net"
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-violet-500"
               />
               <button
@@ -234,7 +249,7 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
 
             <div className="text-[11px] text-slate-400 flex items-center justify-between">
               <span>
-                Active: <span className="font-mono text-violet-300">{currentBaseUrl || '(relative / same-origin proxy)'}</span>
+                Active: <span className="font-mono text-violet-300">{currentBaseUrl || '(relative / Vite dev proxy)'}</span>
               </span>
               <span>
                 Origin: <span className="font-mono text-slate-300">{typeof window !== 'undefined' ? window.location.origin : ''}</span>
@@ -250,14 +265,12 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 Cross-Origin Resource Sharing (CORS) Block Detected
               </div>
               <p className="text-xs text-amber-200/90 leading-relaxed">
-                The deployed frontend at <code className="bg-amber-950/60 px-1 py-0.5 rounded text-amber-300 font-mono">{typeof window !== 'undefined' ? window.location.origin : ''}</code> was blocked by the browser when connecting to the API because the Azure Web App has not allowed this origin in its CORS whitelist.
+                The frontend at <code className="bg-amber-950/60 px-1 py-0.5 rounded text-amber-300 font-mono">{typeof window !== 'undefined' ? window.location.origin : ''}</code> was blocked by the browser. If running C# locally, enable CORS in <code className="text-amber-300 font-mono">Program.cs</code>:
               </p>
               <div className="text-[11px] bg-slate-950/80 p-3 rounded-lg border border-amber-500/20 font-mono text-slate-300 space-y-1.5">
-                <p className="text-amber-400 font-sans font-bold text-xs">How to fix in Azure:</p>
-                <p>1. Go to <strong>Azure Portal</strong> &gt; <strong>App Services</strong> &gt; <strong>mtgappsapi</strong>.</p>
-                <p>2. In the left menu under <strong>API</strong>, click <strong>CORS</strong>.</p>
-                <p>3. Add <code className="text-emerald-400">{typeof window !== 'undefined' ? window.location.origin : '*'}</code> (or <code className="text-emerald-400">*</code> for development) and check <em>&quot;Enable Access-Control-Allow-Credentials&quot;</em>.</p>
-                <p>4. Alternatively, run via Azure CLI: <code className="text-violet-300">az webapp cors add --resource-group &lt;group&gt; --name mtgappsapi --allowed-origins &quot;{typeof window !== 'undefined' ? window.location.origin : '*'}&quot;</code></p>
+                <p className="text-amber-400 font-sans font-bold text-xs">C# Local Debug CORS Configuration:</p>
+                <p><code>builder.Services.AddCors(options =&gt; options.AddDefaultPolicy(p =&gt; p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));</code></p>
+                <p><code>app.UseCors();</code></p>
               </div>
             </div>
           )}
