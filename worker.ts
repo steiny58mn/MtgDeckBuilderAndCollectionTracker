@@ -1,6 +1,6 @@
 /**
  * Cloudflare Worker (_worker.js / worker.ts)
- * Lightweight Edge Proxy for Scryfall, EDHREC, MtgApps API, and Turso Storage endpoints.
+ * Edge Proxy for Scryfall, EDHREC, and MtgApps API (mtgappsapi.azurewebsites.net).
  */
 
 interface Env {
@@ -10,20 +10,6 @@ interface Env {
 }
 
 const REMOTE_API_BASE = 'https://mtgappsapi.azurewebsites.net';
-
-// In-memory fallback cache for worker instances
-const workerMemoryVaults: Map<string, { decks: Map<string, any>; binders: Map<string, any>; collection: Map<string, any> }> = new Map();
-
-function getOrCreateVault(vaultId: string) {
-  if (!workerMemoryVaults.has(vaultId)) {
-    workerMemoryVaults.set(vaultId, {
-      decks: new Map(),
-      binders: new Map(),
-      collection: new Map(),
-    });
-  }
-  return workerMemoryVaults.get(vaultId)!;
-}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -67,103 +53,7 @@ export default {
       );
     }
 
-    // 3. Turso Storage API Route (/api/storage/:vaultId/...)
-    if (url.pathname.startsWith('/api/storage')) {
-      const parts = url.pathname.replace(/^\/api\/storage\/?/, '').split('/');
-      const vaultId = parts[0] || 'DEFAULT';
-
-      // GET /api/storage/:vaultId/all
-      if (parts[1] === 'all' && request.method === 'GET') {
-        const vault = getOrCreateVault(vaultId);
-        const decks = Array.from(vault.decks.values());
-        const binders = Array.from(vault.binders.values());
-        const collection = Array.from(vault.collection.values());
-
-        return new Response(
-          JSON.stringify({ decks, binders, collection }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              ...corsHeaders,
-            },
-          }
-        );
-      }
-
-      // POST /api/storage/:vaultId/:collectionId/:docId
-      if (request.method === 'POST') {
-        const collectionId = parts[1]; // 'decks', 'binders', 'collection'
-        const docId = parts[2];
-        const vault = getOrCreateVault(vaultId);
-
-        try {
-          const body = await request.json();
-          if (collectionId === 'decks') {
-            vault.decks.set(docId, body);
-          } else if (collectionId === 'binders') {
-            vault.binders.set(docId, body);
-          } else if (collectionId === 'collection') {
-            vault.collection.set(docId, body);
-          }
-
-          return new Response(
-            JSON.stringify({ success: true, id: docId }),
-            {
-              status: 200,
-              headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders,
-              },
-            }
-          );
-        } catch (err: any) {
-          return new Response(
-            JSON.stringify({ error: err.message || 'Invalid JSON payload' }),
-            {
-              status: 400,
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            }
-          );
-        }
-      }
-
-      // DELETE /api/storage/:vaultId/:collectionId/:docId
-      if (request.method === 'DELETE') {
-        const collectionId = parts[1];
-        const docId = parts[2];
-        const vault = getOrCreateVault(vaultId);
-
-        if (collectionId === 'decks') {
-          vault.decks.delete(docId);
-        } else if (collectionId === 'binders') {
-          vault.binders.delete(docId);
-        } else if (collectionId === 'collection') {
-          vault.collection.delete(docId);
-        }
-
-        return new Response(
-          JSON.stringify({ success: true, deleted: docId }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              ...corsHeaders,
-            },
-          }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ error: `Method ${request.method} not allowed on storage route` }),
-        {
-          status: 405,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        }
-      );
-    }
-
-    // 4. Remote MtgTools & DeckBuilder API Proxy
+    // 3. Remote MtgTools & DeckBuilder API Proxy
     if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder')) {
       const targetBase = env.API_BASE_URL || REMOTE_API_BASE;
       const targetUrl = `${targetBase}${url.pathname}${url.search}`;
@@ -200,7 +90,7 @@ export default {
       }
     }
 
-    // 5. Scryfall API Proxy (prevents CORS & adblocker issues in browser)
+    // 4. Scryfall API Proxy (with proper User-Agent & caching)
     if (url.pathname.startsWith('/api/scryfall')) {
       const targetPath = url.pathname.replace(/^\/api\/scryfall/, '');
       const targetUrl = `https://api.scryfall.com${targetPath}${url.search}`;
@@ -209,8 +99,8 @@ export default {
         const scryfallRes = await fetch(targetUrl, {
           method: request.method,
           headers: {
-            'User-Agent': 'MTGCreativeStudio/1.0',
-            'Accept': 'application/json',
+            'User-Agent': 'MtgDeckBuilderAndCollectionTracker/1.0 (https://github.com/steiny58mn/MtgDeckBuilderAndCollectionTracker)',
+            'Accept': 'application/json;q=0.9,*/*;q=0.8',
             ...(request.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
           },
           body: request.method === 'POST' ? await request.text() : undefined,
@@ -221,7 +111,7 @@ export default {
           status: scryfallRes.status,
           headers: {
             'Content-Type': scryfallRes.headers.get('content-type') || 'application/json',
-            'Cache-Control': 'public, max-age=3600',
+            'Cache-Control': 'public, max-age=3600, s-maxage=86400',
             ...corsHeaders,
           },
         });
@@ -233,7 +123,7 @@ export default {
       }
     }
 
-    // 6. EDHREC API Proxy
+    // 5. EDHREC API Proxy
     if (url.pathname.startsWith('/api/edhrec')) {
       const targetPath = url.pathname.replace(/^\/api\/edhrec/, '');
       const targetUrl = `https://json.edhrec.com${targetPath}${url.search}`;
@@ -284,7 +174,7 @@ export default {
       }
     }
 
-    // 7. Static Assets (SPA fallback)
+    // 6. Static Assets (SPA fallback)
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }

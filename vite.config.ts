@@ -18,6 +18,11 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
+        '/api/storage': {
+          target: 'http://127.0.0.1:3000',
+          changeOrigin: true,
+          secure: false,
+        },
         '/mtgtools': {
           target: 'https://mtgappsapi.azurewebsites.net',
           changeOrigin: true,

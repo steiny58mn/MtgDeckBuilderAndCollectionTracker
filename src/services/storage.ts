@@ -2,473 +2,30 @@ type Unsubscribe = () => void;
 
 import { Deck, CollectionCard, DeckCard, Binder } from '../types/mtg';
 import { fetchBatchCardPrices } from './scryfall';
-import { getRemoteDecks, getRemoteCollection } from './api';
-
-const VAULT_KEY_STORAGE = 'mtg_cloud_vault_id';
-const LOCAL_DECKS_KEY = 'mtg_local_decks_cache';
-const LOCAL_COLLECTION_KEY = 'mtg_local_collection_cache';
-const LOCAL_BINDERS_KEY = 'mtg_local_binders_cache';
+import { 
+  getRemoteDecks, 
+  saveRemoteDeck, 
+  deleteRemoteDeck, 
+  getRemoteBinders, 
+  saveRemoteBinder, 
+  deleteRemoteBinder 
+} from './api';
 
 export const DEFAULT_BINDER: Binder = {
   id: 'binder-main',
   name: 'Main Binder',
   description: 'Primary trade and collection binder',
-  createdAt: Date.now() - 86400000 * 7,
+  cards: [],
+  createdAt: Date.now(),
   updatedAt: Date.now(),
 };
 
-// Generate human-friendly 8-char vault code
-function generateVaultId(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = 'MTG-';
-  for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-  code += '-';
-  for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-  return code;
-}
-
-export function getCurrentVaultId(): string {
-  let vaultId = localStorage.getItem(VAULT_KEY_STORAGE);
-  if (!vaultId) {
-    vaultId = generateVaultId();
-    localStorage.setItem(VAULT_KEY_STORAGE, vaultId);
-  }
-  return vaultId;
-}
-
-export function setCurrentVaultId(vaultId: string): void {
-  const cleaned = vaultId.trim().toUpperCase();
-  if (!cleaned) return;
-  localStorage.setItem(VAULT_KEY_STORAGE, cleaned);
-}
-
-// Initial Starter Sample Decks
-export const SAMPLE_DECKS: Deck[] = [
-  {
-    id: 'sample-edh-atraxa',
-    name: "Atraxa, Praetors' Voice // +1/+1 Counters",
-    description: "Proliferate counters and build an unstoppable army of modified creatures.",
-    format: 'commander',
-    commanderId: 'd0d33d52-3d28-4635-b985-51e126289259',
-    commanderName: "Atraxa, Praetors' Voice",
-    commanderArtUrl: 'https://cards.scryfall.io/art_crop/front/d/0/d0d33d52-3d28-4635-b985-51e126289259.jpg',
-    coverCardUrl: 'https://cards.scryfall.io/art_crop/front/d/0/d0d33d52-3d28-4635-b985-51e126289259.jpg',
-    createdAt: Date.now() - 86400000 * 3,
-    updatedAt: Date.now(),
-    tags: ['Commander', 'Proliferate', '+1/+1 Counters'],
-    cards: [
-      {
-        id: 'c-atraxa',
-        scryfallId: 'd0d33d52-3d28-4635-b985-51e126289259',
-        name: "Atraxa, Praetors' Voice",
-        set: '2xm',
-        collector_number: '190',
-        category: 'commander',
-        quantity: 1,
-        mana_cost: '{G}{W}{U}{B}',
-        cmc: 4,
-        type_line: 'Legendary Creature — Phyrexian Angel Horror',
-        colors: ['W', 'U', 'B', 'G'],
-        color_identity: ['W', 'U', 'B', 'G'],
-        rarity: 'mythic',
-        imageUrl: 'https://cards.scryfall.io/normal/front/d/0/d0d33d52-3d28-4635-b985-51e126289259.jpg',
-        priceUsd: 14.50,
-      },
-      {
-        id: 'c-sol-ring',
-        scryfallId: '4cbc6901-6a4a-4d0a-83ea-7eefa3b35021',
-        name: 'Sol Ring',
-        set: 'c21',
-        collector_number: '263',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{1}',
-        cmc: 1,
-        type_line: 'Artifact',
-        colors: [],
-        color_identity: [],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/4/c/4cbc6901-6a4a-4d0a-83ea-7eefa3b35021.jpg',
-        priceUsd: 1.85,
-      },
-      {
-        id: 'c-doubling-season',
-        scryfallId: '13254504-6330-4888-8a6b-80a5a7518447',
-        name: 'Doubling Season',
-        set: 'cmm',
-        collector_number: '283',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{4}{G}',
-        cmc: 5,
-        type_line: 'Enchantment',
-        colors: ['G'],
-        color_identity: ['G'],
-        rarity: 'mythic',
-        imageUrl: 'https://cards.scryfall.io/normal/front/1/3/13254504-6330-4888-8a6b-80a5a7518447.jpg',
-        priceUsd: 38.25,
-      },
-      {
-        id: 'c-swords-to-plowshares',
-        scryfallId: '47d3183a-6767-483d-9232-0bc25f7fb5b6',
-        name: 'Swords to Plowshares',
-        set: 'dmr',
-        collector_number: '31',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{W}',
-        cmc: 1,
-        type_line: 'Instant',
-        colors: ['W'],
-        color_identity: ['W'],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/4/7/47d3183a-6767-483d-9232-0bc25f7fb5b6.jpg',
-        priceUsd: 1.45,
-      },
-      {
-        id: 'c-counterspell',
-        scryfallId: '1920dae4-fb92-4f19-ae4b-eb3276b8dac7',
-        name: 'Counterspell',
-        set: 'dmr',
-        collector_number: '45',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{U}{U}',
-        cmc: 2,
-        type_line: 'Instant',
-        colors: ['U'],
-        color_identity: ['U'],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/1/9/1920dae4-fb92-4f19-ae4b-eb3276b8dac7.jpg',
-        priceUsd: 1.20,
-      },
-      {
-        id: 'c-cyclonic-rift',
-        scryfallId: 'ff08e5ed-f47b-4d8e-8b8b-41675dccef8b',
-        name: 'Cyclonic Rift',
-        set: 'rtr',
-        collector_number: '35',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{1}{U}',
-        cmc: 2,
-        type_line: 'Instant',
-        colors: ['U'],
-        color_identity: ['U'],
-        rarity: 'rare',
-        imageUrl: 'https://cards.scryfall.io/normal/front/f/f/ff08e5ed-f47b-4d8e-8b8b-41675dccef8b.jpg',
-        priceUsd: 32.50,
-      },
-      {
-        id: 'c-rhystic-study',
-        scryfallId: 'd6914dba-0d27-4055-ac34-b3ebf5802221',
-        name: 'Rhystic Study',
-        set: 'jmp',
-        collector_number: '169',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{2}{U}',
-        cmc: 3,
-        type_line: 'Enchantment',
-        colors: ['U'],
-        color_identity: ['U'],
-        rarity: 'rare',
-        imageUrl: 'https://cards.scryfall.io/normal/front/d/6/d6914dba-0d27-4055-ac34-b3ebf5802221.jpg',
-        priceUsd: 34.00,
-      },
-      {
-        id: 'c-demonic-tutor',
-        scryfallId: '3bdbc231-5316-4abd-9d8d-d87cff2c9847',
-        name: 'Demonic Tutor',
-        set: 'cmm',
-        collector_number: '150',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '{1}{B}',
-        cmc: 2,
-        type_line: 'Sorcery',
-        colors: ['B'],
-        color_identity: ['B'],
-        rarity: 'rare',
-        imageUrl: 'https://cards.scryfall.io/normal/front/3/b/3bdbc231-5316-4abd-9d8d-d87cff2c9847.jpg',
-        priceUsd: 36.00,
-      },
-      {
-        id: 'c-command-tower',
-        scryfallId: '37b60582-7e04-4e47-8a18-86fa0d14878b',
-        name: 'Command Tower',
-        set: 'otc',
-        collector_number: '280',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '',
-        cmc: 0,
-        type_line: 'Land',
-        colors: [],
-        color_identity: [],
-        rarity: 'common',
-        imageUrl: 'https://cards.scryfall.io/normal/front/3/7/37b60582-7e04-4e47-8a18-86fa0d14878b.jpg',
-        priceUsd: 0.25,
-      },
-      {
-        id: 'c-watery-grave',
-        scryfallId: '45611c75-01e4-448f-8d96-981881ff1b55',
-        name: 'Watery Grave',
-        set: 'rvr',
-        collector_number: '291',
-        category: 'main',
-        quantity: 1,
-        mana_cost: '',
-        cmc: 0,
-        type_line: 'Land — Island Swamp',
-        colors: [],
-        color_identity: ['U', 'B'],
-        rarity: 'rare',
-        imageUrl: 'https://cards.scryfall.io/normal/front/4/5/45611c75-01e4-448f-8d96-981881ff1b55.jpg',
-        priceUsd: 11.80,
-      },
-    ],
-  },
-  {
-    id: 'sample-modern-burn',
-    name: 'Modern Mono-Red Burn',
-    description: 'Fast, lethal aggressive direct damage burn deck targeting opponent life total.',
-    format: 'modern',
-    createdAt: Date.now() - 86400000 * 5,
-    updatedAt: Date.now(),
-    coverCardUrl: 'https://cards.scryfall.io/art_crop/front/f/7/f74a9f31-f49a-4573-b778-831b26857ea2.jpg',
-    tags: ['Modern', 'Aggro', 'Burn'],
-    cards: [
-      {
-        id: 'b-lightning-bolt',
-        scryfallId: 'f74a9f31-f49a-4573-b778-831b26857ea2',
-        name: 'Lightning Bolt',
-        set: '2x2',
-        collector_number: '117',
-        category: 'main',
-        quantity: 4,
-        mana_cost: '{R}',
-        cmc: 1,
-        type_line: 'Instant',
-        colors: ['R'],
-        color_identity: ['R'],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/f/7/f74a9f31-f49a-4573-b778-831b26857ea2.jpg',
-        priceUsd: 1.50,
-      },
-      {
-        id: 'b-monastery-swiftspear',
-        scryfallId: 'd8b9f3b2-0144-4b60-acfa-6316aec89c14',
-        name: 'Monastery Swiftspear',
-        set: 'bro',
-        collector_number: '144',
-        category: 'main',
-        quantity: 4,
-        mana_cost: '{R}',
-        cmc: 1,
-        type_line: 'Creature — Human Monk',
-        colors: ['R'],
-        color_identity: ['R'],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/d/8/d8b9f3b2-0144-4b60-acfa-6316aec89c14.jpg',
-        priceUsd: 0.75,
-      },
-      {
-        id: 'b-lava-spike',
-        scryfallId: '79c21c1f-eaa4-454d-a1c7-b41466d0a428',
-        name: 'Lava Spike',
-        set: 'uma',
-        collector_number: '136',
-        category: 'main',
-        quantity: 4,
-        mana_cost: '{R}',
-        cmc: 1,
-        type_line: 'Sorcery — Arcane',
-        colors: ['R'],
-        color_identity: ['R'],
-        rarity: 'uncommon',
-        imageUrl: 'https://cards.scryfall.io/normal/front/7/9/79c21c1f-eaa4-454d-a1c7-b41466d0a428.jpg',
-        priceUsd: 2.20,
-      },
-      {
-        id: 'b-mountain',
-        scryfallId: '42232ea6-e31d-46a6-9f94-b2ad2416d79b',
-        name: 'Mountain',
-        set: 'unf',
-        collector_number: '243',
-        category: 'main',
-        quantity: 18,
-        mana_cost: '',
-        cmc: 0,
-        type_line: 'Basic Land — Mountain',
-        colors: [],
-        color_identity: ['R'],
-        rarity: 'common',
-        imageUrl: 'https://cards.scryfall.io/normal/front/4/42232ea6-e31d-46a6-9f94-b2ad2416d79b.jpg',
-        priceUsd: 0.15,
-      },
-      {
-        id: 'b-smash-to-smithereens',
-        scryfallId: '655c489f-abbb-45e4-8e7c-8270c655d8b8',
-        name: 'Smash to Smithereens',
-        set: 'ori',
-        collector_number: '163',
-        category: 'sideboard',
-        quantity: 3,
-        mana_cost: '{1}{R}',
-        cmc: 2,
-        type_line: 'Instant',
-        colors: ['R'],
-        color_identity: ['R'],
-        rarity: 'common',
-        imageUrl: 'https://cards.scryfall.io/normal/front/6/5/655c489f-abbb-45e4-8e7c-8270c655d8b8.jpg',
-        priceUsd: 0.40,
-      }
-    ]
-  }
-];
-
-export const SAMPLE_COLLECTION: CollectionCard[] = [
-  {
-    id: 'col-black-lotus-30th',
-    scryfallId: 'bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd',
-    name: 'Black Lotus',
-    set: '30a',
-    setName: '30th Anniversary Edition',
-    collectorNumber: '233',
-    quantity: 1,
-    isFoil: false,
-    condition: 'NM',
-    cmc: 0,
-    type_line: 'Artifact',
-    colors: [],
-    rarity: 'rare',
-    imageUrl: 'https://cards.scryfall.io/normal/front/b/d/bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd.jpg',
-    acquiredPrice: 850.00,
-    currentPriceUsd: 980.00,
-    addedAt: Date.now() - 86400000 * 10,
-    notes: 'Graded display binder piece',
-  },
-  {
-    id: 'col-sheoldred',
-    scryfallId: '359d2907-93ae-4222-8734-4cb032274bfa',
-    name: 'Sheoldred, the Apocalypse',
-    set: 'dmu',
-    setName: 'Dominaria United',
-    collectorNumber: '107',
-    quantity: 2,
-    isFoil: true,
-    condition: 'NM',
-    cmc: 4,
-    mana_cost: '{2}{B}{B}',
-    type_line: 'Legendary Creature — Phyrexian Praetor',
-    colors: ['B'],
-    rarity: 'mythic',
-    imageUrl: 'https://cards.scryfall.io/normal/front/3/5/359d2907-93ae-4222-8734-4cb032274bfa.jpg',
-    acquiredPrice: 65.00,
-    currentPriceUsd: 84.50,
-    addedAt: Date.now() - 86400000 * 7,
-    notes: 'Playset piece for Modern/Pioneer',
-  },
-  {
-    id: 'col-the-one-ring',
-    scryfallId: 'd5806e68-1054-458e-866d-5f4707f68295',
-    name: 'The One Ring',
-    set: 'ltr',
-    setName: 'The Lord of the Rings: Tales of Middle-earth',
-    collectorNumber: '246',
-    quantity: 1,
-    isFoil: false,
-    condition: 'NM',
-    cmc: 4,
-    mana_cost: '{4}',
-    type_line: 'Legendary Artifact',
-    colors: [],
-    rarity: 'mythic',
-    imageUrl: 'https://cards.scryfall.io/normal/front/d/5/d5806e68-1054-458e-866d-5f4707f68295.jpg',
-    acquiredPrice: 50.00,
-    currentPriceUsd: 95.00,
-    addedAt: Date.now() - 86400000 * 14,
-  },
-  {
-    id: 'col-ragavan',
-    scryfallId: 'a9738cda-adb1-47fb-9f4c-ecd930228c4d',
-    name: 'Ragavan, Nimble Pilferer',
-    set: 'mh2',
-    setName: 'Modern Horizons 2',
-    collectorNumber: '138',
-    quantity: 4,
-    isFoil: false,
-    condition: 'NM',
-    cmc: 1,
-    mana_cost: '{R}',
-    type_line: 'Legendary Creature — Monkey Pirate',
-    colors: ['R'],
-    rarity: 'mythic',
-    imageUrl: 'https://cards.scryfall.io/normal/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.jpg',
-    acquiredPrice: 42.00,
-    currentPriceUsd: 48.00,
-    addedAt: Date.now() - 86400000 * 20,
-    notes: 'Full playset',
-  }
-];
-
-// Local cache helpers
-function loadLocalDecks(): Deck[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_DECKS_KEY);
-    if (raw) {
-      const parsed: Deck[] = JSON.parse(raw);
-      return parsed.filter((d) => !d.id.startsWith('sample-'));
-    }
-  } catch (e) {
-    console.error('Error loading local decks:', e);
-  }
-  return [];
-}
-
-function saveLocalDecks(decks: Deck[]) {
-  localStorage.setItem(LOCAL_DECKS_KEY, JSON.stringify(decks));
-}
-
-function loadLocalCollection(): CollectionCard[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_COLLECTION_KEY);
-    if (raw) {
-      const parsed: CollectionCard[] = JSON.parse(raw);
-      return parsed.filter((c) => !c.id.startsWith('col-sample-'));
-    }
-  } catch (e) {
-    console.error('Error loading local collection:', e);
-  }
-  return [];
-}
-
-function saveLocalCollection(cards: CollectionCard[]) {
-  localStorage.setItem(LOCAL_COLLECTION_KEY, JSON.stringify(cards));
-}
-
-function loadLocalBinders(): Binder[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_BINDERS_KEY);
-    if (raw !== null) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error loading local binders:', e);
-  }
-  return [DEFAULT_BINDER];
-}
-
-function saveLocalBinders(binders: Binder[]) {
-  localStorage.setItem(LOCAL_BINDERS_KEY, JSON.stringify(binders));
-}
-
-export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'local' | 'error';
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
 
 /**
- * Turso Cloud Storage Manager & Real-Time Sync
- * Connects directly to Turso DB & mtgappsapi.azurewebsites.net
+ * Storage Service
+ * Directly communicates with the remote C# Web API (mtgappsapi.azurewebsites.net)
+ * In-memory state only (no local storage for decks and binders).
  */
 export class StorageService {
   private static statusListeners: Set<(status: SyncStatus, error?: string) => void> = new Set();
@@ -476,6 +33,9 @@ export class StorageService {
   private static deckListeners: Set<(decks: Deck[]) => void> = new Set();
   private static colListeners: Set<(cards: CollectionCard[]) => void> = new Set();
   private static binderListeners: Set<(binders: Binder[]) => void> = new Set();
+
+  private static inMemoryDecks: Deck[] = [];
+  private static inMemoryBinders: Binder[] = [];
   private static hasInitialized = false;
 
   static onSyncStatusChange(callback: (status: SyncStatus, error?: string) => void): () => void {
@@ -494,90 +54,45 @@ export class StorageService {
   }
 
   /**
-   * Synchronize all decks, binders, and collection items with Turso backend
+   * Helper to derive flat collection from all binders
    */
-  public static async syncWithTurso(): Promise<void> {
-    const vaultId = getCurrentVaultId();
+  private static getCollectionFromBinders(binders: Binder[]): CollectionCard[] {
+    return binders.flatMap((b) => (b.cards || []).map((c) => ({
+      ...c,
+      binderId: c.binderId || b.id,
+    })));
+  }
+
+  private static notifyDecks() {
+    this.deckListeners.forEach((cb) => cb([...this.inMemoryDecks]));
+  }
+
+  private static notifyBinders() {
+    this.binderListeners.forEach((cb) => cb([...this.inMemoryBinders]));
+    const col = this.getCollectionFromBinders(this.inMemoryBinders);
+    this.colListeners.forEach((cb) => cb(col));
+  }
+
+  /**
+   * Fetch all decks and binders from the remote API
+   */
+  public static async syncWithRemote(): Promise<void> {
     this.setStatus('syncing');
 
     try {
-      let remoteDecks: Deck[] = [];
-      let remoteCol: CollectionCard[] = [];
-      let remoteBinders: Binder[] = [];
-      let hasRemoteData = false;
+      const [remoteDecks, remoteBinders] = await Promise.all([
+        getRemoteDecks(),
+        getRemoteBinders(),
+      ]);
 
-      // 1. Fetch from Turso vault storage endpoint
-      try {
-        const res = await fetch(`/api/storage/${vaultId}/all`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.decks) && data.decks.length > 0) {
-            remoteDecks = data.decks;
-            hasRemoteData = true;
-          }
-          if (Array.isArray(data.binders) && data.binders.length > 0) {
-            remoteBinders = data.binders;
-            hasRemoteData = true;
-          }
-          if (Array.isArray(data.collection) && data.collection.length > 0) {
-            remoteCol = data.collection;
-            hasRemoteData = true;
-          }
-        }
-      } catch (err) {
-        console.warn('Local Turso API fetch error, checking remote mtgappsapi:', err);
-      }
+      this.inMemoryDecks = remoteDecks;
+      this.inMemoryBinders = remoteBinders.length > 0 ? remoteBinders : [DEFAULT_BINDER];
 
-      // 2. Fallback / supplementary check from mtgappsapi /deckbuilder endpoints
-      if (!hasRemoteData) {
-        try {
-          const [decks, col] = await Promise.all([
-            getRemoteDecks(),
-            getRemoteCollection(),
-          ]);
-          if (Array.isArray(decks) && decks.length > 0) {
-            remoteDecks = decks;
-            hasRemoteData = true;
-          }
-          if (Array.isArray(col) && col.length > 0) {
-            remoteCol = col;
-            hasRemoteData = true;
-          }
-        } catch (err) {
-          console.warn('mtgappsapi remote endpoint fetch note:', err);
-        }
-      }
-
-      // Merge / sync Decks
-      const localDecks = loadLocalDecks();
-      if (remoteDecks.length === 0 && localDecks.length > 0) {
-        this.pushDecksToTurso(vaultId, localDecks);
-      } else if (remoteDecks.length > 0) {
-        saveLocalDecks(remoteDecks);
-        this.deckListeners.forEach((cb) => cb(remoteDecks));
-      }
-
-      // Merge / sync Binders
-      const localBinders = loadLocalBinders();
-      if (remoteBinders.length === 0 && localBinders.length > 0) {
-        this.pushBindersToTurso(vaultId, localBinders);
-      } else if (remoteBinders.length > 0) {
-        saveLocalBinders(remoteBinders);
-        this.binderListeners.forEach((cb) => cb(remoteBinders));
-      }
-
-      // Merge / sync Collection
-      const localCol = loadLocalCollection();
-      if (remoteCol.length === 0 && localCol.length > 0) {
-        this.pushCollectionToTurso(vaultId, localCol);
-      } else if (remoteCol.length > 0) {
-        saveLocalCollection(remoteCol);
-        this.colListeners.forEach((cb) => cb(remoteCol));
-      }
-
+      this.notifyDecks();
+      this.notifyBinders();
       this.setStatus('synced');
     } catch (e: any) {
-      console.error('Turso sync error:', e);
+      console.error('[StorageService] Error syncing with remote API:', e);
       this.setStatus('offline', e?.message);
     }
   }
@@ -585,13 +100,12 @@ export class StorageService {
   private static initSync() {
     if (this.hasInitialized) return;
     this.hasInitialized = true;
-    this.syncWithTurso();
+    this.syncWithRemote();
   }
 
   static subscribeDecks(onUpdate: (decks: Deck[]) => void): Unsubscribe {
     this.deckListeners.add(onUpdate);
-    const localDecks = loadLocalDecks();
-    onUpdate(localDecks);
+    onUpdate([...this.inMemoryDecks]);
     this.initSync();
 
     return () => {
@@ -599,21 +113,9 @@ export class StorageService {
     };
   }
 
-  static subscribeCollection(onUpdate: (cards: CollectionCard[]) => void): Unsubscribe {
-    this.colListeners.add(onUpdate);
-    const localCollection = loadLocalCollection();
-    onUpdate(localCollection);
-    this.initSync();
-
-    return () => {
-      this.colListeners.delete(onUpdate);
-    };
-  }
-
   static subscribeBinders(onUpdate: (binders: Binder[]) => void): Unsubscribe {
     this.binderListeners.add(onUpdate);
-    const localBinders = loadLocalBinders();
-    onUpdate(localBinders);
+    onUpdate([...this.inMemoryBinders]);
     this.initSync();
 
     return () => {
@@ -621,86 +123,94 @@ export class StorageService {
     };
   }
 
-  static getLocalCollection(): CollectionCard[] {
-    return loadLocalCollection();
+  static subscribeCollection(onUpdate: (cards: CollectionCard[]) => void): Unsubscribe {
+    this.colListeners.add(onUpdate);
+    onUpdate(this.getCollectionFromBinders(this.inMemoryBinders));
+    this.initSync();
+
+    return () => {
+      this.colListeners.delete(onUpdate);
+    };
   }
 
   static getLocalDecks(): Deck[] {
-    return loadLocalDecks();
+    return [...this.inMemoryDecks];
   }
 
-  private static async pushBindersToTurso(vaultId: string, binders: Binder[]) {
-    for (const binder of binders) {
-      try {
-        await fetch(`/api/storage/${vaultId}/binders/${binder.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(binder),
-        });
-      } catch (e) {
-        // Silent local fallback
-      }
+  static getLocalBinders(): Binder[] {
+    return [...this.inMemoryBinders];
+  }
+
+  static getLocalCollection(): CollectionCard[] {
+    return this.getCollectionFromBinders(this.inMemoryBinders);
+  }
+
+  /**
+   * Save or update a Deck on the remote server
+   */
+  static async saveDeck(deck: Deck): Promise<void> {
+    const updated: Deck = {
+      ...deck,
+      updatedAt: Date.now(),
+    };
+
+    const idx = this.inMemoryDecks.findIndex((d) => d.id === updated.id);
+    if (idx >= 0) {
+      this.inMemoryDecks[idx] = updated;
+    } else {
+      this.inMemoryDecks.unshift(updated);
     }
-  }
+    this.notifyDecks();
 
-  private static async pushDecksToTurso(vaultId: string, decks: Deck[]) {
-    for (const deck of decks) {
-      try {
-        await fetch(`/api/storage/${vaultId}/decks/${deck.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(deck),
-        });
-      } catch (e) {
-        // Silent local fallback
-      }
-    }
-  }
-
-  private static async pushCollectionToTurso(vaultId: string, cards: CollectionCard[]) {
-    for (const card of cards) {
-      try {
-        await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(card),
-        });
-      } catch (e) {
-        // Silent local fallback
-      }
+    this.setStatus('syncing');
+    const ok = await saveRemoteDeck(updated);
+    if (ok) {
+      this.setStatus('synced');
+    } else {
+      this.setStatus('offline');
     }
   }
 
   /**
-   * Save or update a Binder
+   * Delete a deck from the remote server
+   */
+  static async deleteDeck(deckId: string): Promise<void> {
+    this.inMemoryDecks = this.inMemoryDecks.filter((d) => d.id !== deckId);
+    this.notifyDecks();
+
+    this.setStatus('syncing');
+    const ok = await deleteRemoteDeck(deckId);
+    if (ok) {
+      this.setStatus('synced');
+    } else {
+      this.setStatus('offline');
+    }
+  }
+
+  /**
+   * Save or update a Binder on the remote server
    */
   static async saveBinder(binder: Binder): Promise<void> {
     const updated: Binder = {
       ...binder,
+      cards: binder.cards || [],
       updatedAt: Date.now(),
     };
-    const local = loadLocalBinders();
-    const idx = local.findIndex((b) => b.id === updated.id);
-    if (idx >= 0) {
-      local[idx] = updated;
-    } else {
-      local.unshift(updated);
-    }
-    saveLocalBinders(local);
-    this.binderListeners.forEach((cb) => cb(local));
 
-    try {
-      const vaultId = getCurrentVaultId();
-      const res = await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (res.ok) {
-        this.setStatus('synced');
-      }
-    } catch (e) {
-      // Local cache remains intact
+    const idx = this.inMemoryBinders.findIndex((b) => b.id === updated.id);
+    if (idx >= 0) {
+      this.inMemoryBinders[idx] = updated;
+    } else {
+      this.inMemoryBinders.unshift(updated);
+    }
+    this.notifyBinders();
+
+    this.setStatus('syncing');
+    const ok = await saveRemoteBinder(updated);
+    if (ok) {
+      this.setStatus('synced');
+    } else {
+      this.setStatus('offline');
     }
   }
 
@@ -712,7 +222,7 @@ export class StorageService {
       id: `binder-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       name: name.trim(),
       description: description?.trim() || '',
-      cardCount: 0,
+      cards: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -721,124 +231,69 @@ export class StorageService {
   }
 
   /**
-   * Delete a binder
+   * Delete a binder from the remote server
    */
   static async deleteBinder(binderId: string): Promise<void> {
-    const local = loadLocalBinders().filter((b) => b.id !== binderId);
-    saveLocalBinders(local);
-    this.binderListeners.forEach((cb) => cb(local));
+    this.inMemoryBinders = this.inMemoryBinders.filter((b) => b.id !== binderId);
+    this.notifyBinders();
 
-    try {
-      const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/binders/${binderId}`, { method: 'DELETE' });
-    } catch (e) {
-      // Local cache remains intact
+    this.setStatus('syncing');
+    const ok = await deleteRemoteBinder(binderId);
+    if (ok) {
+      this.setStatus('synced');
+    } else {
+      this.setStatus('offline');
     }
   }
 
   /**
-   * Save or update a Deck
+   * Add or update a card inside its binder
    */
-  static async saveDeck(deck: Deck): Promise<void> {
-    const updated: Deck = {
-      ...deck,
+  static async saveCollectionCard(card: CollectionCard): Promise<void> {
+    let targetBinder = this.inMemoryBinders.find((b) => b.id === (card.binderId || 'binder-main'));
+    if (!targetBinder) {
+      if (this.inMemoryBinders.length > 0) {
+        targetBinder = this.inMemoryBinders[0];
+      } else {
+        targetBinder = await this.createBinder('Main Binder', 'Primary collection binder');
+      }
+    }
+
+    const currentCards = [...(targetBinder.cards || [])];
+    const idx = currentCards.findIndex((c) => c.id === card.id);
+    if (idx >= 0) {
+      currentCards[idx] = card;
+    } else {
+      currentCards.unshift(card);
+    }
+
+    const updatedBinder: Binder = {
+      ...targetBinder,
+      cards: currentCards,
+      cardCount: currentCards.reduce((acc, c) => acc + c.quantity, 0),
       updatedAt: Date.now(),
     };
 
-    const local = loadLocalDecks();
-    const idx = local.findIndex((d) => d.id === updated.id);
-    if (idx >= 0) {
-      local[idx] = updated;
-    } else {
-      local.unshift(updated);
-    }
-    saveLocalDecks(local);
-    this.deckListeners.forEach((cb) => cb(local));
-
-    try {
-      this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
-      const res = await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (res.ok) {
-        this.setStatus('synced');
-      }
-    } catch (e) {
-      // Local cache remains intact
-      this.setStatus('local');
-    }
+    await this.saveBinder(updatedBinder);
   }
 
   /**
-   * Delete a deck
-   */
-  static async deleteDeck(deckId: string): Promise<void> {
-    const local = loadLocalDecks().filter((d) => d.id !== deckId);
-    saveLocalDecks(local);
-    this.deckListeners.forEach((cb) => cb(local));
-
-    try {
-      this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
-      const res = await fetch(`/api/storage/${vaultId}/decks/${deckId}`, { method: 'DELETE' });
-      if (res.ok) {
-        this.setStatus('synced');
-      }
-    } catch (e) {
-      this.setStatus('local');
-    }
-  }
-
-  /**
-   * Add or update a card in collection
-   */
-  static async saveCollectionCard(card: CollectionCard): Promise<void> {
-    const local = loadLocalCollection();
-    const idx = local.findIndex((c) => c.id === card.id);
-    if (idx >= 0) {
-      local[idx] = card;
-    } else {
-      local.unshift(card);
-    }
-    saveLocalCollection(local);
-    this.colListeners.forEach((cb) => cb(local));
-
-    try {
-      this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
-      const res = await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(card),
-      });
-      if (res.ok) {
-        this.setStatus('synced');
-      }
-    } catch (e) {
-      this.setStatus('local');
-    }
-  }
-
-  /**
-   * Remove a card from collection
+   * Remove a card from its binder
    */
   static async deleteCollectionCard(cardId: string): Promise<void> {
-    const local = loadLocalCollection().filter((c) => c.id !== cardId);
-    saveLocalCollection(local);
-    this.colListeners.forEach((cb) => cb(local));
-
-    try {
-      this.setStatus('syncing');
-      const vaultId = getCurrentVaultId();
-      const res = await fetch(`/api/storage/${vaultId}/collection/${cardId}`, { method: 'DELETE' });
-      if (res.ok) {
-        this.setStatus('synced');
+    for (const binder of this.inMemoryBinders) {
+      const cards = binder.cards || [];
+      if (cards.some((c) => c.id === cardId)) {
+        const updatedCards = cards.filter((c) => c.id !== cardId);
+        const updatedBinder: Binder = {
+          ...binder,
+          cards: updatedCards,
+          cardCount: updatedCards.reduce((acc, c) => acc + c.quantity, 0),
+          updatedAt: Date.now(),
+        };
+        await this.saveBinder(updatedBinder);
+        break;
       }
-    } catch (e) {
-      this.setStatus('local');
     }
   }
 
@@ -871,12 +326,11 @@ export class StorageService {
     };
 
     await this.saveDeck(updatedDeck);
-    this.setStatus('synced');
     return updatedDeck;
   }
 
   /**
-   * Real-time refresh prices for all cards in collection
+   * Real-time refresh prices for all cards in binders
    */
   static async refreshCollectionPrices(cards: CollectionCard[]): Promise<CollectionCard[]> {
     const scryfallIds = cards.map((c) => c.scryfallId).filter(Boolean);
@@ -885,18 +339,30 @@ export class StorageService {
     this.setStatus('syncing');
     const priceMap = await fetchBatchCardPrices(scryfallIds);
 
-    const updatedList: CollectionCard[] = [];
-    for (const item of cards) {
-      const fresh = priceMap.get(item.scryfallId);
-      const updatedItem: CollectionCard = {
-        ...item,
-        currentPriceUsd: fresh?.usd !== undefined ? fresh.usd : item.currentPriceUsd,
-      };
-      updatedList.push(updatedItem);
-      await this.saveCollectionCard(updatedItem);
+    for (const binder of this.inMemoryBinders) {
+      if (!binder.cards || binder.cards.length === 0) continue;
+      let hasChanges = false;
+      const updatedCards = binder.cards.map((item) => {
+        const fresh = priceMap.get(item.scryfallId);
+        if (fresh) {
+          hasChanges = true;
+          return {
+            ...item,
+            currentPriceUsd: fresh.usd !== undefined ? fresh.usd : item.currentPriceUsd,
+          };
+        }
+        return item;
+      });
+
+      if (hasChanges) {
+        await this.saveBinder({
+          ...binder,
+          cards: updatedCards,
+          updatedAt: Date.now(),
+        });
+      }
     }
 
-    this.setStatus('synced');
-    return updatedList;
+    return this.getLocalCollection();
   }
 }

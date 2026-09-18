@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, initDb } from './server/db';
 
 const REMOTE_API_BASE = process.env.API_BASE_URL || 'https://mtgappsapi.azurewebsites.net';
 
@@ -9,76 +8,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   
-  // Need to increase payload limits for large deck objects
   app.use(express.json({ limit: '10mb' }));
-
-  // Initialize Turso DB
-  await initDb().catch(console.error);
-
-  // Turso API routes
-  // 1. GET all data for a vault
-  app.get('/api/storage/:vaultId/all', async (req, res) => {
-    const { vaultId } = req.params;
-    try {
-      const [decksRes, bindersRes, collectionRes] = await Promise.all([
-        db.execute({ sql: 'SELECT data FROM turso_decks WHERE vault_id = ?', args: [vaultId] }),
-        db.execute({ sql: 'SELECT data FROM turso_binders WHERE vault_id = ?', args: [vaultId] }),
-        db.execute({ sql: 'SELECT data FROM turso_collection WHERE vault_id = ?', args: [vaultId] }),
-      ]);
-      
-      const decks = decksRes.rows.map(r => JSON.parse(r.data as string));
-      const binders = bindersRes.rows.map(r => JSON.parse(r.data as string));
-      const collection = collectionRes.rows.map(r => JSON.parse(r.data as string));
-      
-      res.json({ decks, binders, collection });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // 2. Write operations
-  // Save a document
-  app.post('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
-    const { vaultId, collectionId, docId } = req.params;
-    const data = req.body;
-    try {
-      const tableName = `turso_${collectionId}`;
-      if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
-         return res.status(400).json({ error: 'Invalid collection' });
-      }
-      
-      await db.execute({
-        sql: `INSERT INTO ${tableName} (id, vault_id, data) VALUES (?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET data = excluded.data, vault_id = excluded.vault_id`,
-        args: [docId, vaultId, JSON.stringify(data)]
-      });
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Delete a document
-  app.delete('/api/storage/:vaultId/:collectionId/:docId', async (req, res) => {
-    const { vaultId, collectionId, docId } = req.params;
-    try {
-      const tableName = `turso_${collectionId}`;
-      if (!['turso_decks', 'turso_binders', 'turso_collection'].includes(tableName)) {
-         return res.status(400).json({ error: 'Invalid collection' });
-      }
-      
-      await db.execute({
-        sql: `DELETE FROM ${tableName} WHERE id = ? AND vault_id = ?`,
-        args: [docId, vaultId]
-      });
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
-    }
-  });
 
   // Proxy route for mtgappsapi.azurewebsites.net endpoints
   app.use(['/mtgtools', '/deckbuilder'], async (req, res) => {
@@ -88,7 +18,7 @@ async function startServer() {
         'Accept': 'application/json',
       };
       if (req.headers['content-type']) {
-        headers['Content-Type'] = req.headers['content-type'];
+        headers['Content-Type'] = req.headers['content-type'] as string;
       }
 
       const response = await fetch(targetUrl, {
@@ -132,7 +62,7 @@ async function startServer() {
     }
   });
 
-  // Proxy route for Scryfall API to bypass browser CORS / Adblockers
+  // Proxy route for Scryfall API
   app.use('/api/scryfall', async (req, res) => {
     try {
       const targetUrl = `https://api.scryfall.com${req.url}`;
@@ -140,8 +70,8 @@ async function startServer() {
       const response = await fetch(targetUrl, {
         method: req.method,
         headers: {
-          'User-Agent': 'AIStudioDeckBuilder/1.0',
-          'Accept': 'application/json',
+          'User-Agent': 'MtgDeckBuilderAndCollectionTracker/1.0 (https://github.com/steiny58mn/MtgDeckBuilderAndCollectionTracker)',
+          'Accept': 'application/json;q=0.9,*/*;q=0.8',
           ...(req.method === 'POST' ? { 'Content-Type': 'application/json' } : {})
         },
         body: req.method === 'POST' ? JSON.stringify(req.body) : undefined

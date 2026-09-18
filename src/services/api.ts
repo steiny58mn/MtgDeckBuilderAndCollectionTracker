@@ -3,6 +3,8 @@
  * Connects to Magic: The Gathering C# Web API Backend at mtgappsapi.azurewebsites.net
  */
 
+import { Deck, Binder } from '../types/mtg';
+
 const STORAGE_API_BASE_KEY = 'mtg_custom_api_base_url';
 
 export const DEFAULT_API_BASE_URL = 
@@ -129,29 +131,6 @@ export async function getApiHealth(): Promise<ApiHealthResponse | null> {
 }
 
 /**
- * Fetch list of valid deck color combinations from backend
- */
-export async function getDeckColors(): Promise<string[]> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/deckcolors` : '/mtgtools/deckcolors';
-  try {
-    const res = await fetch(targetUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn('[API] Error fetching deck colors:', err);
-    return [
-      'Colorless', 'White', 'Blue', 'Black', 'Red', 'Green',
-      'Azorius', 'Dimir', 'Rakdos', 'Gruul', 'Selesnya',
-      'Orzhov', 'Izzet', 'Golgari', 'Boros', 'Simic',
-      'Esper', 'Grixis', 'Jund', 'Naya', 'Bant',
-      'Abzan', 'Jeskai', 'Sultai', 'Mardu', 'Temur',
-      'WUBR', 'UBRG', 'WBRG', 'WURG', 'WUBG', 'WUBRG'
-    ];
-  }
-}
-
-/**
  * Check Turso database connection status on backend
  */
 export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
@@ -168,15 +147,19 @@ export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
 }
 
 /**
- * Fetch decks from deck builder endpoint
+ * Fetch decks from remote C# API (/deckbuilder/decks)
  */
-export async function getRemoteDecks(): Promise<any[]> {
+export async function getRemoteDecks(): Promise<Deck[]> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks';
   try {
     const res = await fetch(targetUrl);
-    if (!res.ok) return [];
-    return await res.json();
+    if (!res.ok) {
+      console.warn(`[API] getRemoteDecks returned status ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch (err) {
     console.warn('[API] Error fetching decks:', err);
     return [];
@@ -184,59 +167,95 @@ export async function getRemoteDecks(): Promise<any[]> {
 }
 
 /**
- * Fetch card collection from deck builder endpoint
+ * Save/upsert deck to remote C# API (POST /deckbuilder/decks)
  */
-export async function getRemoteCollection(): Promise<any[]> {
+export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/collection` : '/deckbuilder/collection';
+  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks';
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(deck),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[API] Error saving remote deck:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete deck from remote C# API (DELETE /deckbuilder/decks/{id})
+ */
+export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
+  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks/${deckId}` : `/deckbuilder/decks/${deckId}`;
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[API] Error deleting remote deck:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetch binders from remote C# API (/deckbuilder/binders)
+ */
+export async function getRemoteBinders(): Promise<Binder[]> {
+  const baseUrl = getApiBaseUrl();
+  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
   try {
     const res = await fetch(targetUrl);
-    if (!res.ok) return [];
-    return await res.json();
+    if (!res.ok) {
+      console.warn(`[API] getRemoteBinders returned status ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch (err) {
-    console.warn('[API] Error fetching collection:', err);
+    console.warn('[API] Error fetching binders:', err);
     return [];
   }
 }
 
 /**
- * Parse MTGO Game Log using backend parser
+ * Save/upsert binder to remote C# API (POST /deckbuilder/binders)
  */
-export async function parseMtgoGameLog(file: File | Blob): Promise<string> {
+export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/parsemtgolog` : '/mtgtools/parsemtgolog';
-  const formData = new FormData();
-  formData.append('file', file, 'gamelog.txt');
-
-  const res = await fetch(targetUrl, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to parse MTGO log (HTTP ${res.status})`);
+  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(binder),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[API] Error saving remote binder:', err);
+    return false;
   }
-  return await res.text();
 }
 
 /**
- * Compare two deck files using backend comparator
+ * Delete binder from remote C# API (DELETE /deckbuilder/binders/{id})
  */
-export async function compareDeckFiles(file: File | Blob): Promise<any> {
+export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/comparefiles` : '/mtgtools/comparefiles';
-  const formData = new FormData();
-  formData.append('file', file, 'decks.txt');
-
-  const res = await fetch(targetUrl, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to compare deck files (HTTP ${res.status})`);
+  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders/${binderId}` : `/deckbuilder/binders/${binderId}`;
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[API] Error deleting remote binder:', err);
+    return false;
   }
-  return await res.json();
 }
 
 /**
@@ -249,50 +268,32 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
   const testConfigs = [
     {
       id: 'health',
-      name: 'API Root & Health Check',
+      name: 'API Root & Health Check (GET /)',
       url: baseUrl ? `${baseUrl}/` : '/',
       method: 'GET',
     },
     {
       id: 'turso_status',
-      name: 'Turso DB Status (/mtgtools/turso/status)',
+      name: 'Turso DB Status (GET /mtgtools/turso/status)',
       url: baseUrl ? `${baseUrl}/mtgtools/turso/status` : '/mtgtools/turso/status',
       method: 'GET',
     },
     {
-      id: 'deck_colors',
-      name: 'Deck Colors Endpoint (/mtgtools/deckcolors)',
-      url: baseUrl ? `${baseUrl}/mtgtools/deckcolors` : '/mtgtools/deckcolors',
-      method: 'GET',
-    },
-    {
       id: 'deckbuilder_decks',
-      name: 'Remote Decks Endpoint (/deckbuilder/decks)',
+      name: 'Remote Decks Endpoint (GET /deckbuilder/decks)',
       url: baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks',
       method: 'GET',
     },
     {
-      id: 'deckbuilder_col',
-      name: 'Remote Collection Endpoint (/deckbuilder/collection)',
-      url: baseUrl ? `${baseUrl}/deckbuilder/collection` : '/deckbuilder/collection',
+      id: 'deckbuilder_binders',
+      name: 'Remote Binders Endpoint (GET /deckbuilder/binders)',
+      url: baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders',
       method: 'GET',
     },
     {
-      id: 'local_storage',
-      name: 'Turso Local Vault Sync (/api/storage/test/all)',
-      url: '/api/storage/TEST-VAULT/all',
-      method: 'GET',
-    },
-    {
-      id: 'scryfall_proxy',
-      name: 'Scryfall Proxy (/api/scryfall/cards/random)',
-      url: '/api/scryfall/cards/random',
-      method: 'GET',
-    },
-    {
-      id: 'edhrec_proxy',
-      name: 'EDHREC Proxy (/api/edhrec/pages/commanders/atraxa-praetors-voice.json)',
-      url: '/api/edhrec/pages/commanders/atraxa-praetors-voice.json',
+      id: 'scryfall_direct',
+      name: 'Scryfall Direct API (GET https://api.scryfall.com/cards/random)',
+      url: 'https://api.scryfall.com/cards/random',
       method: 'GET',
     },
   ];
@@ -351,6 +352,15 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
         preview,
       });
 
+      let errorDetails: string | undefined = undefined;
+      if (!isSuccess) {
+        if (res.status === 429) {
+          errorDetails = `Scryfall Rate Limited (HTTP 429)`;
+        } else {
+          errorDetails = `Server returned HTTP status ${res.status} ${res.statusText}`;
+        }
+      }
+
       results.push({
         id: test.id,
         name: test.name,
@@ -360,7 +370,7 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
         statusText: res.statusText,
         durationMs,
         responsePreview: preview,
-        errorDetails: !isSuccess ? `Server returned HTTP status ${res.status} ${res.statusText}` : undefined,
+        errorDetails,
       });
     }
   }

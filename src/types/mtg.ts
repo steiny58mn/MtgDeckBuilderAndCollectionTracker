@@ -117,16 +117,6 @@ export interface Deck {
   tags?: string[];
 }
 
-export interface Binder {
-  id: string;
-  name: string;
-  description?: string;
-  cardCount?: number;
-  coverCardUrl?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export type CardCondition = 'NM' | 'LP' | 'MP' | 'HP' | 'DMG';
 
 export interface CollectionCard {
@@ -151,6 +141,17 @@ export interface CollectionCard {
   currentPriceUsd?: number;
   addedAt: number;
   notes?: string;
+}
+
+export interface Binder {
+  id: string;
+  name: string;
+  description?: string;
+  cardCount?: number;
+  coverCardUrl?: string;
+  cards: CollectionCard[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ManaCurvePoint {

@@ -8,7 +8,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
-import { SyncStatus, getCurrentVaultId } from '../services/storage';
+import { SyncStatus } from '../services/storage';
 
 interface NavbarProps {
   activeTab: 'decks' | 'collection' | 'search';
@@ -35,8 +35,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSyncModal,
   onOpenDiagnostics,
 }) => {
-  const currentVaultId = getCurrentVaultId();
-
   return (
     <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-xl border-b border-indigo-500/20 shadow-lg shadow-indigo-500/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -57,7 +55,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ScrySync
                 </span>
                 <span className="text-[10px] uppercase tracking-widest text-violet-400/90 font-bold block -mt-0.5">
-                  MTG Turso Studio
+                  MTG Studio
                 </span>
               </div>
             </div>
@@ -113,23 +111,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden lg:inline-block">API Diagnostics</span>
             </button>
 
-            {/* Turso Sync Status Button */}
+            {/* Backend Sync Status Button */}
             <button
               onClick={onOpenSyncModal}
               className="flex items-center gap-2 bg-slate-900 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-              title="Manage Turso Database Vault"
+              title="Remote API Connection Status"
             >
               {syncStatus === 'syncing' ? (
                 <RefreshCw className="w-3.5 h-3.5 text-fuchsia-400 animate-spin" />
               ) : syncStatus === 'synced' ? (
                 <Database className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <Database className="w-3.5 h-3.5 text-slate-400" />
+                <Database className="w-3.5 h-3.5 text-rose-400" />
               )}
               
               <span className="hidden sm:inline-block">
-                <span className="text-slate-400">Turso: </span>
-                <span className="text-fuchsia-400 font-mono">{currentVaultId.substring(0, 8)}</span>
+                <span className="text-slate-400">Server: </span>
+                <span className={syncStatus === 'synced' ? 'text-emerald-400' : 'text-slate-300'}>
+                  {syncStatus === 'synced' ? 'Connected' : syncStatus === 'syncing' ? 'Syncing...' : 'Offline'}
+                </span>
               </span>
               
               {syncStatus === 'synced' && (
