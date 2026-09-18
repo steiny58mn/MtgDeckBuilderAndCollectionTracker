@@ -3,6 +3,8 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { db, initDb } from './server/db.js';
 
+const REMOTE_API_BASE = process.env.API_BASE_URL || 'https://mtgappsapi.azurewebsites.net';
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -78,10 +80,61 @@ async function startServer() {
     }
   });
 
+  // Proxy route for mtgappsapi.azurewebsites.net endpoints
+  app.use(['/mtgtools', '/deckbuilder'], async (req, res) => {
+    try {
+      const targetUrl = `${REMOTE_API_BASE}${req.originalUrl || req.url}`;
+      const headers: Record<string, string> = {
+        'Accept': 'application/json',
+      };
+      if (req.headers['content-type']) {
+        headers['Content-Type'] = req.headers['content-type'];
+      }
+
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers,
+        body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+      });
+
+      const contentType = response.headers.get('content-type') || 'application/json';
+      const data = await response.text();
+
+      res.status(response.status);
+      res.set('Content-Type', contentType);
+      res.send(data);
+    } catch (error: any) {
+      console.error('Remote API Proxy Error:', error);
+      res.status(500).json({ error: 'Failed to proxy request to remote API', details: error.message });
+    }
+  });
+
+  // Proxy route for EDHREC API
+  app.use('/api/edhrec', async (req, res) => {
+    try {
+      const targetUrl = `https://json.edhrec.com${req.url}`;
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).json({ error: `EDHREC responded with ${response.status}` });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to proxy request to EDHREC', details: error.message });
+    }
+  });
+
   // Proxy route for Scryfall API to bypass browser CORS / Adblockers
   app.use('/api/scryfall', async (req, res) => {
     try {
-      // Reconstruct the target URL
       const targetUrl = `https://api.scryfall.com${req.url}`;
       
       const response = await fetch(targetUrl, {
@@ -120,7 +173,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT} (proxying remote endpoints to ${REMOTE_API_BASE})`);
   });
 }
 

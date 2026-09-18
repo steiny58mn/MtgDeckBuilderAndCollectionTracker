@@ -1,0 +1,7 @@
+﻿<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Dev &amp; Debug in Chrome" type="CompoundRunConfigurationType">
+    <toRun name="Dev Server" type="js.build_tools.npm" />
+    <toRun name="Debug in Chrome" type="JavascriptDebugType" />
+    <method v="2" />
+  </configuration>
+</component>

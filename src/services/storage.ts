@@ -1,9 +1,8 @@
 type Unsubscribe = () => void;
 
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, ensureAuthUser } from '../lib/firebase';
 import { Deck, CollectionCard, DeckCard, Binder } from '../types/mtg';
 import { fetchBatchCardPrices } from './scryfall';
+import { API_BASE_URL, getRemoteDecks, getRemoteCollection, getTursoStatus, TursoStatusResponse } from './api';
 
 const VAULT_KEY_STORAGE = 'mtg_cloud_vault_id';
 const LOCAL_DECKS_KEY = 'mtg_local_decks_cache';
@@ -305,7 +304,7 @@ export const SAMPLE_DECKS: Deck[] = [
         colors: [],
         color_identity: ['R'],
         rarity: 'common',
-        imageUrl: 'https://cards.scryfall.io/normal/front/4/2/42232ea6-e31d-46a6-9f94-b2ad2416d79b.jpg',
+        imageUrl: 'https://cards.scryfall.io/normal/front/4/42232ea6-e31d-46a6-9f94-b2ad2416d79b.jpg',
         priceUsd: 0.15,
       },
       {
@@ -468,18 +467,16 @@ function saveLocalBinders(binders: Binder[]) {
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'local' | 'error';
 
 /**
- * Cloud Storage Manager with Real-Time Listeners & Local Fallback
+ * Turso Cloud Storage Manager & Real-Time Sync
+ * Connects directly to Turso DB & mtgappsapi.azurewebsites.net
  */
 export class StorageService {
   private static statusListeners: Set<(status: SyncStatus, error?: string) => void> = new Set();
-  private static currentStatus: SyncStatus = 'local';
-  private static activeDecksUnsub: Unsubscribe | null = null;
-  private static activeColUnsub: Unsubscribe | null = null;
-  private static activeBindersUnsub: Unsubscribe | null = null;
+  private static currentStatus: SyncStatus = 'syncing';
   private static deckListeners: Set<(decks: Deck[]) => void> = new Set();
   private static colListeners: Set<(cards: CollectionCard[]) => void> = new Set();
   private static binderListeners: Set<(binders: Binder[]) => void> = new Set();
-  private static authWatcherInitialized = false;
+  private static hasInitialized = false;
 
   static onSyncStatusChange(callback: (status: SyncStatus, error?: string) => void): () => void {
     this.statusListeners.add(callback);
@@ -496,121 +493,133 @@ export class StorageService {
     return this.currentStatus;
   }
 
-  private static initAuthWatcher() {
-    if (this.authWatcherInitialized) return;
-    this.authWatcherInitialized = true;
-
-    onAuthStateChanged(auth, (user) => {
-      if (user) {
-        // User logged in: connect real-time Firestore listeners
-        this.reconnectFirestoreListeners();
-      } else {
-        // User logged out: detach cloud listeners and revert to local storage
-        if (this.activeDecksUnsub) { this.activeDecksUnsub(); this.activeDecksUnsub = null; }
-        if (this.activeColUnsub) { this.activeColUnsub(); this.activeColUnsub = null; }
-        if (this.activeBindersUnsub) { this.activeBindersUnsub(); this.activeBindersUnsub = null; }
-        this.setStatus('local');
-      }
-    });
-  }
-
-  private static async reconnectFirestoreListeners() {
+  /**
+   * Synchronize all decks, binders, and collection items with Turso backend
+   */
+  public static async syncWithTurso(): Promise<void> {
     const vaultId = getCurrentVaultId();
-    if (!auth.currentUser) return;
-    
+    this.setStatus('syncing');
+
     try {
-      this.setStatus('syncing');
-      const res = await fetch(`/api/storage/${vaultId}/all`);
-      if (!res.ok) throw new Error('Failed to fetch data');
-      const data = await res.json();
-      
-      const { decks, binders, collection } = data;
-      
-      // Merge with local if empty remotely (basic sync)
+      let remoteDecks: Deck[] = [];
+      let remoteCol: CollectionCard[] = [];
+      let remoteBinders: Binder[] = [];
+      let hasRemoteData = false;
+
+      // 1. Fetch from Turso vault storage endpoint
+      try {
+        const res = await fetch(`/api/storage/${vaultId}/all`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.decks) && data.decks.length > 0) {
+            remoteDecks = data.decks;
+            hasRemoteData = true;
+          }
+          if (Array.isArray(data.binders) && data.binders.length > 0) {
+            remoteBinders = data.binders;
+            hasRemoteData = true;
+          }
+          if (Array.isArray(data.collection) && data.collection.length > 0) {
+            remoteCol = data.collection;
+            hasRemoteData = true;
+          }
+        }
+      } catch (err) {
+        console.warn('Local Turso API fetch error, checking remote mtgappsapi:', err);
+      }
+
+      // 2. Fallback / supplementary check from mtgappsapi /deckbuilder endpoints
+      if (!hasRemoteData) {
+        try {
+          const [decks, col] = await Promise.all([
+            getRemoteDecks(),
+            getRemoteCollection(),
+          ]);
+          if (Array.isArray(decks) && decks.length > 0) {
+            remoteDecks = decks;
+            hasRemoteData = true;
+          }
+          if (Array.isArray(col) && col.length > 0) {
+            remoteCol = col;
+            hasRemoteData = true;
+          }
+        } catch (err) {
+          console.warn('mtgappsapi remote endpoint fetch note:', err);
+        }
+      }
+
+      // Merge / sync Decks
       const localDecks = loadLocalDecks();
-      if (decks.length === 0 && localDecks.length > 0) {
-         this.pushDecksToCloud(vaultId, localDecks);
-      } else {
-         saveLocalDecks(decks);
-         this.deckListeners.forEach(cb => cb(decks));
+      if (remoteDecks.length === 0 && localDecks.length > 0) {
+        this.pushDecksToTurso(vaultId, localDecks);
+      } else if (remoteDecks.length > 0) {
+        saveLocalDecks(remoteDecks);
+        this.deckListeners.forEach((cb) => cb(remoteDecks));
       }
 
+      // Merge / sync Binders
       const localBinders = loadLocalBinders();
-      if (binders.length === 0 && localBinders.length > 0) {
-         this.pushBindersToCloud(vaultId, localBinders);
-      } else if (binders.length > 0) {
-         saveLocalBinders(binders);
-         this.binderListeners.forEach(cb => cb(binders));
+      if (remoteBinders.length === 0 && localBinders.length > 0) {
+        this.pushBindersToTurso(vaultId, localBinders);
+      } else if (remoteBinders.length > 0) {
+        saveLocalBinders(remoteBinders);
+        this.binderListeners.forEach((cb) => cb(remoteBinders));
       }
 
-      const localCollection = loadLocalCollection();
-      if (collection.length === 0 && localCollection.length > 0) {
-         this.pushCollectionToCloud(vaultId, localCollection);
-      } else {
-         saveLocalCollection(collection);
-         this.colListeners.forEach(cb => cb(collection));
+      // Merge / sync Collection
+      const localCol = loadLocalCollection();
+      if (remoteCol.length === 0 && localCol.length > 0) {
+        this.pushCollectionToTurso(vaultId, localCol);
+      } else if (remoteCol.length > 0) {
+        saveLocalCollection(remoteCol);
+        this.colListeners.forEach((cb) => cb(remoteCol));
       }
-      
+
       this.setStatus('synced');
-    } catch (e) {
-      console.error(e);
-      this.setStatus('offline');
+    } catch (e: any) {
+      console.error('Turso sync error:', e);
+      this.setStatus('offline', e?.message);
     }
   }
 
-  
-  static subscribeDecks(onUpdate: (decks: Deck[]) => void): Unsubscribe {
-    this.initAuthWatcher();
-    this.deckListeners.add(onUpdate);
+  private static initSync() {
+    if (this.hasInitialized) return;
+    this.hasInitialized = true;
+    this.syncWithTurso();
+  }
 
+  static subscribeDecks(onUpdate: (decks: Deck[]) => void): Unsubscribe {
+    this.deckListeners.add(onUpdate);
     const localDecks = loadLocalDecks();
     onUpdate(localDecks);
-
-    ensureAuthUser().then((user) => {
-      if (!user) {
-        this.setStatus('local');
-        return;
-      }
-      this.reconnectFirestoreListeners();
-    });
+    this.initSync();
 
     return () => {
       this.deckListeners.delete(onUpdate);
-      if (this.deckListeners.size === 0 && this.activeDecksUnsub) {
-        this.activeDecksUnsub();
-        this.activeDecksUnsub = null;
-      }
     };
   }
 
-  private static async pushBindersToCloud(vaultId: string, binders: Binder[]) {
-    try {
-      for (const binder of binders) {
-        await fetch(`/api/storage/${vaultId}/binders/${binder.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(binder)
-        });
-      }
-    } catch (e) {
-      console.error('Failed to push binders to cloud', e);
-    }
+  static subscribeCollection(onUpdate: (cards: CollectionCard[]) => void): Unsubscribe {
+    this.colListeners.add(onUpdate);
+    const localCollection = loadLocalCollection();
+    onUpdate(localCollection);
+    this.initSync();
+
+    return () => {
+      this.colListeners.delete(onUpdate);
+    };
   }
 
-private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
-    try {
-      for (const deck of decks) {
-        await fetch(`/api/storage/${vaultId}/decks/${deck.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(deck)
-        });
-      }
-    } catch (e) {
-      console.error('Failed to push decks to cloud', e);
-    }
-  }
+  static subscribeBinders(onUpdate: (binders: Binder[]) => void): Unsubscribe {
+    this.binderListeners.add(onUpdate);
+    const localBinders = loadLocalBinders();
+    onUpdate(localBinders);
+    this.initSync();
 
+    return () => {
+      this.binderListeners.delete(onUpdate);
+    };
+  }
 
   static getLocalCollection(): CollectionCard[] {
     return loadLocalCollection();
@@ -620,71 +629,46 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     return loadLocalDecks();
   }
 
-  /**
-   * Subscribe to Collection Cards in the current Vault
-   */
-  static subscribeCollection(onUpdate: (cards: CollectionCard[]) => void): Unsubscribe {
-    this.initAuthWatcher();
-    this.colListeners.add(onUpdate);
-
-    const localCollection = loadLocalCollection();
-    onUpdate(localCollection);
-
-    ensureAuthUser().then((user) => {
-      if (!user) {
-        this.setStatus('local');
-        return;
+  private static async pushBindersToTurso(vaultId: string, binders: Binder[]) {
+    try {
+      for (const binder of binders) {
+        await fetch(`/api/storage/${vaultId}/binders/${binder.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(binder),
+        });
       }
-      this.reconnectFirestoreListeners();
-    });
-
-    return () => {
-      this.colListeners.delete(onUpdate);
-      if (this.colListeners.size === 0 && this.activeColUnsub) {
-        this.activeColUnsub();
-        this.activeColUnsub = null;
-      }
-    };
+    } catch (e) {
+      console.error('Failed to push binders to Turso', e);
+    }
   }
 
-  private static async pushCollectionToCloud(vaultId: string, cards: CollectionCard[]) {
+  private static async pushDecksToTurso(vaultId: string, decks: Deck[]) {
+    try {
+      for (const deck of decks) {
+        await fetch(`/api/storage/${vaultId}/decks/${deck.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(deck),
+        });
+      }
+    } catch (e) {
+      console.error('Failed to push decks to Turso', e);
+    }
+  }
+
+  private static async pushCollectionToTurso(vaultId: string, cards: CollectionCard[]) {
     try {
       for (const card of cards) {
         await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(card)
+          body: JSON.stringify(card),
         });
       }
     } catch (e) {
-      console.error('Failed to push collection to cloud', e);
+      console.error('Failed to push collection to Turso', e);
     }
-  }
-
-
-  /**
-   * Subscribe to Binders in current Vault
-   */
-  static subscribeBinders(onUpdate: (binders: Binder[]) => void): Unsubscribe {
-    this.initAuthWatcher();
-    this.binderListeners.add(onUpdate);
-
-    let localBinders = loadLocalBinders();
-    // if (localBinders.length === 0) localBinders = [DEFAULT_BINDER];
-    onUpdate(localBinders);
-
-    ensureAuthUser().then((user) => {
-      if (!user) return;
-      this.reconnectFirestoreListeners();
-    });
-
-    return () => {
-      this.binderListeners.delete(onUpdate);
-      if (this.binderListeners.size === 0 && this.activeBindersUnsub) {
-        this.activeBindersUnsub();
-        this.activeBindersUnsub = null;
-      }
-    };
   }
 
   /**
@@ -705,14 +689,16 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalBinders(local);
     this.binderListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) return;
-
     try {
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) });
+      await fetch(`/api/storage/${vaultId}/binders/${updated.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+      this.setStatus('synced');
     } catch (e) {
-      console.error('Failed to save binder', e);
+      console.error('Failed to save binder to Turso', e);
     }
   }
 
@@ -740,19 +726,16 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalBinders(local);
     this.binderListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) return;
-
     try {
       const vaultId = getCurrentVaultId();
       await fetch(`/api/storage/${vaultId}/binders/${binderId}`, { method: 'DELETE' });
     } catch (e) {
-      console.error('Failed to delete binder', e);
+      console.error('Failed to delete binder from Turso', e);
     }
   }
 
   /**
-   * Save or update a Deck (both local cache and Firestore)
+   * Save or update a Deck
    */
   static async saveDeck(deck: Deck): Promise<void> {
     const updated: Deck = {
@@ -760,7 +743,6 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
       updatedAt: Date.now(),
     };
 
-    // Update local cache immediately for zero-latency feel
     const local = loadLocalDecks();
     const idx = local.findIndex((d) => d.id === updated.id);
     if (idx >= 0) {
@@ -771,19 +753,17 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalDecks(local);
     this.deckListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) {
-      this.setStatus('local');
-      return;
-    }
-
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) });
+      await fetch(`/api/storage/${vaultId}/decks/${updated.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
       this.setStatus('synced');
     } catch (e) {
-      console.error('Failed to save deck', e);
+      console.error('Failed to save deck to Turso', e);
       this.setStatus('offline');
     }
   }
@@ -796,19 +776,13 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalDecks(local);
     this.deckListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) {
-      this.setStatus('local');
-      return;
-    }
-
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
       await fetch(`/api/storage/${vaultId}/decks/${deckId}`, { method: 'DELETE' });
       this.setStatus('synced');
     } catch (e) {
-      console.error('Failed to delete deck', e);
+      console.error('Failed to delete deck from Turso', e);
       this.setStatus('offline');
     }
   }
@@ -827,19 +801,17 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalCollection(local);
     this.colListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) {
-      this.setStatus('local');
-      return;
-    }
-
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
-      await fetch(`/api/storage/${vaultId}/collection/${card.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(card) });
+      await fetch(`/api/storage/${vaultId}/collection/${card.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(card),
+      });
       this.setStatus('synced');
     } catch (e) {
-      console.error('Failed to save collection card', e);
+      console.error('Failed to save collection card to Turso', e);
       this.setStatus('offline');
     }
   }
@@ -852,19 +824,13 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     saveLocalCollection(local);
     this.colListeners.forEach((cb) => cb(local));
 
-    const user = auth.currentUser;
-    if (!user) {
-      this.setStatus('local');
-      return;
-    }
-
     try {
       this.setStatus('syncing');
       const vaultId = getCurrentVaultId();
       await fetch(`/api/storage/${vaultId}/collection/${cardId}`, { method: 'DELETE' });
       this.setStatus('synced');
     } catch (e) {
-      console.error('Failed to delete collection card', e);
+      console.error('Failed to delete collection card from Turso', e);
       this.setStatus('offline');
     }
   }
@@ -879,11 +845,9 @@ private static async pushDecksToCloud(vaultId: string, decks: Deck[]) {
     this.setStatus('syncing');
     const priceMap = await fetchBatchCardPrices(scryfallIds);
 
-    let priceChangesCount = 0;
     const updatedCards: DeckCard[] = deck.cards.map((card) => {
       const fresh = priceMap.get(card.scryfallId);
       if (fresh) {
-        priceChangesCount++;
         return {
           ...card,
           priceUsd: fresh.usd ?? card.priceUsd,

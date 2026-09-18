@@ -1,0 +1,28 @@
+﻿{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dev & Debug in Chrome",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "serverReadyAction": {
+        "pattern": "Server running on (https?://localhost:[0-9]+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome",
+        "webRoot": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Launch Chrome (localhost:3000)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true
+    }
+  ]
+}

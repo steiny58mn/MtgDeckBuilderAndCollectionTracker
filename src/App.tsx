@@ -4,8 +4,6 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './lib/firebase';
 import { 
   Deck, 
   CollectionCard, 
@@ -15,7 +13,7 @@ import {
   DeckCard,
   Binder
 } from './types/mtg';
-import { StorageService, SyncStatus, getCurrentVaultId } from './services/storage';
+import { StorageService, SyncStatus } from './services/storage';
 import { Navbar } from './components/Navbar';
 import { DeckList } from './components/DeckList';
 import { DeckBuilder } from './components/DeckBuilder';
@@ -35,8 +33,7 @@ export default function App() {
   const [binders, setBinders] = useState<Binder[]>([]);
   const [activeBinder, setActiveBinder] = useState<Binder | null>(null);
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   
   // Modals
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
@@ -60,19 +57,10 @@ export default function App() {
     }, 4500);
   };
 
-  // Auth state listener
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // Subscribe to real-time Cloud Firestore & local cache
+  // Subscribe to Turso Database & local cache
   useEffect(() => {
     const unsubDecks = StorageService.subscribeDecks((updatedDecks) => {
       setDecks(updatedDecks);
-      // Keep active deck in sync via functional state update to avoid stale closure
       setActiveDeck(prev => {
         if (!prev) return null;
         return updatedDecks.find(d => d.id === prev.id) || prev;
@@ -410,7 +398,6 @@ export default function App() {
   };
 
   // Add card to collection binder
-  // Add card to collection binder
   const handleAddCardToCollection = async (
     card: ScryfallCard,
     quantity: number = 1,
@@ -550,14 +537,11 @@ export default function App() {
           setActiveTab('decks');
         }}
         syncStatus={syncStatus}
-        currentUser={currentUser}
         onOpenSyncModal={() => setShowSyncModal(true)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        
-
         {/* Decks Tab */}
         {activeTab === 'decks' && (
           activeDeck ? (
@@ -568,7 +552,6 @@ export default function App() {
                   await StorageService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
                 }
                 setActiveDeck(null);
-                // No longer redirecting to dashboard, we stay on 'decks' tab with activeDeck = null
               }}
               onUpdateDeck={handleUpdateDeck}
               onDeleteDeck={handleDeleteDeck}
@@ -666,12 +649,11 @@ export default function App() {
         }}
       />
 
-      {/* Cross-Device Sync Modal */}
+      {/* Turso Database Sync Modal */}
       <SyncModal
         isOpen={showSyncModal}
         onClose={() => setShowSyncModal(false)}
         syncStatus={syncStatus}
-        currentUser={currentUser}
         onVaultChanged={handleVaultChanged}
         onNotify={(msg, type) => showToast(msg, type)}
       />
