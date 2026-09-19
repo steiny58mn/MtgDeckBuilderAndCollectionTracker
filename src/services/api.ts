@@ -6,9 +6,73 @@
 import { Deck, Binder } from '../types/mtg';
 
 const STORAGE_API_BASE_KEY = 'mtg_custom_api_base_url';
+const STORAGE_VAULT_KEY = 'mtg_cloud_vault_id';
 
 export const DEFAULT_API_BASE_URL = 
   ((import.meta as any).env?.VITE_API_BASE_URL as string) || 'https://mtgappsapi.azurewebsites.net';
+
+/**
+ * Generate a randomized persistent Vault ID
+ */
+export function generateRandomVaultId(): string {
+  const rand = Math.random().toString(36).substring(2, 8);
+  return `vault-${rand}`;
+}
+
+/**
+ * Get active Vault / User ID used for backend tenant partition
+ */
+export function getVaultId(): string {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem(STORAGE_VAULT_KEY);
+    if (saved && saved.trim()) {
+      return saved.trim();
+    }
+    const newId = generateRandomVaultId();
+    localStorage.setItem(STORAGE_VAULT_KEY, newId);
+    return newId;
+  }
+  return 'vault-default';
+}
+
+/**
+ * Set active Vault / User ID
+ */
+export function setVaultId(vaultId: string): void {
+  if (typeof window !== 'undefined') {
+    const clean = vaultId.trim();
+    if (!clean) {
+      const fresh = generateRandomVaultId();
+      localStorage.setItem(STORAGE_VAULT_KEY, fresh);
+    } else {
+      localStorage.setItem(STORAGE_VAULT_KEY, clean);
+    }
+  }
+}
+
+/**
+ * Reset active Vault ID to a newly generated ID
+ */
+export function resetVaultId(): string {
+  const fresh = generateRandomVaultId();
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(STORAGE_VAULT_KEY, fresh);
+  }
+  return fresh;
+}
+
+/**
+ * Get standard headers including user / vault identification
+ */
+export function getAuthHeaders(customHeaders: Record<string, string> = {}): Record<string, string> {
+  const vaultId = getVaultId();
+  return {
+    'Accept': 'application/json',
+    'X-Vault-Id': vaultId,
+    'X-User-Id': vaultId,
+    ...customHeaders,
+  };
+}
 
 /**
  * Get active API Base URL (supports localStorage override for live deployment debugging)
@@ -121,7 +185,9 @@ export async function getApiHealth(): Promise<ApiHealthResponse | null> {
   const baseUrl = getApiBaseUrl();
   try {
     const targetUrl = baseUrl ? `${baseUrl}/` : '/';
-    const res = await fetch(targetUrl);
+    const res = await fetch(targetUrl, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -137,7 +203,9 @@ export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/mtgtools/turso/status` : '/mtgtools/turso/status';
   try {
-    const res = await fetch(targetUrl);
+    const res = await fetch(targetUrl, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -153,7 +221,9 @@ export async function getRemoteDecks(): Promise<Deck[]> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks';
   try {
-    const res = await fetch(targetUrl);
+    const res = await fetch(targetUrl, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) {
       console.warn(`[API] getRemoteDecks returned status ${res.status}`);
       return [];
@@ -175,7 +245,7 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   try {
     const res = await fetch(targetUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(deck),
     });
     return res.ok;
@@ -194,6 +264,7 @@ export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
   try {
     const res = await fetch(targetUrl, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     return res.ok;
   } catch (err) {
@@ -209,7 +280,9 @@ export async function getRemoteBinders(): Promise<Binder[]> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
   try {
-    const res = await fetch(targetUrl);
+    const res = await fetch(targetUrl, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) {
       console.warn(`[API] getRemoteBinders returned status ${res.status}`);
       return [];
@@ -231,7 +304,7 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
   try {
     const res = await fetch(targetUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(binder),
     });
     return res.ok;
@@ -250,6 +323,7 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
   try {
     const res = await fetch(targetUrl, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     return res.ok;
   } catch (err) {
@@ -264,6 +338,7 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
 export async function runFullDiagnostics(customBaseUrl?: string): Promise<DiagnosticResult[]> {
   const baseUrl = customBaseUrl !== undefined ? customBaseUrl : getApiBaseUrl();
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
+  const vaultId = getVaultId();
 
   const testConfigs = [
     {
@@ -280,13 +355,13 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
     },
     {
       id: 'deckbuilder_decks',
-      name: 'Remote Decks Endpoint (GET /deckbuilder/decks)',
+      name: `Remote Decks Endpoint [Vault: ${vaultId}] (GET /deckbuilder/decks)`,
       url: baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks',
       method: 'GET',
     },
     {
       id: 'deckbuilder_binders',
-      name: 'Remote Binders Endpoint (GET /deckbuilder/binders)',
+      name: `Remote Binders Endpoint [Vault: ${vaultId}] (GET /deckbuilder/binders)`,
       url: baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders',
       method: 'GET',
     },
@@ -298,14 +373,18 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
     },
   ];
 
-  console.groupCollapsed(`[API Diagnostics] Running tests against base: "${baseUrl || '(relative proxy)'}" (Origin: ${currentOrigin})`);
+  console.groupCollapsed(`[API Diagnostics] Running tests against base: "${baseUrl || '(relative proxy)'}" (Origin: ${currentOrigin}, Vault: ${vaultId})`);
 
   const results: DiagnosticResult[] = [];
 
   for (const test of testConfigs) {
+    const headers = test.id.startsWith('scryfall')
+      ? { Accept: 'application/json' }
+      : getAuthHeaders();
+
     const { res, error, durationMs, isCors } = await fetchWithDebug(test.url, {
       method: test.method,
-      headers: { Accept: 'application/json' },
+      headers,
     });
 
     if (error) {
@@ -328,7 +407,7 @@ export async function runFullDiagnostics(customBaseUrl?: string): Promise<Diagno
         status,
         durationMs,
         errorDetails: isCors 
-          ? `CORS / Network Error: The browser blocked this request to "${test.url}". Likely missing Access-Control-Allow-Origin header on ${baseUrl || 'server'}.`
+          ? `CORS / Network Error: The browser blocked this request to "${test.url}". Likely missing Access-Control-Allow-Origin / Allow-Headers on ${baseUrl || 'server'}.`
           : isTimeout 
           ? `Request timed out after ${durationMs}ms.`
           : errorMsg,

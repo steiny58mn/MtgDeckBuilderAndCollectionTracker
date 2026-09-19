@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Database, X, RefreshCw, Server, ShieldCheck, Activity } from 'lucide-react';
+import { Database, X, RefreshCw, Server, ShieldCheck, Activity, Key, Copy, Check, Shuffle, Save } from 'lucide-react';
 import { SyncStatus, StorageService } from '../services/storage';
-import { getTursoStatus, TursoStatusResponse, getApiBaseUrl } from '../services/api';
+import { getTursoStatus, TursoStatusResponse, getApiBaseUrl, getVaultId, setVaultId, resetVaultId } from '../services/api';
 
 interface SyncModalProps {
   isOpen: boolean;
@@ -16,15 +16,22 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   isOpen,
   onClose,
   syncStatus,
+  onVaultChanged,
   onOpenDiagnostics,
   onNotify,
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [tursoStatus, setTursoStatus] = useState<TursoStatusResponse | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+  const [currentVaultId, setCurrentVaultId] = useState('');
+  const [vaultInput, setVaultInput] = useState('');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      const activeId = getVaultId();
+      setCurrentVaultId(activeId);
+      setVaultInput(activeId);
       checkTursoHealth();
     }
   }, [isOpen]);
@@ -54,6 +61,43 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleSaveVaultId = async () => {
+    const trimmed = vaultInput.trim();
+    if (!trimmed) return;
+    setVaultId(trimmed);
+    const updated = getVaultId();
+    setCurrentVaultId(updated);
+    onNotify?.(`Switched to Vault: "${updated}"`, 'success');
+    setIsSyncing(true);
+    try {
+      await StorageService.syncWithRemote();
+    } finally {
+      setIsSyncing(false);
+      onVaultChanged();
+    }
+  };
+
+  const handleGenerateNewVault = async () => {
+    const newId = resetVaultId();
+    setCurrentVaultId(newId);
+    setVaultInput(newId);
+    onNotify?.(`Created fresh Vault: "${newId}"`, 'success');
+    setIsSyncing(true);
+    try {
+      await StorageService.syncWithRemote();
+    } finally {
+      setIsSyncing(false);
+      onVaultChanged();
+    }
+  };
+
+  const handleCopyVault = () => {
+    navigator.clipboard.writeText(currentVaultId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    onNotify?.('Vault ID copied to clipboard!', 'info');
   };
 
   const activeBaseUrl = getApiBaseUrl();
@@ -100,6 +144,59 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               </span>
             </div>
           </div>
+        </div>
+
+        {/* User / Vault Partition Header */}
+        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-200 flex items-center gap-2">
+              <Key className="w-3.5 h-3.5 text-fuchsia-400" />
+              User Vault ID (Data Partition)
+            </label>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCopyVault}
+                className="text-[11px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 transition-colors flex items-center gap-1 cursor-pointer"
+                title="Copy current Vault ID"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateNewVault}
+                className="text-[11px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-fuchsia-400 transition-colors flex items-center gap-1 cursor-pointer"
+                title="Generate a fresh random Vault ID"
+              >
+                <Shuffle className="w-3 h-3" />
+                New ID
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={vaultInput}
+              onChange={(e) => setVaultInput(e.target.value)}
+              placeholder="e.g. vault-alex, user_123"
+              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-fuchsia-300 focus:outline-none focus:border-fuchsia-500"
+            />
+            <button
+              type="button"
+              onClick={handleSaveVaultId}
+              disabled={isSyncing || vaultInput.trim() === currentVaultId}
+              className="px-3 py-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-slate-950 font-bold text-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-40"
+            >
+              <Save className="w-3 h-3" />
+              Apply
+            </button>
+          </div>
+
+          <p className="text-[10px] text-slate-400 leading-normal">
+            Sent via <code className="text-fuchsia-300 font-mono">X-Vault-Id</code> & <code className="text-fuchsia-300 font-mono">X-User-Id</code> headers to ensure user data remains isolated.
+          </p>
         </div>
 
         {/* Turso Service Info Card */}

@@ -3,17 +3,37 @@
  * Edge Proxy for Scryfall, EDHREC, and MtgApps API (mtgappsapi.azurewebsites.net).
  */
 
-interface Env {
+export interface Env {
   ASSETS?: { fetch: (request: Request) => Promise<Response> };
   API_BASE_URL?: string;
+  API_URL?: string;
+  BACKEND_URL?: string;
   [key: string]: any;
 }
 
-const REMOTE_API_BASE = 'https://mtgappsapi.azurewebsites.net';
+export const DEFAULT_API_BASE = 'https://mtgappsapi.azurewebsites.net';
+
+/**
+ * Resolve target backend base URL from environment variables or optional header override
+ */
+export function getBackendBaseUrl(env: Env, request?: Request): string {
+  const headerOverride = request?.headers.get('x-api-target') || request?.headers.get('x-api-base-url');
+  if (headerOverride) {
+    return headerOverride.trim().replace(/\/+$/, '');
+  }
+
+  const envUrl = env.API_BASE_URL || env.API_URL || env.BACKEND_URL;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  return DEFAULT_API_BASE;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const apiTarget = getBackendBaseUrl(env, request);
 
     // 1. CORS Preflight Handling
     if (request.method === 'OPTIONS') {
@@ -22,7 +42,7 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+          'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Api-Target, X-Api-Base-Url',
           'Access-Control-Max-Age': '86400',
         },
       });
@@ -31,7 +51,7 @@ export default {
     const corsHeaders: Record<string, string> = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+      'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Api-Target, X-Api-Base-Url',
     };
 
     // 2. Health & Diagnostics Check
@@ -41,7 +61,7 @@ export default {
           status: 'online',
           engine: 'Cloudflare Worker Edge Proxy',
           timestamp: new Date().toISOString(),
-          remoteApiBase: env.API_BASE_URL || REMOTE_API_BASE,
+          remoteApiBase: apiTarget,
         }),
         {
           headers: {
@@ -55,8 +75,7 @@ export default {
 
     // 3. Remote MtgTools & DeckBuilder API Proxy
     if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder')) {
-      const targetBase = env.API_BASE_URL || REMOTE_API_BASE;
-      const targetUrl = `${targetBase}${url.pathname}${url.search}`;
+      const targetUrl = `${apiTarget}${url.pathname}${url.search}`;
 
       try {
         const headers: Record<string, string> = {
@@ -64,6 +83,12 @@ export default {
         };
         const contentType = request.headers.get('content-type');
         if (contentType) headers['Content-Type'] = contentType;
+        const vaultId = request.headers.get('x-vault-id');
+        if (vaultId) headers['X-Vault-Id'] = vaultId;
+        const userId = request.headers.get('x-user-id');
+        if (userId) headers['X-User-Id'] = userId;
+        const auth = request.headers.get('authorization');
+        if (auth) headers['Authorization'] = auth;
 
         const remoteRes = await fetch(targetUrl, {
           method: request.method,
@@ -81,7 +106,7 @@ export default {
         });
       } catch (err: any) {
         return new Response(
-          JSON.stringify({ error: 'Failed to proxy request to Azure API', details: err.message }),
+          JSON.stringify({ error: `Failed to proxy request to API at ${apiTarget}`, details: err.message }),
           {
             status: 502,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
