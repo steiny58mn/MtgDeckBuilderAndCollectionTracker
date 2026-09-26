@@ -177,7 +177,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
               <span className="block text-[10px] uppercase font-semibold text-slate-400">Regular</span>
               <span className="text-sm font-bold text-emerald-400">
-                {priceUsd !== null ? `$${priceUsd.toFixed(2)}` : '—'}
+                {priceUsd !== null ? `${(Number(priceUsd) || 0).toFixed(2)}` : '—'}
               </span>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-900 border border-fuchsia-900/40 text-center">
@@ -185,13 +185,13 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 <Sparkles className="w-2.5 h-2.5" /> Foil
               </span>
               <span className="text-sm font-bold text-fuchsia-300">
-                {priceFoil !== null ? `$${priceFoil.toFixed(2)}` : '—'}
+                {priceFoil !== null ? `${(Number(priceFoil) || 0).toFixed(2)}` : '—'}
               </span>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
               <span className="block text-[10px] uppercase font-semibold text-slate-400">Europe</span>
               <span className="text-sm font-bold text-sky-400">
-                {priceEur !== null ? `€${priceEur.toFixed(2)}` : '—'}
+                {priceEur !== null ? `€${(Number(priceEur) || 0).toFixed(2)}` : '—'}
               </span>
             </div>
           </div>
@@ -454,7 +454,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     <input
                       type="number"
                       step="0.01"
-                      placeholder={priceUsd ? priceUsd.toFixed(2) : '0.00'}
+                      placeholder={priceUsd ? (Number(priceUsd) || 0).toFixed(2) : '0.00'}
                       value={colPrice}
                       onChange={(e) => setColPrice(e.target.value)}
                       className="w-full bg-transparent text-xs text-white focus:outline-none"

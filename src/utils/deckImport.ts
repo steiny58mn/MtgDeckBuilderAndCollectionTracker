@@ -787,23 +787,52 @@ export function autoDetectFormat(raw: string): ExportFormatKey {
 export function parseDeckImport(content: string, formatHint: ExportFormatKey | 'auto' = 'auto'): ParsedDeckImport {
   const chosenFormat = formatHint === 'auto' ? autoDetectFormat(content) : formatHint;
 
+  let result: ParsedDeckImport;
   switch (chosenFormat) {
     case 'bbcode':
-      return parseBBCode(content);
+      result = parseBBCode(content);
+      break;
     case 'tappedout':
-      return parseTappedOut(content);
+      result = parseTappedOut(content);
+      break;
     case 'moxfield':
-      return parseMoxfield(content);
+      result = parseMoxfield(content);
+      break;
     case 'mtgo':
-      return parseMTGO(content);
+      result = parseMTGO(content);
+      break;
     case 'archidekt':
-      return parseArchidekt(content);
+      result = parseArchidekt(content);
+      break;
     case 'csv':
-      return parseCSV(content);
+      result = parseCSV(content);
+      break;
     case 'excel':
-      return parseExcelTSV(content);
+      result = parseExcelTSV(content);
+      break;
     case 'text':
     default:
-      return parsePlainText(content);
+      result = parsePlainText(content);
+      break;
   }
+
+  // When importing as Commander (or auto-detected format is commander / typical ~100-card deck),
+  // if there are 1 or 2 cards in the Sideboard and no commander designated,
+  // set those card(s) as the Commander(s) automatically (supporting single or partner/background).
+  const cmdrCount = result.cards.filter((c) => c.category === 'commander').length;
+  const sideCards = result.cards.filter((c) => c.category === 'sideboard');
+  const totalSideQty = sideCards.reduce((s, c) => s + c.quantity, 0);
+  const totalCards = result.cards.reduce((s, c) => s + c.quantity, 0);
+
+  if (cmdrCount === 0 && sideCards.length >= 1 && sideCards.length <= 2 && totalSideQty === sideCards.length) {
+    if (result.format === 'commander' || totalCards >= 90) {
+      sideCards.forEach((sc) => { sc.category = 'commander'; });
+      result.format = 'commander';
+      if (!result.deckName) {
+        result.deckName = sideCards.map((sc) => sc.name).join(' // ');
+      }
+    }
+  }
+
+  return result;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
 import { Bookmark, Search, FolderPlus, Trash2, X } from 'lucide-react';
 import { Binder } from '../types/mtg';
@@ -25,6 +25,20 @@ export const BinderList: React.FC<BinderListProps> = ({
   const filteredBinders = binders.filter(
     (b) => !searchQuery.trim() || b.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  useEffect(() => {
+    console.log(`[BinderList] 📁 State check: ${binders.length} total binder(s), ${filteredBinders.length} matching filter.`, {
+      totalBinders: binders.length,
+      filteredBinders: filteredBinders.length,
+      searchQuery,
+      binderSummaries: binders.map(b => ({ id: b.id, name: b.name, cardCount: b.cards?.length || 0 })),
+    });
+    if (binders.length === 0) {
+      console.warn('[BinderList] ⚠️ Showing "No binders found": binders prop array is empty.');
+    } else if (filteredBinders.length === 0) {
+      console.warn(`[BinderList] ⚠️ Showing "No binders found": all ${binders.length} binder(s) were filtered out by search query "${searchQuery}".`);
+    }
+  }, [binders, filteredBinders.length, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -53,8 +67,7 @@ export const BinderList: React.FC<BinderListProps> = ({
 
       {filteredBinders.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {filteredBinders.map((binder) => (
-            <div
+          {filteredBinders.map((binder) => (            <div
               key={binder.id}
               onClick={() => onSelectBinder(binder)}
               className="group p-5 bg-slate-900 border border-slate-800 hover:border-emerald-500/60 rounded-2xl shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer flex flex-col justify-between relative"
@@ -96,7 +109,6 @@ export const BinderList: React.FC<BinderListProps> = ({
         </div>
       )}
 
-      
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">

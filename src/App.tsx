@@ -21,7 +21,6 @@ import { CollectionManager } from './components/CollectionManager';
 import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
 import { SyncModal } from './components/SyncModal';
-import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
 import { BinderList } from './components/BinderList';
 import { getCardImageUrl } from './services/scryfall';
 import { getDeckCommander, isCardLegalInCommander } from './utils/deckUtils';
@@ -39,7 +38,6 @@ export default function App() {
   // Modals
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [globalToast, setGlobalToast] = useState<{
     message: string;
     type: 'success' | 'info';
@@ -62,6 +60,12 @@ export default function App() {
   // Subscribe to Turso Database & local cache
   useEffect(() => {
     const unsubDecks = DeckService.subscribeDecks((updatedDecks) => {
+      console.log(`[App] 📥 Received updated decks (${updatedDecks.length} deck(s)):`, updatedDecks.map(d => ({
+        id: d.id,
+        name: d.name,
+        format: d.format,
+        cardCount: d.cards?.length || 0,
+      })));
       setDecks(updatedDecks);
       setActiveDeck(prev => {
         if (!prev) return null;
@@ -70,10 +74,16 @@ export default function App() {
     });
 
     const unsubCol = DeckService.subscribeCollection((updatedCol) => {
+      console.log(`[App] 📥 Received updated collection (${updatedCol.length} card(s))`);
       setCollectionCards(updatedCol);
     });
 
     const unsubBinders = DeckService.subscribeBinders((updatedBinders) => {
+      console.log(`[App] 📥 Received updated binders (${updatedBinders.length} binder(s)):`, updatedBinders.map(b => ({
+        id: b.id,
+        name: b.name,
+        cardCount: b.cards?.length || 0,
+      })));
       setBinders(updatedBinders);
       setActiveBinder(prev => {
         if (!prev) return null;
@@ -82,6 +92,7 @@ export default function App() {
     });
 
     const unsubSync = DeckService.onSyncStatusChange((status) => {
+      console.log(`[App] 🔄 Sync status changed to: "${status}"`);
       setSyncStatus(status);
     });
 
@@ -245,11 +256,13 @@ export default function App() {
     const imgUrl = getCardImageUrl(card, 'normal');
 
     if (category === 'commander') {
-      updatedCommanderName = card.name;
-      updatedCommanderArt = getCardImageUrl(card, 'art_crop');
+      const otherCommanders = currentCards.filter((c) => c.category === 'commander' && c.scryfallId !== card.id);
+      const allCmdrs = [...otherCommanders, { name: card.name, color_identity: card.color_identity || [] }];
+      updatedCommanderName = allCmdrs.map((c) => c.name).join(' // ');
+      updatedCommanderArt = latestActiveDeck.commanderArtUrl || getCardImageUrl(card, 'art_crop');
       updatedCover = updatedCommanderArt;
-      updatedCommanderId = card.id;
-      updatedCommanderColorIdentity = card.color_identity || [];
+      updatedCommanderId = latestActiveDeck.commanderId || card.id;
+      updatedCommanderColorIdentity = Array.from(new Set(allCmdrs.flatMap((c) => c.color_identity || [])));
     } else if (!updatedCover) {
       updatedCover = getCardImageUrl(card, 'art_crop');
     }
@@ -540,7 +553,6 @@ export default function App() {
         }}
         syncStatus={syncStatus}
         onOpenSyncModal={() => setShowSyncModal(true)}
-        onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
       />
 
       {/* Main Content Area */}
@@ -658,16 +670,9 @@ export default function App() {
         onClose={() => setShowSyncModal(false)}
         syncStatus={syncStatus}
         onVaultChanged={handleVaultChanged}
-        onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
         onNotify={(msg, type) => showToast(msg, type)}
       />
 
-      {/* API Diagnostics Modal */}
-      <ApiDiagnosticsModal
-        isOpen={showDiagnosticsModal}
-        onClose={() => setShowDiagnosticsModal(false)}
-        onNotify={(msg, type) => showToast(msg, type)}
-      />
 
       {/* Global Interactive Notification Toast */}
       {globalToast && (

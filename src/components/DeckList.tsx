@@ -1,5 +1,5 @@
 import { ConfirmModal } from "./ConfirmModal";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   Layers, 
@@ -16,6 +16,7 @@ import {
 import { Deck, MTGFormat } from '../types/mtg';
 import { calculateDeckStats } from '../utils/deckUtils';
 import { DeckExportModal } from './DeckExportModal';
+import { DeckService } from '../services/deckService';
 
 interface DeckListProps {
   decks: Deck[];
@@ -55,6 +56,21 @@ export const DeckList: React.FC<DeckListProps> = ({
     return matchFormat && matchSearch;
   });
 
+  useEffect(() => {
+    console.log(`[DeckList] 📋 State check: ${decks.length} total deck(s), ${filteredDecks.length} matching filter.`, {
+      totalDecks: decks.length,
+      filteredDecks: filteredDecks.length,
+      filterFormat,
+      searchQuery,
+      deckSummaries: decks.map(d => ({ id: d.id, name: d.name, format: d.format, cardCount: d.cards?.length || 0 })),
+    });
+    if (decks.length === 0) {
+      console.warn('[DeckList] ⚠️ Showing "No decks found": decks prop array is empty (0 decks loaded from storage/API).');
+    } else if (filteredDecks.length === 0) {
+      console.warn(`[DeckList] ⚠️ Showing "No decks found": all ${decks.length} deck(s) were filtered out by format "${filterFormat}" or search query "${searchQuery}".`);
+    }
+  }, [decks, filteredDecks.length, filterFormat, searchQuery]);
+
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDeckName.trim()) return;
@@ -73,16 +89,7 @@ export const DeckList: React.FC<DeckListProps> = ({
     setShowCreateModal(false);
   };
 
-  const formats: { id: string; label: string }[] = [
-    { id: 'all', label: 'All Formats' },
-    { id: 'commander', label: 'Commander / EDH' },
-    { id: 'modern', label: 'Modern' },
-    { id: 'standard', label: 'Standard' },
-    { id: 'pioneer', label: 'Pioneer' },
-    { id: 'legacy', label: 'Legacy' },
-    { id: 'pauper', label: 'Pauper' },
-    { id: 'casual', label: 'Casual' },
-  ];
+  const formats: { id: string; label: string }[] = [    { id: 'all', label: 'All Formats' },    { id: 'commander', label: 'Commander / EDH' },    { id: 'modern', label: 'Modern' },    { id: 'standard', label: 'Standard' },    { id: 'pioneer', label: 'Pioneer' },    { id: 'legacy', label: 'Legacy' },    { id: 'pauper', label: 'Pauper' },    { id: 'casual', label: 'Casual' },  ];
 
   return (
     <div className="space-y-6">
@@ -190,7 +197,7 @@ export const DeckList: React.FC<DeckListProps> = ({
                   </div>
 
                   <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 backdrop-blur-xs px-2 py-0.5 rounded-md border border-slate-800 text-xs font-bold text-emerald-400">
-                    ${stats.totalPriceUsd.toFixed(2)}
+                    ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                   </div>
                 </div>
 
@@ -346,6 +353,7 @@ export const DeckList: React.FC<DeckListProps> = ({
       {showImportModal && (
         <DeckExportModal
           deck={null}
+          existingDecks={decks}
           isOpen={showImportModal}
           onClose={() => setShowImportModal(false)}
           onImportAsNewDeck={async (newDeck, shouldSave) => {
@@ -353,6 +361,11 @@ export const DeckList: React.FC<DeckListProps> = ({
               await onImportDeck(newDeck, shouldSave);
             }
             setShowImportModal(false);
+          }}
+          onImportOverwriteDeck={async (overwrittenDeck) => {
+            await DeckService.saveDeck(overwrittenDeck);
+            setShowImportModal(false);
+            onSelectDeck(overwrittenDeck);
           }}
           initialTab="import"
         />

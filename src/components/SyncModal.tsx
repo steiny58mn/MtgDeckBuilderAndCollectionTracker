@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, X, RefreshCw, Server, ShieldCheck, Activity, Key, Copy, Check, Shuffle, Save } from 'lucide-react';
+import { Database, X, RefreshCw, Server, ShieldCheck, Key, Copy, Check, Shuffle, Save } from 'lucide-react';
 import { SyncStatus, DeckService } from '../services/deckService';
 import { getTursoStatus, TursoStatusResponse, getApiBaseUrl, getVaultId, setVaultId, resetVaultId } from '../services/deckService';
 
@@ -8,7 +8,6 @@ interface SyncModalProps {
   onClose: () => void;
   syncStatus: SyncStatus;
   onVaultChanged: () => void;
-  onOpenDiagnostics?: () => void;
   onNotify?: (msg: string, type: 'info' | 'success') => void;
 }
 
@@ -17,7 +16,6 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   onClose,
   syncStatus,
   onVaultChanged,
-  onOpenDiagnostics,
   onNotify,
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
@@ -207,19 +205,6 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               <span className="text-xs font-bold text-slate-200">Backend API & Database Status</span>
             </div>
             <div className="flex items-center gap-2">
-              {onOpenDiagnostics && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenDiagnostics();
-                  }}
-                  className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <Activity className="w-3 h-3" />
-                  Diagnostics
-                </button>
-              )}
               <button
                 onClick={checkTursoHealth}
                 disabled={isLoadingStatus}

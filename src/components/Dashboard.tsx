@@ -107,7 +107,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
 
                     <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 backdrop-blur-xs px-2 py-0.5 rounded-md border border-slate-800 text-xs font-bold text-emerald-400">
-                      ${stats.totalPriceUsd.toFixed(2)}
+                      ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                     </div>
                   </div>
 

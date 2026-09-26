@@ -1,4 +1,3 @@
-import { ConfirmModal } from "./ConfirmModal";
 import React, { useState } from 'react';
 import { 
   ArrowLeft, 
@@ -10,10 +9,6 @@ import {
   Plus, 
   Minus, 
   X, 
-  Check, 
-  Copy, 
-  Download, 
-  Upload, 
   AlertTriangle, 
   Layers, 
   SlidersHorizontal,
@@ -21,23 +16,31 @@ import {
   ChevronUp,
   Pencil,
   Crown,
-  LayoutGrid, Columns3,
+  LayoutGrid, 
+  Columns3,
   List,
   Swords,
   Zap,
   Shield,
   Mountain,
   Bookmark,
-  HelpCircle
+  HelpCircle,
+  Upload
 } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard } from '../types/mtg';
-import { calculateDeckStats, exportDeckToText, parseTextDecklist } from '../utils/deckUtils';
+import { calculateDeckStats } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
-import { searchCards } from '../services/scryfall';
+
+// Helper to safely get numeric card unit price
+export const getCardUnitPrice = (card: DeckCard): number => {
+  const rawPrice = card.isFoil && card.priceUsdFoil ? card.priceUsdFoil : card.priceUsd || 0;
+  return typeof rawPrice === 'number' ? rawPrice : (parseFloat(String(rawPrice)) || 0);
+};
 
 interface DeckBuilderProps {
   deck: Deck;
@@ -71,15 +74,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
-  const [importText, setImportText] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [exportCopied, setExportCopied] = useState(false);
-  const [activeCategoryTab, setActiveCategoryTab] = useState<DeckCategory>('main');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>('main');
   const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
   const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color'>('name');
   const [isSavingNewDeck, setIsSavingNewDeck] = useState(false);
-  const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   // Keep internal state in sync with deck updates
   React.useEffect(() => {
@@ -144,15 +153,40 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (idx === -1) return;
 
     const newQty = existingCards[idx].quantity + delta;
+
+    // Commanders in singleton formats like Commander cannot exceed quantity 1
+    if (existingCards[idx].category === 'commander' && delta > 0 && newQty > 1) {
+      setPriceRefreshMessage('Commander cards cannot have a quantity greater than 1.');
+      setTimeout(() => setPriceRefreshMessage(null), 3000);
+      return;
+    }
+
     if (newQty <= 0) {
       existingCards.splice(idx, 1);
     } else {
       existingCards[idx] = { ...existingCards[idx], quantity: newQty };
     }
 
+    // Recompute commander metadata if a commander was removed
+    const remainingCmdrs = existingCards.filter((c) => c.category === 'commander');
+    const newCommanderName = remainingCmdrs.length > 1
+      ? remainingCmdrs.map((c) => c.name).join(' // ')
+      : remainingCmdrs[0]?.name;
+    const newCommanderArt = remainingCmdrs[0]?.imageUrl;
+    const newCover = remainingCmdrs[0]?.imageUrl || existingCards[0]?.imageUrl;
+    const newCommanderId = remainingCmdrs[0]?.scryfallId;
+    const newCommanderColorIdentity = remainingCmdrs.length > 1
+      ? Array.from(new Set(remainingCmdrs.flatMap((c) => c.color_identity || [])))
+      : remainingCmdrs[0]?.color_identity || [];
+
     onUpdateDeck({
       ...deck,
       cards: existingCards,
+      commanderName: newCommanderName,
+      commanderArtUrl: newCommanderArt,
+      commanderId: newCommanderId,
+      commanderColorIdentity: newCommanderColorIdentity,
+      coverCardUrl: newCover,
       updatedAt: Date.now(),
     });
   };
@@ -179,25 +213,35 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const idx = existingCards.findIndex((c) => c.id === cardId);
     if (idx === -1) return;
 
+    if (newCategory === 'commander') {
+      const currentCmdrs = existingCards.filter((c) => c.category === 'commander' && c.id !== cardId);
+      if (currentCmdrs.length >= 2) {
+        setPriceRefreshMessage('Commander decks can have at most 2 commanders (Partner/Background).');
+        setTimeout(() => setPriceRefreshMessage(null), 3500);
+        return;
+      }
+      // If moving to commander, cap quantity at 1
+      if (existingCards[idx].quantity > 1) {
+        existingCards[idx].quantity = 1;
+      }
+    }
+
     existingCards[idx] = {
       ...existingCards[idx],
       category: newCategory,
     };
 
-    // If moved to commander category, update commander metadata
-    let newCommanderName = deck.commanderName;
-    let newCommanderArt = deck.commanderArtUrl;
-    let newCover = deck.coverCardUrl;
-    let newCommanderId = deck.commanderId;
-    let newCommanderColorIdentity = deck.commanderColorIdentity;
-
-    if (newCategory === 'commander') {
-      newCommanderName = existingCards[idx].name;
-      newCommanderArt = existingCards[idx].imageUrl;
-      newCover = existingCards[idx].imageUrl;
-      newCommanderId = existingCards[idx].scryfallId;
-      newCommanderColorIdentity = existingCards[idx].color_identity || [];
-    }
+    // Update commander metadata
+    const updatedCmdrs = existingCards.filter((c) => c.category === 'commander');
+    const newCommanderName = updatedCmdrs.length > 1
+      ? updatedCmdrs.map((c) => c.name).join(' // ')
+      : updatedCmdrs[0]?.name;
+    const newCommanderArt = updatedCmdrs[0]?.imageUrl || deck.commanderArtUrl;
+    const newCover = updatedCmdrs[0]?.imageUrl || deck.coverCardUrl;
+    const newCommanderId = updatedCmdrs[0]?.scryfallId;
+    const newCommanderColorIdentity = updatedCmdrs.length > 1
+      ? Array.from(new Set(updatedCmdrs.flatMap((c) => c.color_identity || [])))
+      : updatedCmdrs[0]?.color_identity || [];
 
     onUpdateDeck({
       ...deck,
@@ -213,9 +257,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const handleRemoveCard = (cardId: string) => {
     const filtered = deck.cards.filter((c) => c.id !== cardId);
+    const updatedCmdrs = filtered.filter((c) => c.category === 'commander');
+    const newCommanderName = updatedCmdrs.length > 1
+      ? updatedCmdrs.map((c) => c.name).join(' // ')
+      : updatedCmdrs[0]?.name;
+    const newCommanderArt = updatedCmdrs[0]?.imageUrl;
+    const newCover = updatedCmdrs[0]?.imageUrl || filtered[0]?.imageUrl;
+    const newCommanderId = updatedCmdrs[0]?.scryfallId;
+    const newCommanderColorIdentity = updatedCmdrs.length > 1
+      ? Array.from(new Set(updatedCmdrs.flatMap((c) => c.color_identity || [])))
+      : updatedCmdrs[0]?.color_identity || [];
+
     onUpdateDeck({
       ...deck,
       cards: filtered,
+      commanderName: newCommanderName,
+      commanderArtUrl: newCommanderArt,
+      commanderId: newCommanderId,
+      commanderColorIdentity: newCommanderColorIdentity,
+      coverCardUrl: newCover,
       updatedAt: Date.now(),
     });
   };
@@ -233,6 +293,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     } finally {
       setIsRefreshingPrices(false);
     }
+  };
+
+  const handleOverwriteDeck = async (overwrittenDeck: Deck) => {
+    await DeckService.saveDeck(overwrittenDeck);
+    onUpdateDeck(overwrittenDeck);
+    setTitle(overwrittenDeck.name);
+    setFormat(overwrittenDeck.format);
+    setDescription(overwrittenDeck.description || '');
+    setPriceRefreshMessage(`Deck "${overwrittenDeck.name}" overwritten with ${overwrittenDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards!`);
+    setTimeout(() => setPriceRefreshMessage(null), 3500);
   };
 
   // Import handlers
@@ -305,7 +375,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
   };
 
-  const mainCards = sortCards(deck.cards.filter((c) => c.category === 'main'));
+  // Main cards include all mainboard cards and commanders (commanders display badges and appear under their card type)
+  const mainCards = sortCards(deck.cards.filter((c) => c.category === 'main' || c.category === 'commander'));
   const sideCards = sortCards(deck.cards.filter((c) => c.category === 'sideboard'));
   const maybeCards = sortCards(deck.cards.filter((c) => c.category === 'maybeboard'));
 
@@ -335,18 +406,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const groupedMain = groupCardsByType(mainCards);
 
-  // Available categories for Category Grid view
+  // Available categories for Category Grid view (no separate Command Zone section needed since displayed in header & under type)
   const availableCategories = [
-    ...(deck.format === 'commander' || commanderCards.length > 0
-      ? [{
-          id: 'commander',
-          title: 'Command Zone',
-          icon: <Crown className="w-4 h-4 text-violet-400" />,
-          cards: commanderCards,
-          totalQty: commanderCards.reduce((s, c) => s + c.quantity, 0),
-          totalPrice: commanderCards.reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
-        }]
-      : []),
     {
       id: 'creatures',
       title: 'Creatures',
@@ -416,6 +477,29 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         }]
       : []),
   ];
+
+  const toScryfallCard = (card: DeckCard): ScryfallCard => ({
+    id: card.scryfallId,
+    name: card.name,
+    set: card.set,
+    collector_number: card.collector_number || '',
+    cmc: card.cmc,
+    mana_cost: card.mana_cost,
+    type_line: card.type_line,
+    rarity: card.rarity || 'common',
+    color_identity: card.color_identity || [],
+    legalities: {},
+    prices: { usd: card.priceUsd?.toString(), usd_foil: card.priceUsdFoil?.toString() },
+    image_uris: {
+      small: card.imageUrl,
+      normal: card.imageUrl,
+      large: card.imageUrl,
+      art_crop: card.imageUrl,
+    },
+    imageUrl: card.imageUrl,
+    scryfallId: card.scryfallId,
+    set_name: card.set_name || '',
+  } as any);
 
   return (
     <div className="space-y-6">
@@ -547,13 +631,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   {deck.format}
                 </span>
 
+                {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
                 <span className="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono text-slate-300 shrink-0">
-                  {stats.mainboardCount + (deck.format === 'commander' ? commanderCards.length : 0)}
+                  {stats.mainboardCount}
                   {deck.format === 'commander' ? '/100' : ''}
                 </span>
 
                 <span className="px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] font-bold text-emerald-400 shrink-0" title="Total deck market value">
-                  ${stats.totalPriceUsd.toFixed(2)}
+                  ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
 
                 {/* Top Row Format Notice */}
@@ -680,6 +765,61 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </p>
           )}
 
+          {/* Commander Strip in Deck Header */}
+          {deck.format === 'commander' && (
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80 flex-wrap text-xs">
+              <span className="text-[11px] uppercase font-bold text-fuchsia-400 tracking-wider flex items-center gap-1.5 shrink-0">
+                <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
+                <span>{commanderCards.length === 2 ? 'Commanders (Partner):' : 'Commander:'}</span>
+              </span>
+
+              {commanderCards.length > 0 ? (
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  {commanderCards.map((cmdr, cIdx) => (
+                    <div
+                      key={cmdr.id}
+                      className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-fuchsia-500/30 text-xs shadow-xs"
+                    >
+                      <span className="text-[10px] font-semibold text-fuchsia-400">
+                        {cIdx === 0 ? '👑 Commander' : '👑 Partner'}
+                      </span>
+                      <span
+                        onClick={() => onSelectCard(toScryfallCard(cmdr))}
+                        className="font-bold text-white hover:text-fuchsia-300 cursor-pointer truncate max-w-[200px]"
+                        title={cmdr.name}
+                      >
+                        {cmdr.name}
+                      </span>
+                      {cmdr.mana_cost && (
+                        <div className="shrink-0 scale-90">
+                          <ManaCostBadge manaCost={cmdr.mana_cost} size="sm" />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleChangeCardCategory(cmdr.id, 'main')}
+                        className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Demote to regular deck card"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {commanderCards.length === 1 && (
+                    <span className="text-[11px] text-slate-400 italic">
+                      (Can add 1 Partner or Background commander)
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-[11px] text-slate-500 italic">
+                  No commander assigned yet. Click &quot;Set Commander&quot; on any legendary creature in your deck.
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Toast feedback */}
           {priceRefreshMessage && (
             <div className="py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs text-center font-medium">
@@ -729,23 +869,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           >
             Mainboard ({stats.mainboardCount})
           </button>
-
-          {deck.format === 'commander' && (
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode('tabbed');
-                setActiveCategoryTab('commander');
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                viewMode === 'tabbed' && activeCategoryTab === 'commander'
-                  ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Commander ({commanderCards.length})
-            </button>
-          )}
 
           <button
             type="button"
@@ -847,13 +970,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <span>Category Grid View — showing all available deck categories</span>
             </span>
             <span className="font-mono text-slate-400">
-              Total: {stats.totalCards} cards (${stats.totalPriceUsd.toFixed(2)})
+              Total: {stats.totalCards} cards (${(Number(stats.totalPriceUsd) || 0).toFixed(2)})
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
             {availableCategories
-              .filter((cat) => cat.totalQty > 0 || (cat.id === 'commander' && deck.format === 'commander'))
+              .filter((cat) => cat.totalQty > 0)
               .map((cat) => (
                 <div
                   key={cat.id}
@@ -869,12 +992,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] font-mono text-slate-400">
-                        ${cat.totalPrice.toFixed(2)}
+                        ${(Number(cat.totalPrice) || 0).toFixed(2)}
                       </span>
                       <button
                         type="button"
                         onClick={onOpenSearch}
-                        className="p-1 rounded-md bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 hover:text-white transition-colors"
+                        className="p-1 rounded-md bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 hover:text-white transition-colors cursor-pointer"
                         title={`Add cards to ${cat.title}`}
                       >
                         <Plus className="w-3 h-3 text-violet-400" />
@@ -898,7 +1021,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {deck.cards.length === 0 && (
             <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
               <Layers className="w-8 h-8 mx-auto text-slate-600" />
-              <p className="text-xs font-medium">Your deck is empty. Click "+ Add Cards" to search and add cards from Scryfall.</p>
+              <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search and add cards from Scryfall.</p>
               <button
                 onClick={onOpenSearch}
                 className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
@@ -911,87 +1034,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       ) : (
         /* Tabbed Content */
         <div className="space-y-6">
-          {/* Commander Tab */}
-          {activeCategoryTab === 'commander' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="text-xs uppercase font-semibold text-slate-400">Designated Commander</h3>
-                {commanderName && (
-                  <button
-                    type="button"
-                    onClick={handleUpdateDeckNameToCommander}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs ${
-                      deck.name.trim().toLowerCase() === commanderName.trim().toLowerCase()
-                        ? 'bg-violet-500/10 text-fuchsia-300/80 border border-fuchsia-500/25'
-                        : 'bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 hover:scale-102'
-                    }`}
-                    title={`Update deck name to Commander: "${commanderName}"`}
-                  >
-                    <Crown className="w-3.5 h-3.5 text-violet-400" />
-                    <span>
-                      {deck.name.trim().toLowerCase() === commanderName.trim().toLowerCase()
-                        ? 'Named after Commander'
-                        : `Update Deck Name to "${commanderName}"`}
-                    </span>
-                  </button>
-                )}
-              </div>
-              {commanderCards.length > 0 ? (
-                
-                viewMode === 'grid' ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pt-2">
-                    {commanderCards.map(c => renderCardGridItem(c))}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {commanderCards.map((card) => renderCardRow(card))}
-                  </div>
-                )
-
-              ) : (
-                <div className="p-8 text-center bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-500 text-xs">
-                  No commander selected. Search for a legendary creature and assign to Commander slot.
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Mainboard Tab */}
           {activeCategoryTab === 'main' && (
             <div className="space-y-6">
-              {/* Commander highlight for EDH decks if on mainboard tab */}
-              {deck.format === 'commander' && commanderCards.length > 0 && (
-                <div className="p-4 rounded-xl bg-fuchsia-950/20 border border-fuchsia-800/40 space-y-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-[11px] uppercase font-bold text-violet-400 tracking-wider">
-                      Command Zone
-                    </span>
-                    {commanderName && deck.name.trim().toLowerCase() !== commanderName.trim().toLowerCase() && (
-                      <button
-                        type="button"
-                        onClick={handleUpdateDeckNameToCommander}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-semibold transition-colors cursor-pointer"
-                        title={`Update deck name to Commander: "${commanderName}"`}
-                      >
-                        <Crown className="w-3 h-3 text-violet-400" />
-                        <span>Update Deck Name to &quot;{commanderName}&quot;</span>
-                      </button>
-                    )}
-                  </div>
-                  
-                  {viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pt-2">
-                      {commanderCards.map(c => renderCardGridItem(c))}
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-800/60 bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
-                      {commanderCards.map((c) => renderCardRow(c))}
-                    </div>
-                  )}
-
-                </div>
-              )}
-
               {Object.entries(groupedMain).map(([groupTitle, cardsInGroup]) => {
                 if (cardsInGroup.length === 0) return null;
                 const groupTotalQty = cardsInGroup.reduce((a, b) => a + b.quantity, 0);
@@ -1011,10 +1056,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               {mainCards.length === 0 && (
                 <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
                   <Layers className="w-8 h-8 mx-auto text-slate-600" />
-                  <p className="text-xs font-medium">Your deck is empty. Click "+ Add Cards" to search and add cards from Scryfall.</p>
+                  <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search and add cards from Scryfall.</p>
                   <button
                     onClick={onOpenSearch}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors"
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
                   >
                     Search Cards Now
                   </button>
@@ -1053,7 +1098,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
       )}
 
-      {/* Mana Curve & Stats Accordion (Moved to bottom of the page, collapsed by default) */}
+      {/* Mana Curve & Stats Accordion (collapsed by default) */}
       <div className="pt-2">
         <button
           onClick={() => setShowStats(!showStats)}
@@ -1084,12 +1129,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               onConfirm: () => onDeleteDeck(deck.id)
             });
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-400 hover:bg-rose-950/40 text-xs font-medium transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-400 hover:bg-rose-950/40 text-xs font-medium transition-colors cursor-pointer"
         >
           <Trash2 className="w-4 h-4" />
           <span>Delete This Deck</span>
         </button>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        onConfirm={() => {
+          confirmState.onConfirm();
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+        }}
+        onCancel={() => setConfirmState((prev) => ({ ...prev, isOpen: false }))}
+      />
 
       {/* Card Detail / Oracle Inspector */}
       {showHandSimulator && (
@@ -1107,62 +1164,59 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         isOpen={showExportModal}
         onClose={() => {
           setShowExportModal(false);
-          setImportError(null);
         }}
         onImportAsNewDeck={handleImportAsNewDeck}
         onImportAppendToDeck={handleAppendCardsToDeck}
+        onImportOverwriteDeck={handleOverwriteDeck}
         initialTab={exportModalInitialTab}
       />
     </div>
   );
 
+  function renderCardListOrGrid(cards: DeckCard[]) {
+    if (viewMode === 'grid') {
+      return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pt-2">
+          {cards.map((c) => renderCardGridItem(c))}
+        </div>
+      );
+    }
+    return (
+      <div className="divide-y divide-slate-800/60 bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
+        {cards.map((c) => renderCardRow(c))}
+      </div>
+    );
+  }
+
   // Helper row renderer
   function renderCardRow(card: DeckCard) {
-    const unitPrice = card.isFoil && card.priceUsdFoil ? card.priceUsdFoil : card.priceUsd || 0;
-    const lineTotal = (unitPrice * card.quantity).toFixed(2);
+    const unitPrice = getCardUnitPrice(card);
+    const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
     const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
 
-    const isLegendaryCreatureOrPlaneswalker = card.type_line?.includes('Legendary') && (card.type_line?.includes('Creature') || card.type_line?.includes('Planeswalker'));
-    const hasCommander = deck.cards.some(c => c.category === 'commander');
+    const isLegendaryCreatureOrPlaneswalker = card.type_line?.includes('Legendary') && (
+      card.type_line?.includes('Creature') || 
+      card.type_line?.includes('Planeswalker') ||
+      card.type_line?.includes('Background')
+    );
     const isThisCommander = card.category === 'commander';
-    const showSetCommanderBtn = deck.format === 'commander' && !hasCommander && isLegendaryCreatureOrPlaneswalker && !isThisCommander;
-
-    const toScryCard = (): ScryfallCard => ({
-      id: card.scryfallId,
-      name: card.name,
-      set: card.set,
-      collector_number: card.collector_number || '',
-      cmc: card.cmc,
-      mana_cost: card.mana_cost,
-      type_line: card.type_line,
-      rarity: card.rarity || 'common',
-      color_identity: card.color_identity || [],
-      legalities: {},
-      prices: { usd: card.priceUsd?.toString(), usd_foil: card.priceUsdFoil?.toString() },
-      image_uris: {
-        small: card.imageUrl,
-        normal: card.imageUrl,
-        large: card.imageUrl,
-        art_crop: card.imageUrl,
-      },
-      imageUrl: card.imageUrl,
-      scryfallId: card.scryfallId,
-      set_name: card.set_name || '',
-    } as any);
+    const canAddAsCommander = deck.format === 'commander' && !isThisCommander && commanderCards.length < 2 && isLegendaryCreatureOrPlaneswalker;
 
     return (
       <div
         key={card.id}
-        className="group px-3 py-3 flex flex-col gap-2.5 hover:bg-slate-800/50 transition-colors border-b border-slate-800/40 hover:border-slate-700"
+        className={`group px-3 py-3 flex flex-col gap-2.5 transition-colors border-b border-slate-800/40 hover:border-slate-700 ${
+          isThisCommander ? 'bg-fuchsia-950/15 hover:bg-fuchsia-950/25' : 'hover:bg-slate-800/50'
+        }`}
       >
-        {/* Top Row: Controls (Quantity, Location, Remove) */}
+        {/* Top Row: Controls (Quantity, Location, Commander status, Remove) */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             {/* Quantity stepper */}
             <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shrink-0 shadow-sm">
               <button
                 onClick={() => handleUpdateCardQuantity(card.id, -1)}
-                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Decrease"
               >
                 <Minus className="w-3.5 h-3.5" />
@@ -1170,8 +1224,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <span className="w-7 text-center text-xs font-bold text-slate-100">{card.quantity}</span>
               <button
                 onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                title="Increase"
+                disabled={isThisCommander && card.quantity >= 1}
+                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -1181,41 +1236,64 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
               <button
                 onClick={() => handleChangeCardCategory(card.id, 'main')}
-                className={`px-2 py-1.5 transition-colors ${card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                className={`px-2 py-1.5 transition-colors cursor-pointer ${
+                  card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
               >
                 Main
               </button>
-              {isThisCommander && (
+              {isThisCommander ? (
+                <button
+                  onClick={() => handleChangeCardCategory(card.id, 'main')}
+                  className="px-2 py-1.5 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
+                  title="Click to remove Commander status"
+                >
+                  👑 Cmdr
+                </button>
+              ) : deck.format === 'commander' && commanderCards.length < 2 && isLegendaryCreatureOrPlaneswalker ? (
                 <button
                   onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                  className={`px-2 py-1.5 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold`}
+                  className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
+                  title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
                 >
-                  Cmdr
+                  {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
                 </button>
-              )}
+              ) : null}
               <button
                 onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                className={`px-2 py-1.5 transition-colors border-l border-slate-800 ${card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
               >
                 Side
               </button>
               <button
                 onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                className={`px-2 py-1.5 transition-colors border-l border-slate-800 ${card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
               >
                 Maybe
               </button>
             </div>
 
-            {/* Set as Commander Highlight Button */}
-            {showSetCommanderBtn && (
+            {/* Commander Badge if active commander */}
+            {isThisCommander && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold">
+                <Crown className="w-3 h-3 text-fuchsia-400" />
+                <span>{commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}</span>
+              </span>
+            )}
+
+            {/* Set as Commander / Partner Button */}
+            {canAddAsCommander && (
               <button
                 onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold transition-colors shadow-sm"
-                title="Set as Commander"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold transition-colors shadow-sm cursor-pointer"
+                title={commanderCards.length === 1 ? 'Set as Partner Commander' : 'Set as Commander'}
               >
-                <Crown className="w-3.5 h-3.5" />
-                <span>Set Commander</span>
+                <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
+                <span>{commanderCards.length === 1 ? '+ Partner' : 'Set Commander'}</span>
               </button>
             )}
           </div>
@@ -1223,7 +1301,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Remove Card */}
           <button
             onClick={() => handleRemoveCard(card.id)}
-            className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0"
+            className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
             title="Remove card"
           >
             <X className="w-4 h-4" />
@@ -1234,7 +1312,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         <div className="flex items-center gap-3">
           {/* Thumbnail */}
           <div
-            onClick={() => onSelectCard(toScryCard())}
+            onClick={() => onSelectCard(toScryfallCard(card))}
             className="w-12 h-16 rounded bg-slate-950 overflow-hidden shrink-0 border border-slate-800 cursor-pointer hover:border-fuchsia-400 transition-colors shadow-sm"
           >
             {thumbUrl ? (
@@ -1258,7 +1336,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <div className="min-w-0 flex-1 flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                onClick={() => onSelectCard(toScryCard())}
+                onClick={() => onSelectCard(toScryfallCard(card))}
                 className="text-sm font-bold text-slate-200 hover:text-violet-400 cursor-pointer break-words leading-tight"
               >
                 {card.name}
@@ -1279,62 +1357,28 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Price */}
           <div className="text-right shrink-0 min-w-[3.5rem]">
             <span className="text-xs font-bold text-emerald-400 block">${lineTotal}</span>
-            <span className="text-[10px] text-slate-500 block">${unitPrice.toFixed(2)}</span>
+            <span className="text-[10px] text-slate-500 block">${(Number(unitPrice) || 0).toFixed(2)}</span>
           </div>
         </div>
       </div>
     );
   }
 
-  function renderCardListOrGrid(cards: DeckCard[]) {
-    if (viewMode === 'grid') {
-      return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pt-2">
-          {cards.map((c) => renderCardGridItem(c))}
-        </div>
-      );
-    }
-    return (
-      <div className="divide-y divide-slate-800/60 bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
-        {cards.map((c) => renderCardRow(c))}
-      </div>
-    );
-  };
   function renderCardGridItem(card: DeckCard) {
-    const unitPrice = card.isFoil && card.priceUsdFoil ? card.priceUsdFoil : card.priceUsd || 0;
-    const lineTotal = (unitPrice * card.quantity).toFixed(2);
+    const unitPrice = getCardUnitPrice(card);
+    const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
     const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
-
-    const toScryCard = (): ScryfallCard => ({
-      id: card.scryfallId,
-      name: card.name,
-      set: card.set,
-      collector_number: card.collector_number || '',
-      cmc: card.cmc,
-      mana_cost: card.mana_cost,
-      type_line: card.type_line,
-      rarity: card.rarity || 'common',
-      color_identity: card.color_identity || [],
-      legalities: {},
-      prices: { usd: card.priceUsd?.toString(), usd_foil: card.priceUsdFoil?.toString() },
-      image_uris: {
-        small: card.imageUrl,
-        normal: card.imageUrl,
-        large: card.imageUrl,
-        art_crop: card.imageUrl,
-      },
-      imageUrl: card.imageUrl,
-      scryfallId: card.scryfallId,
-      set_name: card.set_name || '',
-    } as any);
+    const isThisCommander = card.category === 'commander';
 
     return (
       <div
         key={card.id}
-        className="group relative bg-slate-900 border border-slate-800 hover:border-fuchsia-500/60 rounded-xl overflow-hidden shadow-lg transition-all duration-200 flex flex-col justify-between"
+        className={`group relative bg-slate-900 border rounded-xl overflow-hidden shadow-lg transition-all duration-200 flex flex-col justify-between ${
+          isThisCommander ? 'border-fuchsia-500/70 shadow-fuchsia-500/10' : 'border-slate-800 hover:border-fuchsia-500/60'
+        }`}
       >
         <div
-          onClick={() => onSelectCard(toScryCard())}
+          onClick={() => onSelectCard(toScryfallCard(card))}
           className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
         >
           <img
@@ -1349,6 +1393,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               }
             }}
           />
+          {isThisCommander && (
+            <div className="absolute top-1.5 left-1.5 bg-fuchsia-950/95 border border-fuchsia-500/60 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-1 shadow-md">
+              <Crown className="w-2.5 h-2.5 text-fuchsia-400" />
+              {commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}
+            </div>
+          )}
           {card.isFoil && (
             <div className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-700/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md">
               <Sparkles className="w-2.5 h-2.5" /> Foil
@@ -1362,7 +1412,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         <div className="p-2.5 flex flex-col justify-between gap-2">
           <div>
             <h4
-              onClick={() => onSelectCard(toScryCard())}
+              onClick={() => onSelectCard(toScryfallCard(card))}
               className="text-xs font-semibold text-slate-200 break-words leading-tight hover:text-violet-400 cursor-pointer"
               title={card.name}
             >
@@ -1385,7 +1435,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <button
                 type="button"
                 onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
+                disabled={isThisCommander && card.quantity >= 1}
+                className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
               >
                 <Plus className="w-2.5 h-2.5" />
               </button>

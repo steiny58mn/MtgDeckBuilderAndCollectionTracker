@@ -121,12 +121,30 @@ export function calculateDeckStats(deck: Deck): DeckStats {
   });
 
   if (deck.format === 'commander') {
-    if (mainboardCount !== 100) {
-      illegalCards.push(`Commander decks must have exactly 100 cards (Current: ${mainboardCount})`);
-    }
-    const hasCommander = cards.some((c) => c.category === 'commander');
-    if (!hasCommander) {
+    const commanderCards = cards.filter((c) => c.category === 'commander');
+    const commanderQty = commanderCards.reduce((s, c) => s + (c.quantity || 1), 0);
+    const nonCommanderMainQty = cards
+      .filter((c) => c.category === 'main')
+      .reduce((s, c) => s + (c.quantity || 1), 0);
+
+    if (commanderCards.length === 0) {
       illegalCards.push('Missing designated Commander');
+    } else if (commanderCards.length > 2 || commanderQty > 2) {
+      illegalCards.push(`Commander decks cannot have more than 2 commanders (Current: ${commanderQty})`);
+    }
+
+    if (commanderCards.length === 2 || commanderQty === 2) {
+      if (nonCommanderMainQty !== 98) {
+        illegalCards.push(`Commander decks with 2 commanders (Partner/Background) require exactly 98 other cards in the deck (Current: ${nonCommanderMainQty})`);
+      }
+    } else if (commanderCards.length === 1 && commanderQty === 1) {
+      if (nonCommanderMainQty !== 99) {
+        illegalCards.push(`Commander decks require exactly 99 other cards in the deck (Current: ${nonCommanderMainQty})`);
+      }
+    }
+
+    if (mainboardCount !== 100) {
+      illegalCards.push(`Commander decks must have exactly 100 cards total (Current: ${mainboardCount})`);
     }
   } else if (deck.format !== 'casual' && mainboardCount < 60) {
     illegalCards.push(`Constructed decks require at least 60 mainboard cards (Current: ${mainboardCount})`);
@@ -138,7 +156,7 @@ export function calculateDeckStats(deck: Deck): DeckStats {
     sideboardCount,
     maybeboardCount,
     averageCmc,
-    totalPriceUsd: parseFloat(totalPriceUsd.toFixed(2)),
+    totalPriceUsd: parseFloat(((Number(totalPriceUsd) || 0)).toFixed(2)),
     manaCurve,
     colorPips,
     typeBreakdown,
@@ -300,7 +318,11 @@ export function getDeckCommander(deck?: Deck | null): {
   }
 
   const colorIdentity = sortWUBRG(rawIdentity);
-  const commanderName = deck.commanderName || commanderCards[0]?.name || null;
+  const commanderName = deck.commanderName || (
+    commanderCards.length > 1
+      ? commanderCards.map((c) => c.name).join(' // ')
+      : commanderCards[0]?.name || null
+  );
   const commanderArtUrl = deck.commanderArtUrl || commanderCards[0]?.imageUrl || null;
 
   return {
@@ -347,4 +369,3 @@ export function isCardLegalInCommander(
 
   return { isLegal: true };
 }
-

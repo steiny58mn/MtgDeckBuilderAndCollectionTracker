@@ -76,6 +76,9 @@ export default {
     // 3. Remote MtgTools & DeckBuilder API Proxy
     if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder')) {
       const targetUrl = `${apiTarget}${url.pathname}${url.search}`;
+      const vaultId = request.headers.get('x-vault-id');
+      const userId = request.headers.get('x-user-id');
+      console.log(`[Worker Proxy] 🔀 ${request.method} ${url.pathname} -> ${targetUrl} [Vault: ${vaultId || 'none'}]`);
 
       try {
         const headers: Record<string, string> = {
@@ -83,9 +86,7 @@ export default {
         };
         const contentType = request.headers.get('content-type');
         if (contentType) headers['Content-Type'] = contentType;
-        const vaultId = request.headers.get('x-vault-id');
         if (vaultId) headers['X-Vault-Id'] = vaultId;
-        const userId = request.headers.get('x-user-id');
         if (userId) headers['X-User-Id'] = userId;
         const auth = request.headers.get('authorization');
         if (auth) headers['Authorization'] = auth;
@@ -97,6 +98,7 @@ export default {
         });
 
         const data = await remoteRes.text();
+        console.log(`[Worker Proxy] 🔀 Upstream responded: HTTP ${remoteRes.status} (length: ${data.length})`);
         return new Response(data, {
           status: remoteRes.status,
           headers: {
@@ -105,6 +107,7 @@ export default {
           },
         });
       } catch (err: any) {
+        console.error(`[Worker Proxy] ❌ Proxy upstream error for ${targetUrl}:`, err);
         return new Response(
           JSON.stringify({ error: `Failed to proxy request to API at ${apiTarget}`, details: err.message }),
           {

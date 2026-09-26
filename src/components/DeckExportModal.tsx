@@ -15,7 +15,9 @@ import {
   Layers,
   Sparkles,
   Crown,
-  FileCode
+  FileCode,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { Deck, DeckCard, MTGFormat, DeckCategory } from '../types/mtg';
 import { 
@@ -37,21 +39,27 @@ import { fetchBatchCardsCollection } from '../services/scryfall';
 
 interface DeckExportModalProps {
   deck?: Deck | null;
+  existingDecks?: Deck[];
   isOpen: boolean;
   onClose: () => void;
   onImportAsNewDeck: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
   onImportAppendToDeck?: (cardsToAdd: DeckCard[]) => Promise<void>;
+  onImportOverwriteDeck?: (overwrittenDeck: Deck) => Promise<void>;
   initialTab?: 'export' | 'import';
 }
 
 export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   deck,
+  existingDecks = [],
   isOpen,
   onClose,
   onImportAsNewDeck,
   onImportAppendToDeck,
+  onImportOverwriteDeck,
   initialTab = 'export',
 }) => {
+  const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
+  const [targetDeckToOverwrite, setTargetDeckToOverwrite] = useState<Deck | null>(deck || (existingDecks.length > 0 ? existingDecks[0] : null));
   const [activeTab, setActiveTab] = useState<'export' | 'import'>(initialTab);
   
   // Export State
@@ -91,6 +99,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   }, [importText, selectedImportFormat]);
 
+  // Keep targetDeckToOverwrite in sync with opened deck
+  useEffect(() => {
+    if (deck) {
+      setTargetDeckToOverwrite(deck);
+    } else if (existingDecks.length > 0) {
+      setTargetDeckToOverwrite((prev) => prev || existingDecks[0]);
+    }
+  }, [deck, existingDecks]);
+
   // Update default name and format when parsed preview changes
   useEffect(() => {
     if (parsedPreview && parsedPreview.cards.length > 0) {
@@ -98,9 +115,9 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         if (parsedPreview.deckName) {
           setCustomDeckName(parsedPreview.deckName);
         } else {
-          const cmdrCard = parsedPreview.cards.find((c) => c.category === 'commander');
-          if (cmdrCard) {
-            setCustomDeckName(cmdrCard.name);
+          const cmdrCards = parsedPreview.cards.filter((c) => c.category === 'commander');
+          if (cmdrCards.length > 0) {
+            setCustomDeckName(cmdrCards.map((c) => c.name).join(' // '));
           } else {
             setCustomDeckName('Imported Deck');
           }
@@ -261,12 +278,27 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         };
       });
 
+      // Ensure single/partner sideboard card is promoted to commander if importing as Commander
+      if (customDeckFormat === 'commander') {
+        const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+        const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
+        const totalSideboardQty = sideboardCards.reduce((s, c) => s + c.quantity, 0);
+
+        if (cmdrCards.length === 0 && sideboardCards.length >= 1 && sideboardCards.length <= 2 && totalSideboardQty === sideboardCards.length) {
+          sideboardCards.forEach((sc) => { sc.category = 'commander'; });
+        }
+      }
+
       // 3. Extract commander details
       const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
       const commanderName = cmdrCards.length > 1
         ? cmdrCards.map((c) => c.name).join(' // ')
         : cmdrCards[0]?.name;
       const commanderArtUrl = cmdrCards[0]?.imageUrl;
+      const commanderId = cmdrCards[0]?.scryfallId;
+      const commanderColorIdentity = cmdrCards.length > 1
+        ? Array.from(new Set(cmdrCards.flatMap((c) => c.color_identity || [])))
+        : cmdrCards[0]?.color_identity;
 
       const finalDeckName = customDeckName.trim() || 
         parsedPreview.deckName || 
@@ -279,8 +311,10 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         format: customDeckFormat || (cmdrCards.length > 0 ? 'commander' : 'casual'),
         description: `Imported via ${parsedPreview.detectedFormat.toUpperCase()} format with ${resolvedCards.reduce((s, c) => s + c.quantity, 0)} cards.`,
         cards: resolvedCards,
+        commanderId,
         commanderName,
         commanderArtUrl,
+        commanderColorIdentity,
         coverCardUrl: commanderArtUrl || resolvedCards[0]?.imageUrl,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -292,6 +326,98 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     } catch (err: any) {
       console.error('Import execution error:', err);
       setImportError('Import failed: ' + (err.message || 'Unknown error resolving cards'));
+    } finally {
+      setIsResolvingCards(false);
+      setResolveProgress('');
+    }
+  };
+
+  // Execute overwriting target deck with imported cards
+  const executeOverwriteDeckImport = async (targetDeck: Deck) => {
+    if (!parsedPreview || parsedPreview.cards.length === 0 || !onImportOverwriteDeck) return;
+    setIsResolvingCards(true);
+    setImportError(null);
+    setResolveProgress('Resolving imported cards with Scryfall database...');
+
+    try {
+      const cardsToFetch = parsedPreview.cards.map((c) => ({
+        name: c.name,
+        set: c.set,
+      }));
+
+      const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
+
+      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => {
+        const exactLower = item.name.toLowerCase().trim();
+        const frontLower = exactLower.split(' // ')[0].trim();
+        const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
+
+        return {
+          id: `card-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+          scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
+          name: matchedScry?.name || item.name,
+          set: matchedScry?.set || item.set,
+          set_name: matchedScry?.set_name,
+          collector_number: matchedScry?.collector_number || item.collector_number,
+          category: item.category,
+          quantity: item.quantity,
+          mana_cost: matchedScry?.mana_cost,
+          cmc: matchedScry?.cmc,
+          type_line: matchedScry?.type_line,
+          colors: matchedScry?.colors,
+          color_identity: matchedScry?.color_identity,
+          rarity: matchedScry?.rarity,
+          imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
+          priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
+          priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
+          isFoil: item.isFoil,
+        };
+      });
+
+      if (customDeckFormat === 'commander') {
+        const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+        const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
+        const totalSideboardQty = sideboardCards.reduce((s, c) => s + c.quantity, 0);
+
+        if (cmdrCards.length === 0 && sideboardCards.length >= 1 && sideboardCards.length <= 2 && totalSideboardQty === sideboardCards.length) {
+          sideboardCards.forEach((sc) => { sc.category = 'commander'; });
+        }
+      }
+
+      const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+      const commanderName = cmdrCards.length > 1
+        ? cmdrCards.map((c) => c.name).join(' // ')
+        : cmdrCards[0]?.name;
+      const commanderArtUrl = cmdrCards[0]?.imageUrl;
+      const commanderId = cmdrCards[0]?.scryfallId;
+      const commanderColorIdentity = cmdrCards.length > 1
+        ? Array.from(new Set(cmdrCards.flatMap((c) => c.color_identity || [])))
+        : cmdrCards[0]?.color_identity;
+
+      const finalDeckName = customDeckName.trim() || 
+        parsedPreview.deckName || 
+        targetDeck.name;
+
+      const overwrittenDeck: Deck = {
+        ...targetDeck,
+        name: finalDeckName,
+        format: customDeckFormat || (cmdrCards.length > 0 ? 'commander' : targetDeck.format),
+        description: `Imported via ${parsedPreview.detectedFormat.toUpperCase()} format with ${resolvedCards.reduce((s, c) => s + c.quantity, 0)} cards.`,
+        cards: resolvedCards,
+        commanderId,
+        commanderName,
+        commanderArtUrl,
+        commanderColorIdentity,
+        coverCardUrl: commanderArtUrl || resolvedCards[0]?.imageUrl || targetDeck.coverCardUrl,
+        updatedAt: Date.now(),
+      };
+
+      await onImportOverwriteDeck(overwrittenDeck);
+      setShowOverwriteConfirmModal(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Import overwrite error:', err);
+      setImportError('Import overwrite failed: ' + (err.message || 'Unknown error resolving cards'));
     } finally {
       setIsResolvingCards(false);
       setResolveProgress('');
@@ -335,6 +461,18 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           isFoil: item.isFoil,
         };
       });
+
+      // If target deck is Commander format and currently has no commander,
+      // and there are 1 or 2 cards in the Sideboard being added, set those as Commander
+      if (deck && deck.format === 'commander' && !deck.cards.some((c) => c.category === 'commander')) {
+        const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+        const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
+        const totalSideQty = sideboardCards.reduce((s, c) => s + c.quantity, 0);
+
+        if (cmdrCards.length === 0 && sideboardCards.length >= 1 && sideboardCards.length <= 2 && totalSideQty === sideboardCards.length) {
+          sideboardCards.forEach((sc) => { sc.category = 'commander'; });
+        }
+      }
 
       await onImportAppendToDeck(resolvedCards);
       onClose();
@@ -794,6 +932,25 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 </button>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Overwrite existing deck button */}
+                  {onImportOverwriteDeck && (deck || existingDecks.length > 0) && (
+                    <button
+                      onClick={() => {
+                        if (!parsedPreview || parsedPreview.cards.length === 0) {
+                          setImportError('Please enter cards to import first.');
+                          return;
+                        }
+                        setShowOverwriteConfirmModal(true);
+                      }}
+                      disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                      title={deck ? `Replace all cards in "${deck.name}" with imported list` : 'Select an existing deck to overwrite'}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{deck ? 'Overwrite Deck' : 'Overwrite Existing Deck...'}</span>
+                    </button>
+                  )}
+
                   {/* Append to current deck button if active deck exists */}
                   {deck && onImportAppendToDeck && (
                     <button
@@ -833,6 +990,91 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           </div>
         )}
       </div>
+
+            {/* ================= Confirmation Modal: Overwrite Existing Deck ================= */}
+      {showOverwriteConfirmModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+          <div 
+            className="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-2xl p-5 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Overwrite Deck with Imported Cards?
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  This will <strong>replace all existing cards</strong> in the target deck with the {totalParsedCards} imported cards.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-2">
+              {existingDecks && existingDecks.length > 0 && !deck ? (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Select Target Deck to Overwrite:
+                  </label>
+                  <select
+                    value={targetDeckToOverwrite?.id || ''}
+                    onChange={(e) => {
+                      const found = existingDecks.find((d) => d.id === e.target.value);
+                      if (found) setTargetDeckToOverwrite(found);
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-400"
+                  >
+                    {existingDecks.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.cards.reduce((s, c) => s + c.quantity, 0)} cards)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center">
+                  <span>Target Deck:</span>
+                  <span className="font-semibold text-amber-300">
+                    {targetDeckToOverwrite?.name || deck?.name} ({targetDeckToOverwrite?.cards.reduce((s, c) => s + c.quantity, 0) || deck?.cards.reduce((s, c) => s + c.quantity, 0) || 0} cards)
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span>Replacement Cards:</span>
+                <span className="font-semibold text-emerald-400">
+                  {totalParsedCards} cards ({parsedPreview?.detectedFormat.toUpperCase()} format)
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => {
+                  const target = targetDeckToOverwrite || deck;
+                  if (target) {
+                    executeOverwriteDeckImport(target);
+                  }
+                }}
+                disabled={isResolvingCards}
+                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Confirm &amp; Overwrite Deck</span>
+              </button>
+
+              <button
+                onClick={() => setShowOverwriteConfirmModal(false)}
+                disabled={isResolvingCards}
+                className="w-full py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= Confirmation Modal: Save Current Deck Before Importing ================= */}
       {showSaveConfirmModal && deck && (

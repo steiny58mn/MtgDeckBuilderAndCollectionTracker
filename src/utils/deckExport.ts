@@ -409,8 +409,9 @@ export function generateCSV(deck: Deck): string {
   const rows: string[] = [headers.join(',')];
 
   deck.cards.forEach((c) => {
-    const unitPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
-    const lineTotal = (unitPrice * c.quantity).toFixed(2);
+    const rawPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
+    const unitPrice = typeof rawPrice === 'number' ? rawPrice : (parseFloat(String(rawPrice)) || 0);
+    const lineTotal = ((Number(unitPrice) || 0) * c.quantity).toFixed(2);
     rows.push(
       [
         c.quantity,
@@ -465,8 +466,9 @@ export function generateExcelTSV(deck: Deck): string {
   const rows: string[] = [headers.join('\t')];
 
   deck.cards.forEach((c) => {
-    const unitPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
-    const lineTotal = (unitPrice * c.quantity).toFixed(2);
+    const rawPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
+    const unitPrice = typeof rawPrice === 'number' ? rawPrice : (parseFloat(String(rawPrice)) || 0);
+    const lineTotal = ((Number(unitPrice) || 0) * c.quantity).toFixed(2);
     rows.push(
       [
         c.quantity,
@@ -504,7 +506,8 @@ export function generateExcelWorkbook(deck: Deck): string {
   let totalCards = 0;
 
   deck.cards.forEach((c) => {
-    const unitPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
+    const rawPrice = c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0;
+    const unitPrice = typeof rawPrice === 'number' ? rawPrice : (parseFloat(String(rawPrice)) || 0);
     const lineTotal = unitPrice * c.quantity;
     grandTotal += lineTotal;
     totalCards += c.quantity;

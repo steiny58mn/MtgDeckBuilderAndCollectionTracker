@@ -403,10 +403,10 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             ${totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <div className="flex items-center gap-1 text-[11px] mt-1 text-slate-400">
-            <span>Basis: ${totalAcquiredValue.toFixed(2)}</span>
+            <span>Basis: ${(Number(totalAcquiredValue) || 0).toFixed(2)}</span>
             {totalGainLoss !== 0 && (
               <span className={`font-semibold flex items-center ${totalGainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                ({totalGainLoss >= 0 ? '+' : ''}${totalGainLoss.toFixed(2)})
+                ({totalGainLoss >= 0 ? '+' : ''}${(Number(totalGainLoss) || 0).toFixed(2)})
               </span>
             )}
           </div>
@@ -716,7 +716,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[11px] font-mono text-emerald-400 font-bold">
-                            ${categoryValue.toFixed(2)}
+                            ${(Number(categoryValue) || 0).toFixed(2)}
                           </span>
                           {categoryFoils > 0 && (
                             <span className="text-[10px] font-mono text-violet-400 flex items-center gap-0.5">
@@ -738,7 +738,8 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                       {/* Cards in Category */}
                       <div className="divide-y divide-slate-800/60 max-h-[480px] overflow-y-auto">
                         {cat.cards.map((card) => {
-                          const unitPrice = card.currentPriceUsd || 0;
+                          const rawPrice = card.currentPriceUsd || 0;
+                          const unitPrice = typeof rawPrice === 'number' ? rawPrice : (parseFloat(String(rawPrice)) || 0);
                           const lineTotal = unitPrice * card.quantity;
 
                           return (
@@ -790,9 +791,9 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                                     <span className="uppercase font-mono">{card.set} · #{card.collectorNumber}</span>
                                     <span>·</span>
-                                    <span className="text-emerald-400 font-mono font-medium">${lineTotal.toFixed(2)}</span>
+                                    <span className="text-emerald-400 font-mono font-medium">${(Number(lineTotal) || 0).toFixed(2)}</span>
                                     {card.quantity > 1 && (
-                                      <span className="text-slate-400">(${unitPrice.toFixed(2)} ea)</span>
+                                      <span className="text-slate-400">(${(Number(unitPrice) || 0).toFixed(2)} ea)</span>
                                     )}
                                   </div>
                                 </div>
@@ -897,7 +898,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                       )}
 
                       <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400">
-                        ${lineTotal.toFixed(2)}
+                        ${(Number(lineTotal) || 0).toFixed(2)}
                       </div>
 
                       <div className="absolute bottom-1.5 right-1.5 bg-slate-900/90 border border-slate-700 rounded-md px-1 py-0.5 text-[9px] font-mono text-slate-300">
@@ -919,7 +920,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           <span className="uppercase font-mono">{card.set} · #{card.collectorNumber}</span>
                           {gain !== 0 && (
                             <span className={`font-semibold ${gain > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {gain > 0 ? '+' : ''}${gain.toFixed(2)}
+                              {gain > 0 ? '+' : ''}${(Number(gain) || 0).toFixed(2)}
                             </span>
                           )}
                         </div>
@@ -1037,8 +1038,8 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                         </td>
                         <td className="py-2.5 px-3 font-mono text-slate-300 font-semibold">{card.condition}</td>
                         <td className="py-2.5 px-3 font-bold text-slate-100">{card.quantity}</td>
-                        <td className="py-2.5 px-3 text-right font-medium text-slate-300">${unitPrice.toFixed(2)}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-emerald-400">${lineTotal.toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-300">${(Number(unitPrice) || 0).toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-400">${(Number(lineTotal) || 0).toFixed(2)}</td>
                         <td className="py-2.5 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">
                             {activeDeck && (
