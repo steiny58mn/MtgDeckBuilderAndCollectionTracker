@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard } from '../types/mtg';
-import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander } from '../utils/deckUtils';
+import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander, getCardCategorySortOrder } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
@@ -47,7 +47,7 @@ interface DeckBuilderProps {
   onBack: () => void;
   onUpdateDeck: (deck: Deck) => void;
   onDeleteDeck: (deckId: string) => void;
-  onOpenSearch: (category?: DeckCategory) => void;
+  onOpenSearch: (category?: DeckCategory | 'partner') => void;
   onSelectCard: (card: ScryfallCard) => void;
   onCreateNewDeck?: (currentDeckToSave: Deck) => Promise<void> | void;
   onImportAsNewDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
@@ -76,7 +76,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>('main');
   const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
-  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color'>('name');
+  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>('name');
   const [isSavingNewDeck, setIsSavingNewDeck] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean;
@@ -375,6 +375,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   // Group cards for the current view
   const sortCards = (cards: DeckCard[]) => {
     return [...cards].sort((a, b) => {
+      if (sortCardsBy === 'category') {
+        const catA = getCardCategorySortOrder(a);
+        const catB = getCardCategorySortOrder(b);
+        if (catA !== catB) return catA - catB;
+        const cmcA = a.cmc || 0;
+        const cmcB = b.cmc || 0;
+        if (cmcA !== cmcB) return cmcA - cmcB;
+        return a.name.localeCompare(b.name);
+      }
       if (sortCardsBy === 'cmc') {
         const cmcA = a.cmc || 0;
         const cmcB = b.cmc || 0;
@@ -406,11 +415,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const groupCardsByType = (cards: DeckCard[]) => {
     const groups: Record<string, DeckCard[]> = {
       'Creatures': [],
+      'Planeswalkers': [],
       'Instants & Sorceries': [],
       'Artifacts & Enchantments': [],
-      'Planeswalkers': [],
-      'Lands': [],
       'Other': [],
+      'Lands': [],
     };
 
     cards.forEach((c) => {
@@ -583,7 +592,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             {canShowAddPartner && (
               <button
                 type="button"
-                onClick={() => onOpenSearch(activeCategoryTab)}
+                onClick={() => onOpenSearch(commanderCards.length === 1 ? 'partner' : activeCategoryTab)}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-xs font-bold transition-all cursor-pointer"
                 title={commanderCards.length === 0 ? 'Search and add Commander' : `Search and add Partner (${firstCmdrPartnerInfo?.description})`}
               >
@@ -992,10 +1001,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Sort By */}
           <select
             value={sortCardsBy}
-            onChange={(e) => setSortCardsBy(e.target.value as 'name' | 'cmc' | 'color')}
+            onChange={(e) => setSortCardsBy(e.target.value as 'name' | 'cmc' | 'color' | 'category')}
             className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2 py-1.5 text-slate-300 focus:outline-none"
           >
             <option value="name">A-Z</option>
+            <option value="category">Category (Lands at bottom)</option>
             <option value="cmc">Mana Value</option>
             <option value="color">Color</option>
           </select>
@@ -1003,19 +1013,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
             <button
               type="button"
-              onClick={() => setViewMode('category-grid')}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
-                viewMode === 'category-grid' ? 'bg-slate-800 text-violet-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Category Layout"
-            >
-              <Columns3 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Categories</span>
-            </button>
-            <button
-              type="button"
               onClick={() => setViewMode('grid')}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
                 viewMode === 'grid' ? 'bg-slate-800 text-violet-400 font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
               title="Card Grid View"
@@ -1026,7 +1025,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <button
               type="button"
               onClick={() => setViewMode('tabbed')}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
                 viewMode === 'tabbed' ? 'bg-slate-800 text-violet-400 font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
               title="Tabbed List View"

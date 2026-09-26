@@ -28,6 +28,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search'>('decks');
   const [searchContext, setSearchContext] = useState<'deck' | 'binder'>('deck');
   const [searchTargetCategory, setSearchTargetCategory] = useState<DeckCategory>('main');
+  const [searchPartnerMode, setSearchPartnerMode] = useState<boolean>(false);
   const [decks, setDecks] = useState<Deck[]>([]);
   const [collectionCards, setCollectionCards] = useState<CollectionCard[]>([]);
   const [binders, setBinders] = useState<Binder[]>([]);
@@ -567,7 +568,13 @@ export default function App() {
               onDeleteDeck={handleDeleteDeck}
               onOpenSearch={(category) => {
                 setSearchContext('deck');
-                if (category) setSearchTargetCategory(category);
+                if (category === 'partner') {
+                  setSearchTargetCategory('commander');
+                  setSearchPartnerMode(true);
+                } else {
+                  if (category) setSearchTargetCategory(category);
+                  setSearchPartnerMode(false);
+                }
                 setActiveTab('search');
               }}
               onSelectCard={(c) => setInspectedCard(c)}
@@ -627,6 +634,8 @@ export default function App() {
           <CardSearchView
             isActive={activeTab === 'search'}
             initialTargetCategory={searchTargetCategory}
+            initialPartnerMode={searchPartnerMode}
+            onResetPartnerSearchRequest={() => setSearchPartnerMode(false)}
             searchContext={searchContext}
             onSetSearchContext={(ctx) => setSearchContext(ctx)}
             activeDeck={activeDeck}

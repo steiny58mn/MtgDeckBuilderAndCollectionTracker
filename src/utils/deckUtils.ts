@@ -561,3 +561,59 @@ export function canCardsPartnerTogether(
     reason: 'Incompatible partner mechanics: "' + cmdr1.name + '" (' + p1.description + ') cannot pair with "' + cmdr2.name + '" (' + p2.description + ').',
   };
 }
+
+/**
+ * Returns a numerical sort rank for a card based on its primary type/category.
+ * In MTG deckbuilding, standard sort order is:
+ * Creatures -> Planeswalkers -> Battles -> Instants -> Sorceries -> Artifacts -> Enchantments -> Other -> Lands.
+ * Lands are always assigned the lowest priority (highest number) so they appear at the bottom.
+ */
+export function getCardCategorySortOrder(card: { type_line?: string }): number {
+  const t = (card.type_line || '').toLowerCase();
+  // Lands must be at the bottom of the sort
+  if (t.includes('land')) return 99;
+  if (t.includes('creature') || t.includes('summon')) return 1;
+  if (t.includes('planeswalker')) return 2;
+  if (t.includes('battle')) return 3;
+  if (t.includes('instant')) return 4;
+  if (t.includes('sorcery')) return 5;
+  if (t.includes('artifact')) return 6;
+  if (t.includes('enchantment')) return 7;
+  return 8; // other
+}
+
+/**
+ * Constructs a Scryfall query to search for all legal partner/background cards
+ * that can pair with the given primary commander.
+ */
+export function getPartnerScryfallQuery(cmdr: {
+  name?: string;
+  type_line?: string;
+  oracle_text?: string;
+  keywords?: string[];
+}): string | null {
+  const pInfo = getCardPartnerInfo(cmdr);
+  if (!pInfo.canHavePartner) return null;
+
+  switch (pInfo.partnerType) {
+    case 'partner':
+      return 'f:commander is:commander kw:partner -o:"partner with" not:digital';
+    case 'choose_background':
+      return 'f:commander t:background t:enchantment t:legendary not:digital';
+    case 'background':
+      return 'f:commander (o:"choose a background" or kw:"choose a background") t:legendary not:digital';
+    case 'partner_with':
+      if (pInfo.partnerWithTarget) {
+        return '!"' + pInfo.partnerWithTarget + '" not:digital';
+      }
+      return 'f:commander o:"partner with" not:digital';
+    case 'doctors_companion':
+      return 'f:commander t:"time lord" t:doctor not:digital';
+    case 'doctor':
+      return 'f:commander (kw:"doctor\'s companion" or o:"doctor\'s companion") not:digital';
+    case 'friends_forever':
+      return 'f:commander o:"friends forever" not:digital';
+    default:
+      return null;
+  }
+}

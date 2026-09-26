@@ -29,7 +29,15 @@ import { searchCards, getAutocomplete, getCardImageUrl, SearchResult } from '../
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
 import { CommanderDeckCount, CardSynergyPercentage } from './EdhrecStats';
-import { getDeckCommander, isCardLegalInCommander, canBePrimaryCommander, canCardsPartnerTogether } from '../utils/deckUtils';
+import { 
+  getDeckCommander, 
+  isCardLegalInCommander, 
+  canBePrimaryCommander, 
+  canCardsPartnerTogether,
+  getCardPartnerInfo,
+  getPartnerScryfallQuery,
+  getCardCategorySortOrder
+} from '../utils/deckUtils';
 
 interface CardSearchViewProps {
   isActive?: boolean;
@@ -46,6 +54,8 @@ interface CardSearchViewProps {
   onReturnToDeck?: () => void;
   onReturnToBinder?: () => void;
   initialTargetCategory?: DeckCategory;
+  initialPartnerMode?: boolean;
+  onResetPartnerSearchRequest?: () => void;
 }
 
 const CARD_TYPES = [
@@ -104,6 +114,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   onReturnToDeck,
   onReturnToBinder,
   initialTargetCategory = 'main',
+  initialPartnerMode = false,
+  onResetPartnerSearchRequest,
 }) => {
   const isDeckContext = searchContext === 'deck';
   const [targetDeckCategory, setTargetDeckCategory] = useState<DeckCategory>(initialTargetCategory);
@@ -118,6 +130,96 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const isCommanderDeck = activeDeck?.format === 'commander';
   const hasCommander = Boolean(commanderInfo?.commanderName);
   const commanderColorIdentity = commanderInfo?.colorIdentity || [];
+  const commanderCards = (activeDeck?.cards || []).filter((c) => c.category === 'commander');
+  const firstCmdrPartnerInfo = commanderCards.length === 1 ? getCardPartnerInfo(commanderCards[0]) : null;
+  const canHavePartner = isCommanderDeck && commanderCards.length === 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
+
+  const [isPartnerMode, setIsPartnerMode] = useState<boolean>(initialPartnerMode || false);
+
+  useEffect(() => {
+    if (initialPartnerMode) {
+      setIsPartnerMode(true);
+      setSearchTerm('');
+      setSelectedColors([]);
+      setSelectedTypes([]);
+      setCustomSubtype('');
+      setSelectedSupertypes([]);
+      setOracleText('');
+      setCmcValue('');
+      setCmcMax('');
+      setSpecificManaCost('');
+      setSelectedRarity('');
+      setPage(1);
+      onResetPartnerSearchRequest?.();
+    }
+  }, [initialPartnerMode]);
+
+  // Transition detection:
+  // After a Commander is chosen, if it can be a partner variant, show all legal options for the other card.
+  // If not, or once the other card is chosen, reset the search criteria so it just shows all cards available to choose.
+  const prevCmdrCount = useRef(commanderCards.length);
+  const prevFirstCmdrId = useRef(commanderCards[0]?.id);
+
+  useEffect(() => {
+    if (!isDeckContext || !isCommanderDeck) {
+      return;
+    }
+
+    const countChanged = commanderCards.length !== prevCmdrCount.current;
+    const firstCmdrChanged = commanderCards[0]?.id !== prevFirstCmdrId.current;
+
+    if (countChanged || firstCmdrChanged) {
+      prevCmdrCount.current = commanderCards.length;
+      prevFirstCmdrId.current = commanderCards[0]?.id;
+
+      if (commanderCards.length === 1) {
+        const pInfo = getCardPartnerInfo(commanderCards[0]);
+        if (pInfo.canHavePartner) {
+          // Commander is a partner variant -> show all legal options for the other card
+          setIsPartnerMode(true);
+          setSearchTerm('');
+          setSelectedColors([]);
+          setSelectedTypes([]);
+          setCustomSubtype('');
+          setSelectedSupertypes([]);
+          setOracleText('');
+          setCmcValue('');
+          setCmcMax('');
+          setSpecificManaCost('');
+          setSelectedRarity('');
+          setPage(1);
+        } else {
+          // If not -> reset search criteria to show all cards available to choose
+          setIsPartnerMode(false);
+          setSearchTerm('');
+          setSelectedColors([]);
+          setSelectedTypes([]);
+          setCustomSubtype('');
+          setSelectedSupertypes([]);
+          setOracleText('');
+          setCmcValue('');
+          setCmcMax('');
+          setSpecificManaCost('');
+          setSelectedRarity('');
+          setPage(1);
+        }
+      } else if (commanderCards.length >= 2 || commanderCards.length === 0) {
+        // Once the other card is chosen (or no commander) -> reset search criteria
+        setIsPartnerMode(false);
+        setSearchTerm('');
+        setSelectedColors([]);
+        setSelectedTypes([]);
+        setCustomSubtype('');
+        setSelectedSupertypes([]);
+        setOracleText('');
+        setCmcValue('');
+        setCmcMax('');
+        setSpecificManaCost('');
+        setSelectedRarity('');
+        setPage(1);
+      }
+    }
+  }, [commanderCards.length, commanderCards[0]?.id, isDeckContext, isCommanderDeck]);
 
   // Helper to get count of copies of card currently in active deck
   const getDeckCopies = (card: ScryfallCard): number => {
@@ -233,7 +335,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [copiedQuery, setCopiedQuery] = useState<boolean>(false);
 
   // Sorting
-  const [sortBy, setSortBy] = useState<'name' | 'usd' | 'cmc' | 'rarity' | 'edhrec' | 'released' | 'synergy' | 'commander_decks'>(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'commander_decks') : 'edhrec'));
+  const [sortBy, setSortBy] = useState<'name' | 'usd' | 'cmc' | 'rarity' | 'edhrec' | 'released' | 'synergy' | 'commander_decks' | 'category'>(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'commander_decks') : 'edhrec'));
   const [sortDir, setSortDir] = useState<'auto' | 'asc' | 'desc'>('auto');
   const [showSyntaxHelp, setShowSyntaxHelp] = useState(false);
 
@@ -314,12 +416,21 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
     // ONLY apply deck-specific format/color identity constraints if we are actively searching for the deck
     if (isDeckContext) {
-      if (isCommanderDeck && hasCommander) {
-        boundaryClauses.push('f:commander');
-        const idString = commanderColorIdentity.length === 0
-          ? 'c'
-          : commanderColorIdentity.map((c) => c.toLowerCase()).join('');
-        boundaryClauses.push(`id<=${idString}`);
+      if (isCommanderDeck) {
+        if (isPartnerMode && commanderCards.length === 1 && firstCmdrPartnerInfo?.canHavePartner) {
+          const partnerQuery = getPartnerScryfallQuery(commanderCards[0]);
+          if (partnerQuery) {
+            boundaryClauses.push(partnerQuery);
+          }
+        } else if (hasCommander) {
+          boundaryClauses.push('f:commander');
+          const idString = commanderColorIdentity.length === 0
+            ? 'c'
+            : commanderColorIdentity.map((c) => c.toLowerCase()).join('');
+          boundaryClauses.push(`id<=${idString}`);
+        } else {
+          boundaryClauses.push('f:commander');
+        }
       } else {
         const effectiveFormat = selectedFormat || (activeDeck?.format !== 'commander' ? activeDeck?.format : '');
         if (effectiveFormat && effectiveFormat !== 'casual') {
@@ -382,7 +493,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
     try {
       // If sorting by synergy, ask Scryfall to sort by global EDHREC first so the page contains popular cards
-      const scryfallSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks') ? 'edhrec' : sortBy;
+      const scryfallSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category') ? 'edhrec' : sortBy;
       
       const res = await searchCards({
         query,
@@ -394,6 +505,21 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       
       let processedData = res.data;
       
+      // Client-side sorting for Category (Lands at bottom)
+      if (sortBy === 'category') {
+        processedData.sort((a, b) => {
+          const priorityA = getCardCategorySortOrder(a);
+          const priorityB = getCardCategorySortOrder(b);
+          if (priorityA !== priorityB) {
+            return sortDir === 'desc' ? priorityB - priorityA : priorityA - priorityB;
+          }
+          const cmcA = a.cmc || 0;
+          const cmcB = b.cmc || 0;
+          if (cmcA !== cmcB) return cmcA - cmcB;
+          return a.name.localeCompare(b.name);
+        });
+      }
+
       // Client-side sorting for Synergy/Commander Decks
       if (sortBy === 'synergy' && activeDeck?.commanderName) {
         const stats = await getCommanderData(activeDeck.commanderName);
@@ -503,6 +629,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [
+    isPartnerMode,
     filterMatchMode,
     selectedColors,
     selectedTypes,
@@ -544,6 +671,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   }, [searchTerm]);
 
   const isColorDisabledByCommander = (colorKey: string) => {
+    if (isPartnerMode) return false;
     if (!isCommanderDeck || !hasCommander) return false;
     if (colorKey === 'C') return false;
     return !commanderColorIdentity.includes(colorKey);
@@ -934,6 +1062,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               <option value="edhrec">Global Popularity</option>
               {isCommanderDeck && commanderInfo?.commanderName && <option value="synergy">Commander Synergy %</option>}
               {isCommanderDeck && !commanderInfo?.commanderName && <option value="commander_decks">Commander Popularity</option>}
+              <option value="category">Category (Lands at bottom)</option>
 
               <option value="usd">Price (USD)</option>
               <option value="name">Name (A-Z)</option>
@@ -1387,6 +1516,36 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       </div>
 
       {/* Results Header */}
+      {isPartnerMode && commanderCards.length === 1 && firstCmdrPartnerInfo?.canHavePartner && (
+        <div className="bg-gradient-to-r from-fuchsia-950/80 via-purple-950/60 to-slate-900 border border-fuchsia-500/50 rounded-xl p-3 flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <Crown className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-fuchsia-200">
+                  Legal Partner Options for:
+                </span>
+                <span className="text-xs font-black text-amber-300">
+                  {commanderCards[0].name}
+                </span>
+              </div>
+              <p className="text-[11px] text-fuchsia-300/80">
+                {firstCmdrPartnerInfo.description}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsPartnerMode(false);
+              setSearchTerm('');
+            }}
+            className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 font-medium border border-slate-700"
+          >
+            Show all cards instead
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 px-1 gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <span>
@@ -1439,6 +1598,20 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   Maybeboard
                 </button>
               </div>
+              {!isPartnerMode && canHavePartner && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPartnerMode(true);
+                    setSearchTerm('');
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition-colors cursor-pointer flex items-center gap-1.5"
+                  title={`Find legal partner/background options for ${commanderCards[0]?.name}`}
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Find Legal Partner</span>
+                </button>
+              )}
             </div>
           )}
           {isBinderContext && (
@@ -1599,6 +1772,19 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                               >
                                 <Crown className="w-3.5 h-3.5" />
                                 <span>Set as Commander</span>
+                              </button>
+                            );
+                          }
+
+                          if (isPartnerMode || isCandidatePartner) {
+                            return (
+                              <button
+                                onClick={() => onQuickAddToDeck(card, 'commander')}
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
+                                title={`Designate ${card.name} as Partner Commander`}
+                              >
+                                <Crown className="w-3.5 h-3.5 text-amber-300" />
+                                <span>+ Choose as Partner</span>
                               </button>
                             );
                           }
