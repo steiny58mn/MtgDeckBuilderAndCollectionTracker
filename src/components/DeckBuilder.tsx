@@ -375,8 +375,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
   };
 
-  // Main cards include all mainboard cards and commanders (commanders display badges and appear under their card type)
-  const mainCards = sortCards(deck.cards.filter((c) => c.category === 'main' || c.category === 'commander'));
+  // Main cards include all mainboard cards; commanders are kept separate in their own panel at the top
+  const mainCards = sortCards(deck.cards.filter((c) => c.category === 'main'));
   const sideCards = sortCards(deck.cards.filter((c) => c.category === 'sideboard'));
   const maybeCards = sortCards(deck.cards.filter((c) => c.category === 'maybeboard'));
 
@@ -500,6 +500,93 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     scryfallId: card.scryfallId,
     set_name: card.set_name || '',
   } as any);
+
+  const renderCommanderPanel = () => {
+    if (deck.format !== 'commander' && commanderCards.length === 0) return null;
+
+    const totalCommanderPrice = commanderCards.reduce(
+      (s, c) => s + (getCardUnitPrice(c) * c.quantity),
+      0
+    );
+
+    return (
+      <div className="bg-slate-900 border border-fuchsia-500/40 rounded-2xl overflow-hidden shadow-xl shadow-fuchsia-500/5 mb-4">
+        <div className="p-3.5 bg-gradient-to-r from-fuchsia-950/70 via-slate-950/80 to-slate-950/80 border-b border-fuchsia-500/30 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30 shrink-0">
+              <Crown className="w-4 h-4 text-fuchsia-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-bold text-fuchsia-200 tracking-wide uppercase">
+                  {commanderCards.length > 1 ? 'Commanders (Partner / Background)' : 'Commander'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-fuchsia-950 text-[10px] font-mono text-fuchsia-300 border border-fuchsia-500/40 font-bold">
+                  {commanderCards.reduce((s, c) => s + c.quantity, 0)} {commanderCards.length === 2 ? '/ 2' : '/ 1'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {commanderCards.length === 2
+                  ? '2 commanders designated. Remaining mainboard is limited to 98 cards.'
+                  : commanderCards.length === 1
+                  ? '1 commander designated. Remaining mainboard is limited to 99 cards.'
+                  : 'Designate your legendary creature or planeswalker as Commander.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {commanderName && deck.name.trim().toLowerCase() !== commanderName.trim().toLowerCase() && (
+              <button
+                type="button"
+                onClick={handleUpdateDeckNameToCommander}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-semibold transition-colors cursor-pointer"
+                title={`Update deck name to Commander: "${commanderName}"`}
+              >
+                <Crown className="w-3 h-3 text-fuchsia-400" />
+                <span className="hidden sm:inline">Name deck after Commander</span>
+              </button>
+            )}
+
+            {commanderCards.length > 0 && (
+              <span className="text-xs font-mono text-emerald-400 font-bold">
+                ${(Number(totalCommanderPrice) || 0).toFixed(2)}
+              </span>
+            )}
+
+            {commanderCards.length < 2 && (
+              <button
+                type="button"
+                onClick={onOpenSearch}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-xs font-bold transition-all cursor-pointer"
+                title={commanderCards.length === 0 ? 'Search and add Commander' : 'Search and add Partner Commander'}
+              >
+                <Plus className="w-3 h-3" />
+                <span>{commanderCards.length === 0 ? 'Add Commander' : '+ Partner'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {commanderCards.length > 0 ? (
+          viewMode === 'grid' ? (
+            <div className="p-3.5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {commanderCards.map((card) => renderCardGridItem(card))}
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800/60">
+              {commanderCards.map((card) => renderCardRow(card))}
+            </div>
+          )
+        ) : (
+          <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2">
+            <Crown className="w-6 h-6 text-slate-600 animate-pulse" />
+            <p>No commander assigned yet. Click <strong>&quot;+ Add Commander&quot;</strong> or assign any legendary card from your deck.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -867,7 +954,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Mainboard ({stats.mainboardCount})
+            Mainboard ({deck.format === 'commander' ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})
           </button>
 
           <button
@@ -964,6 +1051,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       {/* Category Grid View */}
       {viewMode === 'category-grid' ? (
         <div className="space-y-4">
+          {renderCommanderPanel()}
           <div className="flex items-center justify-between text-xs text-slate-400 px-1">
             <span className="flex items-center gap-1.5 font-medium">
               <LayoutGrid className="w-3.5 h-3.5 text-violet-400" />
@@ -1037,6 +1125,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Mainboard Tab */}
           {activeCategoryTab === 'main' && (
             <div className="space-y-6">
+              {renderCommanderPanel()}
               {Object.entries(groupedMain).map(([groupTitle, cardsInGroup]) => {
                 if (cardsInGroup.length === 0) return null;
                 const groupTotalQty = cardsInGroup.reduce((a, b) => a + b.quantity, 0);
@@ -1056,7 +1145,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               {mainCards.length === 0 && (
                 <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
                   <Layers className="w-8 h-8 mx-auto text-slate-600" />
-                  <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search and add cards from Scryfall.</p>
+                  <p className="text-xs font-medium">
+                    {commanderCards.length > 0
+                      ? `Commander is set. Add ${deck.format === 'commander' ? (commanderCards.length === 2 ? 98 : 99) : ''} cards to complete your deck.`
+                      : 'Your deck is empty. Click "+ Add Cards" to search and add cards from Scryfall.'}
+                  </p>
                   <button
                     onClick={onOpenSearch}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
