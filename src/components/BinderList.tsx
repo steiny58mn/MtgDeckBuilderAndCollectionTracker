@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
 import { Bookmark, Search, FolderPlus, Trash2, X } from 'lucide-react';
@@ -18,6 +19,7 @@ export const BinderList: React.FC<BinderListProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  useBodyScrollLock(showCreateModal);
   const [newBinderName, setNewBinderName] = useState('');
   const [newBinderDesc, setNewBinderDesc] = useState('');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});

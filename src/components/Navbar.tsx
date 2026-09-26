@@ -2,12 +2,9 @@ import React from 'react';
 import { 
   Layers, 
   Bookmark, 
-  Search, 
-  Database,
-  RefreshCw
+  Search
 } from 'lucide-react';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
-import { SyncStatus } from '../services/deckService';
 
 interface NavbarProps {
   activeTab: 'decks' | 'collection' | 'search';
@@ -17,20 +14,16 @@ interface NavbarProps {
   binders?: Binder[];
   activeDeck: Deck | null;
   onSelectActiveDeck: (deck: Deck) => void;
-  syncStatus: SyncStatus;
-  onOpenSyncModal: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onTabChange,
   decks,
-  collection,
+  collection: _collection,
   binders = [],
-  activeDeck,
-  onSelectActiveDeck,
-  syncStatus,
-  onOpenSyncModal,
+  activeDeck: _activeDeck,
+  onSelectActiveDeck: _onSelectActiveDeck,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-xl border-b border-indigo-500/20 shadow-lg shadow-indigo-500/5">
@@ -96,35 +89,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </nav>
           </div>
-
-          <div className="flex items-center gap-2.5">
-
-            {/* Backend Sync Status Button */}
-            <button
-              onClick={onOpenSyncModal}
-              className="flex items-center gap-2 bg-slate-900 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-              title="Remote API Connection Status"
-            >
-              {syncStatus === 'syncing' ? (
-                <RefreshCw className="w-3.5 h-3.5 text-fuchsia-400 animate-spin" />
-              ) : syncStatus === 'synced' ? (
-                <Database className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Database className="w-3.5 h-3.5 text-rose-400" />
-              )}
-              
-              <span className="hidden sm:inline-block">
-                <span className="text-slate-400">Server: </span>
-                <span className={syncStatus === 'synced' ? 'text-emerald-400' : 'text-slate-300'}>
-                  {syncStatus === 'synced' ? 'Connected' : syncStatus === 'syncing' ? 'Syncing...' : 'Offline'}
-                </span>
-              </span>
-              
-              {syncStatus === 'synced' && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-              )}
-            </button>
-          </div>
         </div>
 
         {/* Mobile Navigation Bar */}
@@ -158,7 +122,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Search className="w-4 h-4" />
             <span>Search</span>
           </button>
-
         </div>
       </div>
     </header>

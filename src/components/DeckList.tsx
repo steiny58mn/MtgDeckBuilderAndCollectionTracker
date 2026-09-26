@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { ConfirmModal } from "./ConfirmModal";
 import React, { useState, useEffect } from 'react';
 import { 
@@ -40,6 +41,7 @@ export const DeckList: React.FC<DeckListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  useBodyScrollLock(showCreateModal);
 
   // New deck form state
   const [newDeckName, setNewDeckName] = useState('');

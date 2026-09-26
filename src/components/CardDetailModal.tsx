@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { 
   X, 
@@ -76,6 +77,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         .finally(() => setIsLoadingFull(false));
     }
   }, [card?.id, (card as any)?.scryfallId, isOpen]);
+
+  useBodyScrollLock(isOpen && !!displayCard);
 
   if (!isOpen || !displayCard) return null;
 

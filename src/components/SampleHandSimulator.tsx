@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Play, RotateCcw, X, Layers } from 'lucide-react';
 import { Deck, DeckCard, ScryfallCard } from '../types/mtg';
@@ -77,6 +78,8 @@ export const SampleHandSimulator: React.FC<SampleHandSimulatorProps> = ({
       initHand();
     }
   }, [isOpen, deck.id]);
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 

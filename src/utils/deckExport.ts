@@ -25,7 +25,7 @@ export const EXPORT_FORMATS: ExportFormatOption[] = [
     key: 'bbcode',
     label: 'BBCode (MTGNexus)',
     badge: 'Forum',
-    description: 'Formatted [deck] and [card] tags with counts and card type categorization for MTGNexus forums.',
+    description: 'Formatted [deck] tag with counts and card type categorization for MTGNexus forums.',
     fileExtension: 'txt',
     mimeType: 'text/plain;charset=utf-8',
   },
@@ -123,7 +123,7 @@ export function generateBBCodeMTGNexus(deck: Deck): string {
   if (commanderCards.length > 0) {
     const count = commanderCards.reduce((s, c) => s + c.quantity, 0);
     lines.push(`[b]Commander[/b] (${count})`);
-    commanderCards.forEach((c) => lines.push(`${c.quantity} [card]${c.name}[/card]`));
+    commanderCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
     lines.push('');
   }
 
@@ -131,7 +131,7 @@ export function generateBBCodeMTGNexus(deck: Deck): string {
     if (list.length === 0) return;
     const count = list.reduce((s, c) => s + c.quantity, 0);
     lines.push(`[b]${title}[/b] (${count})`);
-    list.forEach((c) => lines.push(`${c.quantity} [card]${c.name}[/card]`));
+    list.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
     lines.push('');
   };
 
@@ -147,14 +147,14 @@ export function generateBBCodeMTGNexus(deck: Deck): string {
   if (sideCards.length > 0) {
     const count = sideCards.reduce((s, c) => s + c.quantity, 0);
     lines.push(`[b]Sideboard[/b] (${count})`);
-    sideCards.forEach((c) => lines.push(`${c.quantity} [card]${c.name}[/card]`));
+    sideCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
     lines.push('');
   }
 
   if (maybeCards.length > 0) {
     const count = maybeCards.reduce((s, c) => s + c.quantity, 0);
     lines.push(`[b]Maybeboard[/b] (${count})`);
-    maybeCards.forEach((c) => lines.push(`${c.quantity} [card]${c.name}[/card]`));
+    maybeCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
     lines.push('');
   }
 

@@ -833,14 +833,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <span>{isSavingNewDeck ? 'Saving...' : 'New Deck'}</span>
                 </button>
 
-                <button
-                  onClick={onOpenSearch}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-all shadow-sm cursor-pointer hover:scale-102"
-                  title="Open card database search"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Cards</span>
-                </button>
+
               </div>
             </div>
           )}
@@ -919,28 +912,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       {/* Category Navigation & Layout Options Row */}
       <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3 flex-wrap">
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-          {/* Category Grid View Option */}
-          <button
-            type="button"
-            onClick={() => setViewMode('category-grid')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              viewMode === 'category-grid'
-                ? 'bg-fuchsia-500 text-slate-950 shadow-md font-extrabold'
-                : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-            }`}
-            title="Show each category available in a grid layout"
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            <span>Category Grid</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-              viewMode === 'category-grid' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-violet-400'
-            }`}>
-              {availableCategories.filter((c) => c.totalQty > 0).length}
-            </span>
-          </button>
-
-          <span className="text-slate-700">|</span>
-
           {/* Individual Category Tab Navigation Options */}
           <button
             type="button"
@@ -1254,6 +1225,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       {/* Export / Import Multi-format Modal */}
       <DeckExportModal
         deck={deck}
+        existingDecks={DeckService.getLocalDecks()}
         isOpen={showExportModal}
         onClose={() => {
           setShowExportModal(false);

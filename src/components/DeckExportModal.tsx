@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   X, 
@@ -14,12 +15,11 @@ import {
   Save,
   Layers,
   Sparkles,
-  Crown,
   FileCode,
   RefreshCw,
   AlertTriangle
 } from 'lucide-react';
-import { Deck, DeckCard, MTGFormat, DeckCategory } from '../types/mtg';
+import { Deck, DeckCard, MTGFormat } from '../types/mtg';
 import { 
   ExportFormatKey, 
   EXPORT_FORMATS, 
@@ -32,10 +32,23 @@ import {
 import { 
   IMPORT_FORMATS, 
   parseDeckImport, 
-  autoDetectFormat, 
   ParsedDeckImport 
 } from '../utils/deckImport';
 import { fetchBatchCardsCollection } from '../services/scryfall';
+import { DeckService } from '../services/deckService';
+
+export interface UploadedBatchDeckItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  content: string;
+  detectedFormat: ExportFormatKey | 'text';
+  parsedDeck: ParsedDeckImport;
+  deckName: string;
+  deckFormat: MTGFormat;
+  action: 'new' | 'overwrite';
+  targetDeckId: string;
+}
 
 interface DeckExportModalProps {
   deck?: Deck | null;
@@ -66,7 +79,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatKey>('bbcode');
   const [copied, setCopied] = useState(false);
 
-  // Import State
+  // Import State: Single / Paste
   const [selectedImportFormat, setSelectedImportFormat] = useState<ExportFormatKey | 'auto'>('auto');
   const [importText, setImportText] = useState('');
   const [customDeckName, setCustomDeckName] = useState('');
@@ -74,6 +87,9 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   const [isResolvingCards, setIsResolvingCards] = useState(false);
   const [resolveProgress, setResolveProgress] = useState<string>('');
   const [importError, setImportError] = useState<string | null>(null);
+
+  // Multi-File Upload Batch Queue State
+  const [uploadedBatch, setUploadedBatch] = useState<UploadedBatchDeckItem[]>([]);
 
   // Confirmation Modal State (Save current deck before importing as new deck)
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
@@ -89,12 +105,12 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   }, [isOpen, initialTab, deck]);
 
-  // Real-time live parse of input
+  // Real-time live parse of manual text input
   const parsedPreview = useMemo<ParsedDeckImport | null>(() => {
     if (!importText.trim()) return null;
     try {
       return parseDeckImport(importText, selectedImportFormat);
-    } catch (e) {
+    } catch {
       return null;
     }
   }, [importText, selectedImportFormat]);
@@ -128,6 +144,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       }
     }
   }, [parsedPreview]);
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
@@ -175,64 +193,239 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     triggerFileDownload(csvData, `${safeTitle}_excel.csv`, 'text/csv;charset=utf-8');
   };
 
-  // File Upload handler for Import
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Helper to parse multiple files into the uploadedBatch queue
+  const processUploadedFiles = async (files: File[]) => {
+    const newItems: UploadedBatchDeckItem[] = [];
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        setImportText(content);
-        // If file has name, suggest as deck name
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const content = await file.text();
+        if (!content.trim()) continue;
+
+        let formatKey: ExportFormatKey | 'auto' = 'auto';
+        if (file.name.endsWith('.dek') || file.name.endsWith('.xml')) formatKey = 'mtgo';
+        else if (file.name.endsWith('.csv')) formatKey = 'csv';
+        else if (file.name.endsWith('.tsv')) formatKey = 'excel';
+
+        const parsed = parseDeckImport(content, formatKey);
+        if (parsed.cards.length === 0) continue;
+
         const cleanFileName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
-        if (!customDeckName) {
-          setCustomDeckName(cleanFileName);
-        }
-        // Auto select format if obvious extension
-        if (file.name.endsWith('.dek') || file.name.endsWith('.xml')) {
-          setSelectedImportFormat('mtgo');
-        } else if (file.name.endsWith('.csv')) {
-          setSelectedImportFormat('csv');
-        } else if (file.name.endsWith('.tsv')) {
-          setSelectedImportFormat('excel');
-        }
+        const cmdrCards = parsed.cards.filter((c) => c.category === 'commander');
+        const suggestedName = parsed.deckName || (cmdrCards.length > 0 ? cmdrCards.map((c) => c.name).join(' // ') : cleanFileName);
+        const suggestedFormat: MTGFormat = parsed.format || (cmdrCards.length > 0 ? 'commander' : 'casual');
+
+        // Check if an existing deck already matches this name
+        const matchedDeck = existingDecks.find(
+          (d) => d.name.trim().toLowerCase() === suggestedName.trim().toLowerCase()
+        );
+
+        newItems.push({
+          id: `batch-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
+          fileName: file.name,
+          fileSize: file.size,
+          content,
+          detectedFormat: parsed.detectedFormat,
+          parsedDeck: parsed,
+          deckName: suggestedName,
+          deckFormat: suggestedFormat,
+          action: matchedDeck ? 'overwrite' : 'new',
+          targetDeckId: matchedDeck ? matchedDeck.id : (existingDecks[0]?.id || ''),
+        });
+      } catch (err) {
+        console.error(`Error reading file ${file.name}:`, err);
       }
-    };
-    reader.readAsText(file);
-    // Reset file input
+    }
+
+    if (newItems.length > 0) {
+      setUploadedBatch((prev) => [...prev, ...newItems]);
+      setImportError(null);
+    } else {
+      setImportError('No valid deck cards found in the selected file(s).');
+    }
+  };
+
+  // File Upload handler for Import (supports multiple files)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    processUploadedFiles(Array.from(files));
     e.target.value = '';
   };
 
-  // Drag and drop handler
+  // Drag and drop handler (supports multiple files)
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        setImportText(content);
-        const cleanFileName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
-        if (!customDeckName) {
-          setCustomDeckName(cleanFileName);
-        }
-        if (file.name.endsWith('.dek') || file.name.endsWith('.xml')) {
-          setSelectedImportFormat('mtgo');
-        } else if (file.name.endsWith('.csv')) {
-          setSelectedImportFormat('csv');
-        } else if (file.name.endsWith('.tsv')) {
-          setSelectedImportFormat('excel');
-        }
-      }
-    };
-    reader.readAsText(file);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    processUploadedFiles(Array.from(files));
   };
 
-  // Execute Import Core
+  // Update item in batch queue
+  const updateBatchItem = (id: string, updates: Partial<UploadedBatchDeckItem>) => {
+    setUploadedBatch((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  };
+
+  // Remove item from batch queue
+  const removeBatchItem = (id: string) => {
+    setUploadedBatch((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // Add currently pasted text to the batch queue
+  const handleAddPastedToBatch = () => {
+    if (!parsedPreview || parsedPreview.cards.length === 0) {
+      setImportError('Please enter cards to import first.');
+      return;
+    }
+
+    const cmdrCards = parsedPreview.cards.filter((c) => c.category === 'commander');
+    const suggestedName = customDeckName.trim() || parsedPreview.deckName || (cmdrCards.length > 0 ? cmdrCards.map((c) => c.name).join(' // ') : 'Pasted Decklist');
+    const matchedDeck = existingDecks.find(
+      (d) => d.name.trim().toLowerCase() === suggestedName.trim().toLowerCase()
+    );
+
+    const newItem: UploadedBatchDeckItem = {
+      id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      fileName: `${suggestedName}.txt`,
+      fileSize: new Blob([importText]).size,
+      content: importText,
+      detectedFormat: parsedPreview.detectedFormat,
+      parsedDeck: parsedPreview,
+      deckName: suggestedName,
+      deckFormat: customDeckFormat,
+      action: matchedDeck ? 'overwrite' : 'new',
+      targetDeckId: matchedDeck ? matchedDeck.id : (existingDecks[0]?.id || ''),
+    };
+
+    setUploadedBatch((prev) => [...prev, newItem]);
+    setImportText('');
+    setCustomDeckName('');
+    setImportError(null);
+  };
+
+  // Execute Batch Import for all items in uploadedBatch queue
+  const executeBatchImport = async () => {
+    if (uploadedBatch.length === 0) return;
+    setIsResolvingCards(true);
+    setImportError(null);
+
+    try {
+      for (let i = 0; i < uploadedBatch.length; i++) {
+        const item = uploadedBatch[i];
+        setResolveProgress(`Resolving cards for "${item.deckName}" (${i + 1} of ${uploadedBatch.length})...`);
+
+        const cardsToFetch = item.parsedDeck.cards.map((c) => ({
+          name: c.name,
+          set: c.set,
+        }));
+
+        const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
+
+        const resolvedCards: DeckCard[] = item.parsedDeck.cards.map((entry, idx) => {
+          const exactLower = entry.name.toLowerCase().trim();
+          const frontLower = exactLower.split(' // ')[0].trim();
+          const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
+
+          return {
+            id: `card-${Date.now()}-${i}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
+            name: matchedScry?.name || entry.name,
+            set: matchedScry?.set || entry.set,
+            set_name: matchedScry?.set_name,
+            collector_number: matchedScry?.collector_number || entry.collector_number,
+            category: entry.category,
+            quantity: entry.quantity,
+            mana_cost: matchedScry?.mana_cost,
+            cmc: matchedScry?.cmc,
+            type_line: matchedScry?.type_line,
+            colors: matchedScry?.colors,
+            color_identity: matchedScry?.color_identity,
+            rarity: matchedScry?.rarity,
+            imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
+            priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
+            priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
+            isFoil: entry.isFoil,
+          };
+        });
+
+        // Promote sideboard to commander if Commander format and 1-2 sideboard cards
+        if (item.deckFormat === 'commander') {
+          const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+          const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
+          const totalSideboardQty = sideboardCards.reduce((s, c) => s + c.quantity, 0);
+
+          if (cmdrCards.length === 0 && sideboardCards.length >= 1 && sideboardCards.length <= 2 && totalSideboardQty === sideboardCards.length) {
+            sideboardCards.forEach((sc) => { sc.category = 'commander'; });
+          }
+        }
+
+        const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
+        const commanderName = cmdrCards.length > 1
+          ? cmdrCards.map((c) => c.name).join(' // ')
+          : cmdrCards[0]?.name;
+        const commanderArtUrl = cmdrCards[0]?.imageUrl;
+        const commanderId = cmdrCards[0]?.scryfallId;
+        const commanderColorIdentity = cmdrCards.length > 1
+          ? Array.from(new Set(cmdrCards.flatMap((c) => c.color_identity || [])))
+          : cmdrCards[0]?.color_identity;
+
+        if (item.action === 'overwrite') {
+          const target = existingDecks.find((d) => d.id === item.targetDeckId) || existingDecks[0];
+          if (target) {
+            const overwrittenDeck: Deck = {
+              ...target,
+              name: item.deckName.trim() || target.name,
+              format: item.deckFormat,
+              description: `Overwritten from ${item.fileName} on ${new Date().toLocaleDateString()}.`,
+              cards: resolvedCards,
+              commanderId,
+              commanderName,
+              commanderArtUrl,
+              commanderColorIdentity,
+              coverCardUrl: commanderArtUrl || resolvedCards[0]?.imageUrl || target.coverCardUrl,
+              updatedAt: Date.now(),
+            };
+            await DeckService.saveDeck(overwrittenDeck);
+            if (onImportOverwriteDeck) {
+              await onImportOverwriteDeck(overwrittenDeck);
+            }
+          }
+        } else {
+          // Action: 'new'
+          const newDeck: Deck = {
+            id: `deck-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
+            name: item.deckName.trim() || 'Imported Deck',
+            format: item.deckFormat,
+            description: `Imported from ${item.fileName} with ${resolvedCards.reduce((s, c) => s + c.quantity, 0)} cards.`,
+            cards: resolvedCards,
+            commanderId,
+            commanderName,
+            commanderArtUrl,
+            commanderColorIdentity,
+            coverCardUrl: commanderArtUrl || resolvedCards[0]?.imageUrl,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          await DeckService.saveDeck(newDeck);
+          await onImportAsNewDeck(newDeck, false);
+        }
+      }
+
+      setUploadedBatch([]);
+      onClose();
+    } catch (err: any) {
+      console.error('Batch import execution error:', err);
+      setImportError('Batch import failed: ' + (err.message || 'Error resolving cards'));
+    } finally {
+      setIsResolvingCards(false);
+      setResolveProgress('');
+    }
+  };
+
+  // Execute Import Single Deck Core
   const executeNewDeckImport = async (shouldSaveCurrentDeck: boolean) => {
     if (!parsedPreview || parsedPreview.cards.length === 0) {
       setImportError('No recognized card entries to import. Please check format or paste decklist text.');
@@ -244,13 +437,11 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     setResolveProgress('Resolving cards with Scryfall database...');
 
     try {
-      // 1. Batch fetch card metadata via Scryfall Collection
       const cardsToFetch = parsedPreview.cards.map((c) => ({ name: c.name, set: c.set }));
       const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
       setResolveProgress('Assembling deck and categories...');
 
-      // 2. Build full DeckCard instances
       const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => {
         const exactLower = item.name.toLowerCase().trim();
         const frontLower = exactLower.split(' // ')[0].trim();
@@ -278,7 +469,6 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         };
       });
 
-      // Ensure single/partner sideboard card is promoted to commander if importing as Commander
       if (customDeckFormat === 'commander') {
         const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
         const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
@@ -289,7 +479,6 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         }
       }
 
-      // 3. Extract commander details
       const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
       const commanderName = cmdrCards.length > 1
         ? cmdrCards.map((c) => c.name).join(' // ')
@@ -332,7 +521,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   };
 
-  // Execute overwriting target deck with imported cards
+  // Execute overwriting target deck with single imported list
   const executeOverwriteDeckImport = async (targetDeck: Deck) => {
     if (!parsedPreview || parsedPreview.cards.length === 0 || !onImportOverwriteDeck) return;
     setIsResolvingCards(true);
@@ -401,8 +590,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       const overwrittenDeck: Deck = {
         ...targetDeck,
         name: finalDeckName,
-        format: customDeckFormat || (cmdrCards.length > 0 ? 'commander' : targetDeck.format),
-        description: `Imported via ${parsedPreview.detectedFormat.toUpperCase()} format with ${resolvedCards.reduce((s, c) => s + c.quantity, 0)} cards.`,
+        format: customDeckFormat || targetDeck.format,
+        description: `Overwritten from ${parsedPreview.detectedFormat.toUpperCase()} import with ${resolvedCards.reduce((s, c) => s + c.quantity, 0)} cards.`,
         cards: resolvedCards,
         commanderId,
         commanderName,
@@ -416,15 +605,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       setShowOverwriteConfirmModal(false);
       onClose();
     } catch (err: any) {
-      console.error('Import overwrite error:', err);
-      setImportError('Import overwrite failed: ' + (err.message || 'Unknown error resolving cards'));
+      console.error('Overwrite deck import error:', err);
+      setImportError('Overwrite failed: ' + (err.message || 'Unknown error resolving cards'));
     } finally {
       setIsResolvingCards(false);
       setResolveProgress('');
     }
   };
 
-  // Append to current deck
+  // Append cards to currently opened deck
   const handleAppendToCurrentDeck = async () => {
     if (!parsedPreview || parsedPreview.cards.length === 0 || !onImportAppendToDeck) return;
     setIsResolvingCards(true);
@@ -462,8 +651,6 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         };
       });
 
-      // If target deck is Commander format and currently has no commander,
-      // and there are 1 or 2 cards in the Sideboard being added, set those as Commander
       if (deck && deck.format === 'commander' && !deck.cards.some((c) => c.category === 'commander')) {
         const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
         const sideboardCards = resolvedCards.filter((c) => c.category === 'sideboard');
@@ -502,7 +689,6 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   };
 
-  // Stats for parsed preview
   const totalParsedCards = parsedPreview?.cards.reduce((s, c) => s + c.quantity, 0) || 0;
   const cmdrParsedCount = parsedPreview?.cards.filter((c) => c.category === 'commander').reduce((s, c) => s + c.quantity, 0) || 0;
   const mainParsedCount = parsedPreview?.cards.filter((c) => c.category === 'main').reduce((s, c) => s + c.quantity, 0) || 0;
@@ -537,7 +723,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               <p className="text-xs text-slate-400">
                 {activeTab === 'export'
                   ? 'Export in 8 community formats including MTGNexus BBCode, MTGO, TappedOut, and Excel.'
-                  : 'Import from all 8 community formats: BBCode, TappedOut, Moxfield, MTGO (.dek/text), Archidekt, CSV, and Excel.'}
+                  : 'Import single or multiple deck files (.txt, .dek, .csv, .tsv) or paste text.'}
               </p>
             </div>
           </div>
@@ -563,7 +749,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               }`}
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export Deck ({EXPORT_FORMATS.length} Formats)</span>
+              <span>Export Deck</span>
             </button>
           )}
 
@@ -576,7 +762,12 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
             }`}
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Import Deck ({IMPORT_FORMATS.length} Formats)</span>
+            <span>Import Deck</span>
+            {uploadedBatch.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-950 text-fuchsia-300 text-[10px] font-mono font-bold">
+                {uploadedBatch.length} queued
+              </span>
+            )}
           </button>
         </div>
 
@@ -677,7 +868,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                     onClick={handleDownloadMTGODek}
                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-sky-950 border border-sky-700 text-sky-300 hover:bg-sky-900 text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <Download className="w-3 h-3" />
+                    <Download className="w-3.5 h-3.5" />
                     <span>Download .dek (XML)</span>
                   </button>
                 </div>
@@ -729,12 +920,11 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           /* =================== IMPORT TAB =================== */
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
             {/* Format Selector Column */}
-            <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/40 p-3 overflow-y-auto space-y-1">
+            <div className="w-full md:w-60 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/40 p-3 overflow-y-auto space-y-1">
               <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-2 py-1">
                 Import Format
               </div>
 
-              {/* Auto-detect option */}
               <button
                 onClick={() => setSelectedImportFormat('auto')}
                 className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all flex items-center justify-between gap-2 cursor-pointer ${
@@ -788,25 +978,19 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
             >
-              {/* Header Info & File Upload trigger */}
+              {/* Top Banner with File Upload Trigger */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    Import Decklist
-                    {selectedImportFormat !== 'auto' ? (
-                      <span className="text-xs font-normal text-fuchsia-400">
-                        ({IMPORT_FORMATS.find((f) => f.key === selectedImportFormat)?.label})
+                    Import Decklists
+                    {uploadedBatch.length > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">
+                        {uploadedBatch.length} file{uploadedBatch.length > 1 ? 's' : ''} queued
                       </span>
-                    ) : (
-                      parsedPreview?.detectedFormat && (
-                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">
-                          Detected: {parsedPreview.detectedFormat.toUpperCase()}
-                        </span>
-                      )
                     )}
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Paste text below or drag & drop / upload a file (.txt, .dek, .xml, .csv, .tsv, .xls).
+                    Select or drag & drop multiple files, then set each file to either create a new deck or overwrite an existing deck.
                   </p>
                 </div>
 
@@ -815,90 +999,364 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
+                    multiple
                     accept=".txt,.dek,.xml,.csv,.tsv,.xls,.xlsx"
                     className="hidden"
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shadow-sm cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shadow-sm cursor-pointer"
                   >
                     <Upload className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Upload File</span>
+                    <span>Upload File(s)</span>
                   </button>
                 </div>
               </div>
 
-              {/* Textarea Input */}
-              <div className="flex-1 flex flex-col min-h-[180px]">
-                <textarea
-                  value={importText}
-                  onChange={(e) => setImportText(e.target.value)}
-                  placeholder={`Paste ${
-                    selectedImportFormat === 'auto'
-                      ? 'decklist in any format (BBCode, TappedOut, Moxfield, MTGO, Archidekt, CSV, Plain Text, Excel)...'
-                      : IMPORT_FORMATS.find((f) => f.key === selectedImportFormat)?.sampleSyntax || 'decklist here...'
-                  }`}
-                  className="flex-1 w-full min-h-[180px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-fuchsia-500 resize-none"
-                />
-              </div>
-
-              {/* Live Parsing Summary Banner */}
-              {parsedPreview && parsedPreview.cards.length > 0 && (
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span className="font-bold text-white">
-                        {totalParsedCards} Cards Parsed
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        ({cmdrParsedCount > 0 ? `${cmdrParsedCount} Cmdr, ` : ''}
-                        {mainParsedCount} Main, {sideParsedCount} Side
-                        {maybeParsedCount > 0 ? `, ${maybeParsedCount} Maybe` : ''})
-                      </span>
-                    </div>
-
-                    <div className="text-[11px] font-mono text-fuchsia-400">
-                      Format detected: {parsedPreview.detectedFormat.toUpperCase()}
-                    </div>
+              {/* ================= MULTI-FILE UPLOAD BATCH QUEUE ================= */}
+              {uploadedBatch.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-300 pb-1 border-b border-slate-800/80">
+                    <span className="font-bold flex items-center gap-2">
+                      <FileCode className="w-4 h-4 text-fuchsia-400" />
+                      Uploaded Decks Queue ({uploadedBatch.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setUploadedBatch([])}
+                      className="text-[11px] text-slate-400 hover:text-rose-400 cursor-pointer transition-colors"
+                    >
+                      Clear Queue
+                    </button>
                   </div>
 
-                  {/* Deck Configuration Fields */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                    <div className="sm:col-span-2 space-y-1">
-                      <label className="text-[11px] font-semibold text-slate-400 block">
-                        New Deck Name:
-                      </label>
-                      <input
-                        type="text"
-                        value={customDeckName}
-                        onChange={(e) => setCustomDeckName(e.target.value)}
-                        placeholder="Deck Title"
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-fuchsia-500"
-                      />
-                    </div>
+                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    {uploadedBatch.map((item) => {
+                      const totalQty = item.parsedDeck.cards.reduce((s, c) => s + c.quantity, 0);
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-semibold text-slate-400 block">
-                        Target Format:
-                      </label>
-                      <select
-                        value={customDeckFormat}
-                        onChange={(e) => setCustomDeckFormat(e.target.value as MTGFormat)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 capitalize"
+                      return (
+                        <div
+                          key={item.id}
+                          className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3 shadow-md"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <FileCode className="w-4 h-4 text-sky-400 shrink-0" />
+                              <span className="font-semibold text-white text-xs truncate max-w-[200px] sm:max-w-xs" title={item.fileName}>
+                                {item.fileName}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                ({(item.fileSize / 1024).toFixed(1)} KB)
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-mono text-emerald-400 border border-slate-700">
+                                {totalQty} cards
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-fuchsia-950 text-fuchsia-300 border border-fuchsia-500/30 uppercase">
+                                {item.detectedFormat}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeBatchItem(item.id)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Remove file from queue"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Deck Name & Format */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div className="sm:col-span-2 space-y-1">
+                              <label className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wide">
+                                Deck Name:
+                              </label>
+                              <input
+                                type="text"
+                                value={item.deckName}
+                                onChange={(e) => updateBatchItem(item.id, { deckName: e.target.value })}
+                                placeholder="Deck Title"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold text-white focus:outline-none focus:border-fuchsia-500"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wide">
+                                Format:
+                              </label>
+                              <select
+                                value={item.deckFormat}
+                                onChange={(e) => updateBatchItem(item.id, { deckFormat: e.target.value as MTGFormat })}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 capitalize focus:outline-none focus:border-fuchsia-500"
+                              >
+                                <option value="commander">Commander / EDH</option>
+                                <option value="standard">Standard</option>
+                                <option value="modern">Modern</option>
+                                <option value="pioneer">Pioneer</option>
+                                <option value="legacy">Legacy</option>
+                                <option value="vintage">Vintage</option>
+                                <option value="pauper">Pauper</option>
+                                <option value="casual">Casual</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Individual Action: Create as New vs Overwrite Existing */}
+                          <div className="space-y-1.5 pt-1 border-t border-slate-800/60">
+                            <label className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wide">
+                              Destination Action:
+                            </label>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => updateBatchItem(item.id, { action: 'new' })}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                  item.action === 'new'
+                                    ? 'bg-fuchsia-500 text-slate-950 shadow-sm'
+                                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                                }`}
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                <span>Create as New Deck</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => updateBatchItem(item.id, { action: 'overwrite' })}
+                                disabled={existingDecks.length === 0}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed ${
+                                  item.action === 'overwrite'
+                                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                                }`}
+                                title={existingDecks.length === 0 ? 'No existing decks available to overwrite' : 'Select an existing deck to overwrite'}
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Overwrite Existing Deck</span>
+                              </button>
+                            </div>
+
+                            {item.action === 'overwrite' && (
+                              <div className="mt-2 p-2.5 rounded-lg bg-amber-950/30 border border-amber-500/40 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    Select Target Deck to Overwrite:
+                                  </span>
+                                  <span className="text-[10px] text-amber-400/80">
+                                    (All cards will be replaced)
+                                  </span>
+                                </div>
+                                <select
+                                  value={item.targetDeckId}
+                                  onChange={(e) => updateBatchItem(item.id, { targetDeckId: e.target.value })}
+                                  className="w-full bg-slate-900 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                                >
+                                  {existingDecks.map((d) => (
+                                    <option key={d.id} value={d.id}>
+                                      {d.name} ({d.cards.reduce((s, c) => s + c.quantity, 0)} cards — {d.format})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Batch Controls Footer */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-sky-400" />
+                      <span>+ Add More Files</span>
+                    </button>
+
+                    <div className="flex items-center gap-3">
+                      <div className="text-[11px] text-slate-400 hidden sm:block">
+                        <span className="text-fuchsia-400 font-bold">{uploadedBatch.filter((b) => b.action === 'new').length} New</span>
+                        {uploadedBatch.some((b) => b.action === 'overwrite') && (
+                          <span> • <span className="text-amber-400 font-bold">{uploadedBatch.filter((b) => b.action === 'overwrite').length} Overwrite</span></span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={executeBatchImport}
+                        disabled={isResolvingCards}
+                        className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
                       >
-                        <option value="commander">Commander / EDH</option>
-                        <option value="standard">Standard</option>
-                        <option value="modern">Modern</option>
-                        <option value="pioneer">Pioneer</option>
-                        <option value="legacy">Legacy</option>
-                        <option value="vintage">Vintage</option>
-                        <option value="pauper">Pauper</option>
-                        <option value="casual">Casual</option>
-                      </select>
+                        {isResolvingCards ? (
+                          <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Upload className="w-4 h-4" />
+                        )}
+                        <span>Import All ({uploadedBatch.length}) Decks</span>
+                      </button>
                     </div>
                   </div>
                 </div>
+              ) : (
+                /* ================= MANUAL TEXT INPUT / DRAG & DROP ================= */
+                <>
+                  <div className="flex-1 flex flex-col min-h-[160px]">
+                    <textarea
+                      value={importText}
+                      onChange={(e) => setImportText(e.target.value)}
+                      placeholder={`Paste ${
+                        selectedImportFormat === 'auto'
+                          ? 'decklist in any format (BBCode, TappedOut, Moxfield, MTGO, Archidekt, CSV, Plain Text, Excel)...'
+                          : IMPORT_FORMATS.find((f) => f.key === selectedImportFormat)?.sampleSyntax || 'decklist here...'
+                      }`}
+                      className="flex-1 w-full min-h-[160px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-fuchsia-500 resize-none"
+                    />
+                  </div>
+
+                  {/* Live Parsing Summary Banner */}
+                  {parsedPreview && parsedPreview.cards.length > 0 && (
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                        <div className="flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="font-bold text-white">
+                            {totalParsedCards} Cards Parsed
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            ({cmdrParsedCount > 0 ? `${cmdrParsedCount} Cmdr, ` : ''}
+                            {mainParsedCount} Main, {sideParsedCount} Side
+                            {maybeParsedCount > 0 ? `, ${maybeParsedCount} Maybe` : ''})
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] font-mono text-fuchsia-400">
+                          Format detected: {parsedPreview.detectedFormat.toUpperCase()}
+                        </div>
+                      </div>
+
+                      {/* Deck Configuration Fields */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                        <div className="sm:col-span-2 space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-400 block">
+                            Deck Name:
+                          </label>
+                          <input
+                            type="text"
+                            value={customDeckName}
+                            onChange={(e) => setCustomDeckName(e.target.value)}
+                            placeholder="Deck Title"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-fuchsia-500"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-400 block">
+                            Target Format:
+                          </label>
+                          <select
+                            value={customDeckFormat}
+                            onChange={(e) => setCustomDeckFormat(e.target.value as MTGFormat)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 capitalize"
+                          >
+                            <option value="commander">Commander / EDH</option>
+                            <option value="standard">Standard</option>
+                            <option value="modern">Modern</option>
+                            <option value="pioneer">Pioneer</option>
+                            <option value="legacy">Legacy</option>
+                            <option value="vintage">Vintage</option>
+                            <option value="pauper">Pauper</option>
+                            <option value="casual">Casual</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons for Manual Paste */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setImportText('');
+                          setCustomDeckName('');
+                          setImportError(null);
+                        }}
+                        disabled={isResolvingCards || !importText}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                      >
+                        Clear
+                      </button>
+
+                      {parsedPreview && parsedPreview.cards.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAddPastedToBatch}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-fuchsia-300 text-xs font-semibold border border-fuchsia-500/30 cursor-pointer"
+                        >
+                          + Add to Upload Queue
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Overwrite existing deck button */}
+                      {onImportOverwriteDeck && (deck || existingDecks.length > 0) && (
+                        <button
+                          onClick={() => {
+                            if (!parsedPreview || parsedPreview.cards.length === 0) {
+                              setImportError('Please enter cards to import first.');
+                              return;
+                            }
+                            setShowOverwriteConfirmModal(true);
+                          }}
+                          disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                          title={deck ? `Replace all cards in "${deck.name}" with imported list` : 'Select an existing deck to overwrite'}
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>{deck ? 'Overwrite Deck' : 'Overwrite Existing Deck...'}</span>
+                        </button>
+                      )}
+
+                      {/* Append to current deck button if active deck exists */}
+                      {deck && onImportAppendToDeck && (
+                        <button
+                          onClick={handleAppendToCurrentDeck}
+                          disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
+                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer disabled:opacity-50"
+                          title="Add these cards into your currently opened deck"
+                        >
+                          Add to Current Deck
+                        </button>
+                      )}
+
+                      {/* Primary: Import as New Deck */}
+                      <button
+                        onClick={() => {
+                          if (!parsedPreview || parsedPreview.cards.length === 0) {
+                            setImportError('Please enter cards to import first.');
+                            return;
+                          }
+                          if (deck) {
+                            setShowSaveConfirmModal(true);
+                          } else {
+                            executeNewDeckImport(false);
+                          }
+                        }}
+                        disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
+                        className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span>Import as New Deck</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* Error Display */}
@@ -916,82 +1374,12 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                   <span>{resolveProgress || 'Processing import...'}</span>
                 </div>
               )}
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
-                <button
-                  onClick={() => {
-                    setImportText('');
-                    setCustomDeckName('');
-                    setImportError(null);
-                  }}
-                  disabled={isResolvingCards || !importText}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer disabled:opacity-50"
-                >
-                  Clear
-                </button>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Overwrite existing deck button */}
-                  {onImportOverwriteDeck && (deck || existingDecks.length > 0) && (
-                    <button
-                      onClick={() => {
-                        if (!parsedPreview || parsedPreview.cards.length === 0) {
-                          setImportError('Please enter cards to import first.');
-                          return;
-                        }
-                        setShowOverwriteConfirmModal(true);
-                      }}
-                      disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 transition-all shadow-md cursor-pointer disabled:opacity-50"
-                      title={deck ? `Replace all cards in "${deck.name}" with imported list` : 'Select an existing deck to overwrite'}
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>{deck ? 'Overwrite Deck' : 'Overwrite Existing Deck...'}</span>
-                    </button>
-                  )}
-
-                  {/* Append to current deck button if active deck exists */}
-                  {deck && onImportAppendToDeck && (
-                    <button
-                      onClick={handleAppendToCurrentDeck}
-                      disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
-                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer disabled:opacity-50"
-                      title="Add these cards into your currently opened deck"
-                    >
-                      Add to Current Deck
-                    </button>
-                  )}
-
-                  {/* Primary: Import as New Deck */}
-                  <button
-                    onClick={() => {
-                      if (!parsedPreview || parsedPreview.cards.length === 0) {
-                        setImportError('Please enter cards to import first.');
-                        return;
-                      }
-                      if (deck) {
-                        // User has a current deck open: confirm whether to save before importing as new deck
-                        setShowSaveConfirmModal(true);
-                      } else {
-                        // No active deck: proceed directly
-                        executeNewDeckImport(false);
-                      }
-                    }}
-                    disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
-                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>Import as New Deck</span>
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         )}
       </div>
 
-            {/* ================= Confirmation Modal: Overwrite Existing Deck ================= */}
+      {/* ================= Confirmation Modal: Overwrite Existing Deck (Single) ================= */}
       {showOverwriteConfirmModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
           <div 
@@ -1100,19 +1488,6 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-              <div className="flex justify-between">
-                <span>Current Deck:</span>
-                <span className="font-semibold text-slate-200">{deck.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>New Deck to Import:</span>
-                <span className="font-semibold text-fuchsia-300">
-                  {customDeckName.trim() || 'Imported Deck'} ({totalParsedCards} cards)
-                </span>
-              </div>
-            </div>
-
             <div className="flex flex-col gap-2 pt-2">
               <button
                 onClick={() => executeNewDeckImport(true)}
@@ -1120,21 +1495,21 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 className="w-full py-2.5 px-4 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                <span>Save Current Deck &amp; Import New Deck</span>
+                <span>Save Current Deck &amp; Import New</span>
               </button>
 
               <button
                 onClick={() => executeNewDeckImport(false)}
                 disabled={isResolvingCards}
-                className="w-full py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                className="w-full py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
               >
-                Import as New Deck (Keep Current As-Is)
+                Discard Current Changes &amp; Import
               </button>
 
               <button
                 onClick={() => setShowSaveConfirmModal(false)}
                 disabled={isResolvingCards}
-                className="w-full py-1.5 px-4 rounded-xl text-slate-400 hover:text-slate-200 text-xs font-medium cursor-pointer"
+                className="w-full py-1.5 px-4 text-slate-400 hover:text-slate-300 text-xs transition-colors cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>

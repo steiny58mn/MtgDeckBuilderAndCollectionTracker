@@ -20,7 +20,6 @@ import { DeckBuilder } from './components/DeckBuilder';
 import { CollectionManager } from './components/CollectionManager';
 import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
-import { SyncModal } from './components/SyncModal';
 import { BinderList } from './components/BinderList';
 import { getCardImageUrl } from './services/scryfall';
 import { getDeckCommander, isCardLegalInCommander } from './utils/deckUtils';
@@ -37,7 +36,6 @@ export default function App() {
   
   // Modals
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
-  const [showSyncModal, setShowSyncModal] = useState(false);
   const [globalToast, setGlobalToast] = useState<{
     message: string;
     type: 'success' | 'info';
@@ -533,10 +531,6 @@ export default function App() {
     }
   };
 
-  const handleVaultChanged = () => {
-    window.location.reload();
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-950 to-slate-950 text-slate-100 font-sans flex flex-col selection:bg-fuchsia-500 selection:text-slate-950">
       {/* Navigation */}
@@ -551,8 +545,6 @@ export default function App() {
           setActiveDeck(deck);
           setActiveTab('decks');
         }}
-        syncStatus={syncStatus}
-        onOpenSyncModal={() => setShowSyncModal(true)}
       />
 
       {/* Main Content Area */}
@@ -664,14 +656,7 @@ export default function App() {
         }}
       />
 
-      {/* Turso Database Sync Modal */}
-      <SyncModal
-        isOpen={showSyncModal}
-        onClose={() => setShowSyncModal(false)}
-        syncStatus={syncStatus}
-        onVaultChanged={handleVaultChanged}
-        onNotify={(msg, type) => showToast(msg, type)}
-      />
+
 
 
       {/* Global Interactive Notification Toast */}
