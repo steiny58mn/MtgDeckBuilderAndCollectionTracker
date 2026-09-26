@@ -8,7 +8,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
-import { SyncStatus } from '../services/storage';
+import { SyncStatus } from '../services/deckService';
 
 interface NavbarProps {
   activeTab: 'decks' | 'collection' | 'search';

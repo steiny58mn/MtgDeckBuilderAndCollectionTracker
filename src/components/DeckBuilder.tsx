@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard } from '../types/mtg';
 import { calculateDeckStats, exportDeckToText, parseTextDecklist } from '../utils/deckUtils';
-import { StorageService } from '../services/storage';
+import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { SampleHandSimulator } from './SampleHandSimulator';
@@ -224,7 +224,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setIsRefreshingPrices(true);
     setPriceRefreshMessage(null);
     try {
-      const updated = await StorageService.refreshDeckPrices(deck);
+      const updated = await DeckService.refreshDeckPrices(deck);
       onUpdateDeck(updated);
       setPriceRefreshMessage('Prices updated live from Scryfall!');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
@@ -275,7 +275,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       format: format,
       updatedAt: Date.now(),
     };
-    await StorageService.saveDeck(currentDeckToSave);
+    await DeckService.saveDeck(currentDeckToSave);
     onUpdateDeck(currentDeckToSave);
     onBack();
   };

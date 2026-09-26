@@ -13,7 +13,7 @@ import {
   DeckCard,
   Binder
 } from './types/mtg';
-import { StorageService, SyncStatus } from './services/storage';
+import { DeckService, SyncStatus } from './services/deckService';
 import { Navbar } from './components/Navbar';
 import { DeckList } from './components/DeckList';
 import { DeckBuilder } from './components/DeckBuilder';
@@ -61,7 +61,7 @@ export default function App() {
 
   // Subscribe to Turso Database & local cache
   useEffect(() => {
-    const unsubDecks = StorageService.subscribeDecks((updatedDecks) => {
+    const unsubDecks = DeckService.subscribeDecks((updatedDecks) => {
       setDecks(updatedDecks);
       setActiveDeck(prev => {
         if (!prev) return null;
@@ -69,11 +69,11 @@ export default function App() {
       });
     });
 
-    const unsubCol = StorageService.subscribeCollection((updatedCol) => {
+    const unsubCol = DeckService.subscribeCollection((updatedCol) => {
       setCollectionCards(updatedCol);
     });
 
-    const unsubBinders = StorageService.subscribeBinders((updatedBinders) => {
+    const unsubBinders = DeckService.subscribeBinders((updatedBinders) => {
       setBinders(updatedBinders);
       setActiveBinder(prev => {
         if (!prev) return null;
@@ -81,7 +81,7 @@ export default function App() {
       });
     });
 
-    const unsubSync = StorageService.onSyncStatusChange((status) => {
+    const unsubSync = DeckService.onSyncStatusChange((status) => {
       setSyncStatus(status);
     });
 
@@ -105,22 +105,22 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await StorageService.saveDeck(newDeck);
+    await DeckService.saveDeck(newDeck);
     setActiveDeck(newDeck);
     setActiveTab('decks');
     showToast(`Created deck "${newDeck.name}"`);
   };
 
   const handleUpdateDeck = async (updatedDeck: Deck) => {
-    await StorageService.saveDeck(updatedDeck);
+    await DeckService.saveDeck(updatedDeck);
     setActiveDeck(updatedDeck);
   };
 
   const handleImportAsNewDeck = async (newDeck: Deck, shouldSaveCurrentDeck: boolean) => {
     if (shouldSaveCurrentDeck && activeDeck) {
-      await StorageService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
+      await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
     }
-    await StorageService.saveDeck(newDeck);
+    await DeckService.saveDeck(newDeck);
     setActiveDeck(newDeck);
     setActiveTab('decks');
     showToast(`Imported deck "${newDeck.name}" (${newDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards)!`, 'success');
@@ -128,7 +128,7 @@ export default function App() {
 
   const handleCreateNewDeckFromExisting = async (currentDeckToSave: Deck) => {
     // 1. Save the existing deck with its latest modifications
-    await StorageService.saveDeck({ ...currentDeckToSave, updatedAt: Date.now() });
+    await DeckService.saveDeck({ ...currentDeckToSave, updatedAt: Date.now() });
 
     // 2. Determine format label for sensible new deck naming
     const formatLabel = currentDeckToSave.format === 'commander'
@@ -147,7 +147,7 @@ export default function App() {
     };
 
     // 4. Save and activate the new deck
-    await StorageService.saveDeck(newDeck);
+    await DeckService.saveDeck(newDeck);
     setActiveDeck(newDeck);
     setActiveTab('decks');
 
@@ -161,7 +161,7 @@ export default function App() {
   };
 
   const handleDeleteDeck = async (deckId: string) => {
-    await StorageService.deleteDeck(deckId);
+    await DeckService.deleteDeck(deckId);
     if (activeDeck?.id === deckId) {
       setActiveDeck(null);
     }
@@ -181,7 +181,7 @@ export default function App() {
       })),
     };
 
-    await StorageService.saveDeck(duplicated);
+    await DeckService.saveDeck(duplicated);
     showToast(`Duplicated "${sourceDeck.name}"`);
   };
 
@@ -199,7 +199,7 @@ export default function App() {
     }
 
     // Get latest state to prevent race conditions
-    const latestActiveDeck = StorageService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
+    const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
     // Check Commander rules
     if (latestActiveDeck.format === 'commander') {
@@ -294,7 +294,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await StorageService.saveDeck(updatedDeck);
+    await DeckService.saveDeck(updatedDeck);
     setActiveDeck(updatedDeck);
     showToast(
       `Added ${quantity}x "${card.name}" to ${latestActiveDeck.name}`,
@@ -313,7 +313,7 @@ export default function App() {
     }
 
     // Get latest state
-    const latestActiveDeck = StorageService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
+    const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
     // Check Commander rules for collection additions
     if (latestActiveDeck.format === 'commander') {
@@ -389,7 +389,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await StorageService.saveDeck(updatedDeck);
+    await DeckService.saveDeck(updatedDeck);
     setActiveDeck(updatedDeck);
     showToast(
       `Added "${item.name}" from binder into ${latestActiveDeck.name}`,
@@ -414,7 +414,7 @@ export default function App() {
       if (binders.length > 0) {
         targetBinder = binders[0];
       } else {
-        targetBinder = await StorageService.createBinder('Main Binder', 'Default collection binder');
+        targetBinder = await DeckService.createBinder('Main Binder', 'Default collection binder');
         setActiveBinder(targetBinder);
       }
     }
@@ -422,7 +422,7 @@ export default function App() {
     const targetBinderId = targetBinder.id;
     
     // Get latest collection directly to prevent race conditions from double-clicks
-    const latestCollection = StorageService.getLocalCollection();
+    const latestCollection = DeckService.getLocalCollection();
     const existing = latestCollection.find(
       (c) =>
         c.scryfallId === card.id &&
@@ -440,7 +440,7 @@ export default function App() {
         ...existing,
         quantity: existing.quantity + quantity,
       };
-      await StorageService.saveCollectionCard(updated);
+      await DeckService.saveCollectionCard(updated);
     } else {
       const newColCard: CollectionCard = {
         id: `col-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -464,7 +464,7 @@ export default function App() {
         currentPriceUsd: priceUsd,
         addedAt: Date.now(),
       };
-      await StorageService.saveCollectionCard(newColCard);
+      await DeckService.saveCollectionCard(newColCard);
     }
 
     showToast(
@@ -479,13 +479,13 @@ export default function App() {
   };
 
   const handleCreateBinder = async (name: string, description?: string) => {
-    const newBinder = await StorageService.createBinder(name, description);
+    const newBinder = await DeckService.createBinder(name, description);
     setActiveBinder(newBinder);
     showToast(`Created binder "${name}"`);
   };
 
   const handleDeleteBinder = async (binderId: string) => {
-    await StorageService.deleteBinder(binderId);
+    await DeckService.deleteBinder(binderId);
     if (activeBinder?.id === binderId) {
       setActiveBinder(null);
     }
@@ -493,11 +493,11 @@ export default function App() {
   };
 
   const handleUpdateCollectionCard = async (card: CollectionCard) => {
-    await StorageService.saveCollectionCard(card);
+    await DeckService.saveCollectionCard(card);
   };
 
   const handleDeleteCollectionCard = async (cardId: string) => {
-    await StorageService.deleteCollectionCard(cardId);
+    await DeckService.deleteCollectionCard(cardId);
     showToast('Removed from binder');
   };
 
@@ -505,13 +505,13 @@ export default function App() {
   const handleTabChange = async (tab: 'decks' | 'collection' | 'search') => {
     if (tab === 'decks') {
       if (activeDeck) {
-        await StorageService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
+        await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
         setActiveDeck(null);
       }
       setActiveTab('decks');
     } else if (tab === 'collection') {
       if (activeBinder) {
-        await StorageService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
+        await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
         setActiveBinder(null);
       }
       setActiveTab('collection');
@@ -552,7 +552,7 @@ export default function App() {
               deck={activeDeck}
               onBack={async () => {
                 if (activeDeck) {
-                  await StorageService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
+                  await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
                 }
                 setActiveDeck(null);
               }}
@@ -599,7 +599,7 @@ export default function App() {
               onSelectCard={(c) => setInspectedCard(c)}
               onBackToDashboard={async () => {
                 if (activeBinder) {
-                  await StorageService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
+                  await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
                 }
                 setActiveBinder(null);
               }}

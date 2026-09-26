@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, X, RefreshCw, Server, ShieldCheck, Activity, Key, Copy, Check, Shuffle, Save } from 'lucide-react';
-import { SyncStatus, StorageService } from '../services/storage';
-import { getTursoStatus, TursoStatusResponse, getApiBaseUrl, getVaultId, setVaultId, resetVaultId } from '../services/api';
+import { SyncStatus, DeckService } from '../services/deckService';
+import { getTursoStatus, TursoStatusResponse, getApiBaseUrl, getVaultId, setVaultId, resetVaultId } from '../services/deckService';
 
 interface SyncModalProps {
   isOpen: boolean;
@@ -53,9 +53,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
-      await StorageService.syncWithRemote();
+      await DeckService.syncWithRemote();
       await checkTursoHealth();
-      onNotify?.('Synchronized with mtgappsapi.azurewebsites.net.', 'success');
+      onNotify?.('Synchronized with api.frostpointlabs.com.', 'success');
     } catch (e: any) {
       onNotify?.('Sync error: ' + (e.message || 'Check connection'), 'info');
     } finally {
@@ -72,7 +72,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     onNotify?.(`Switched to Vault: "${updated}"`, 'success');
     setIsSyncing(true);
     try {
-      await StorageService.syncWithRemote();
+      await DeckService.syncWithRemote();
     } finally {
       setIsSyncing(false);
       onVaultChanged();
@@ -86,7 +86,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     onNotify?.(`Created fresh Vault: "${newId}"`, 'success');
     setIsSyncing(true);
     try {
-      await StorageService.syncWithRemote();
+      await DeckService.syncWithRemote();
     } finally {
       setIsSyncing(false);
       onVaultChanged();

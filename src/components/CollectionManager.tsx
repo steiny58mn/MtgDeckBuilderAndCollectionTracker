@@ -28,7 +28,7 @@ import {
   Columns3
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
-import { StorageService } from '../services/storage';
+import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 
 interface CollectionManagerProps {
@@ -95,7 +95,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     if (selectedBinderFilter !== 'all') {
       const current = binders.find((b) => b.id === selectedBinderFilter);
       if (current) {
-        await StorageService.saveBinder({ ...current, updatedAt: Date.now() });
+        await DeckService.saveBinder({ ...current, updatedAt: Date.now() });
       }
     }
     setSelectedBinderFilter('all');
@@ -238,7 +238,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     setIsRefreshingPrices(true);
     setRefreshToast(null);
     try {
-      await StorageService.refreshCollectionPrices(collection);
+      await DeckService.refreshCollectionPrices(collection);
       setRefreshToast('Collection prices synced with live Scryfall market!');
       setTimeout(() => setRefreshToast(null), 3000);
     } catch (err: any) {

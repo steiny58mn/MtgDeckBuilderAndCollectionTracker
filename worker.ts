@@ -1,6 +1,6 @@
 /**
  * Cloudflare Worker (_worker.js / worker.ts)
- * Edge Proxy for Scryfall, EDHREC, and MtgApps API (mtgappsapi.azurewebsites.net).
+ * Edge Proxy for Scryfall, EDHREC, and MtgApps API (api.frostpointlabs.com).
  */
 
 export interface Env {
@@ -11,7 +11,7 @@ export interface Env {
   [key: string]: any;
 }
 
-export const DEFAULT_API_BASE = 'https://mtgappsapi.azurewebsites.net';
+export const DEFAULT_API_BASE = 'https://api.frostpointlabs.com';
 
 /**
  * Resolve target backend base URL from environment variables or optional header override

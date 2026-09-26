@@ -20,7 +20,7 @@ import {
   getApiBaseUrl, 
   setApiBaseUrl, 
   resetApiBaseUrl 
-} from '../services/api';
+} from '../services/deckService';
 
 interface ApiDiagnosticsModalProps {
   isOpen: boolean;
@@ -97,13 +97,13 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
     runDiagnostics(localUrl);
   };
 
-  const handleUseAzure = () => {
-    const azureUrl = 'https://mtgappsapi.azurewebsites.net';
-    setInputUrl(azureUrl);
-    setApiBaseUrl(azureUrl);
-    setCurrentBaseUrl(azureUrl);
-    onNotify?.('Switched to direct Azure API', 'info');
-    runDiagnostics(azureUrl);
+  const handleUseProduction = () => {
+    const prodUrl = 'https://api.frostpointlabs.com';
+    setInputUrl(prodUrl);
+    setApiBaseUrl(prodUrl);
+    setCurrentBaseUrl(prodUrl);
+    onNotify?.('Switched to direct Production API (api.frostpointlabs.com)', 'info');
+    runDiagnostics(prodUrl);
   };
 
   const handleCopyReport = () => {
@@ -203,11 +203,11 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={handleUseAzure}
+                  onClick={handleUseProduction}
                   className="text-[11px] px-2 py-1 rounded bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors cursor-pointer"
-                  title="Direct to Azure Web App"
+                  title="Direct to Production API (api.frostpointlabs.com)"
                 >
-                  Azure API
+                  Production API
                 </button>
                 <button
                   type="button"
@@ -233,7 +233,7 @@ export const ApiDiagnosticsModal: React.FC<ApiDiagnosticsModalProps> = ({
                 type="text"
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="http://localhost:5205 or https://mtgappsapi.azurewebsites.net"
+                placeholder="http://localhost:5205 or https://api.frostpointlabs.com"
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-violet-500"
               />
               <button

@@ -12,6 +12,6 @@
     "not_found_handling": "single-page-application"
   },
   "vars": {
-    "API_BASE_URL": "https://mtgappsapi.azurewebsites.net"
+    "API_BASE_URL": "https://api.frostpointlabs.com"
   }
 }
