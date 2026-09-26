@@ -256,12 +256,22 @@ export default function App() {
     const imgUrl = getCardImageUrl(card, 'normal');
 
     if (category === 'commander') {
+      const existingCmdrs = currentCards.filter((c) => c.category === 'commander');
+      // If we already have 2 commanders, replace the secondary commander
+      if (existingCmdrs.length >= 2) {
+        const secondaryCmdr = existingCmdrs[1];
+        const removeIdx = currentCards.findIndex((c) => c.id === secondaryCmdr.id);
+        if (removeIdx >= 0) {
+          currentCards.splice(removeIdx, 1);
+        }
+      }
+
       const otherCommanders = currentCards.filter((c) => c.category === 'commander' && c.scryfallId !== card.id);
       const allCmdrs = [...otherCommanders, { name: card.name, color_identity: card.color_identity || [] }];
       updatedCommanderName = allCmdrs.map((c) => c.name).join(' // ');
       updatedCommanderArt = latestActiveDeck.commanderArtUrl || getCardImageUrl(card, 'art_crop');
       updatedCover = updatedCommanderArt;
-      updatedCommanderId = latestActiveDeck.commanderId || card.id;
+      updatedCommanderId = otherCommanders[0]?.scryfallId || card.id;
       updatedCommanderColorIdentity = Array.from(new Set(allCmdrs.flatMap((c) => c.color_identity || [])));
     } else if (!updatedCover) {
       updatedCover = getCardImageUrl(card, 'art_crop');
@@ -639,6 +649,7 @@ export default function App() {
             searchContext={searchContext}
             onSetSearchContext={(ctx) => setSearchContext(ctx)}
             activeDeck={activeDeck}
+            onUpdateDeck={handleUpdateDeck}
             activeBinder={activeBinder}
             binders={binders}
             onSelectBinder={(b) => setActiveBinder(b)}

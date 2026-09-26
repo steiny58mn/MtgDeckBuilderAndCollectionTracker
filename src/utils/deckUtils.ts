@@ -401,6 +401,43 @@ export function canBePrimaryCommander(card: {
 }
 
 /**
+ * Known "Partner with" pairs in MTG (Battlebond, Commander 2020, etc.)
+ * Used as an authoritative lookup and fallback for partner-with detection.
+ */
+export const KNOWN_PARTNER_WITH_PAIRS: Record<string, string> = {
+  'Regna, the Redeemer': 'Krav, the Unredeemed',
+  'Krav, the Unredeemed': 'Regna, the Redeemer',
+  'Virtus the Veiled': 'Gorm the Great',
+  'Gorm the Great': 'Virtus the Veiled',
+  'Pir, Imaginative Rascal': 'Toothy, Imaginary Friend',
+  'Toothy, Imaginary Friend': 'Pir, Imaginative Rascal',
+  'Khorvath Brightflame': 'Sylvia Brightspear',
+  'Sylvia Brightspear': 'Khorvath Brightflame',
+  'Okaun, Eye of Chaos': 'Zndrsplt, Eye of Wisdom',
+  'Zndrsplt, Eye of Wisdom': 'Okaun, Eye of Chaos',
+  'Rowan Kenrith': 'Will Kenrith',
+  'Will Kenrith': 'Rowan Kenrith',
+  'Brallin, Skyshark Rider': 'Shabraz, the Skyshark',
+  'Shabraz, the Skyshark': 'Brallin, Skyshark Rider',
+  'Cazur, Ruthless Stalker': 'Ukkima, Stalking Shadow',
+  'Ukkima, Stalking Shadow': 'Cazur, Ruthless Stalker',
+  'Haldan, Avid Arcanist': 'Pako, Arcane Retriever',
+  'Pako, Arcane Retriever': 'Haldan, Avid Arcanist',
+  'Nikara, Lair Scavenger': 'Yannik, Scavenging Sentinel',
+  'Yannik, Scavenging Sentinel': 'Nikara, Lair Scavenger',
+  'Blaring Captain': 'Blaring Recruiter',
+  'Blaring Recruiter': 'Blaring Captain',
+  'Chakram Retriever': 'Chakram Slinger',
+  'Chakram Slinger': 'Chakram Retriever',
+  'Impetuous Protege': 'Proud Mentor',
+  'Proud Mentor': 'Impetuous Protege',
+  'Ley Weaver': 'Lore Weaver',
+  'Lore Weaver': 'Ley Weaver',
+  'Soulblade Corrupter': 'Soulblade Renewer',
+  'Soulblade Renewer': 'Soulblade Corrupter',
+};
+
+/**
  * Analyzes Scryfall metadata (keywords, type_line, oracle_text) to determine
  * whether a card supports Partner, Background, Friends Forever, or Doctor mechanics.
  */
@@ -409,6 +446,7 @@ export function getCardPartnerInfo(card: {
   type_line?: string;
   oracle_text?: string;
   keywords?: string[];
+  all_parts?: { component?: string; name: string; type_line?: string }[];
 }): CommanderPartnerInfo {
   const typeLine = (card.type_line || '').toLowerCase();
   const oracle = (card.oracle_text || '').toLowerCase();
@@ -433,9 +471,36 @@ export function getCardPartnerInfo(card: {
   }
 
   // 3. Partner with [Specific Card Name]
-  const partnerWithMatch = (card.oracle_text || '').match(new RegExp('partner with ([^\\n\\r(.,]+)', 'i'));
-  if (keywords.includes('partner with') || partnerWithMatch) {
-    const target = partnerWithMatch ? partnerWithMatch[1].trim() : undefined;
+  // Card names can contain commas (e.g. "Krav, the Unredeemed", "Brallin, Skyshark Rider").
+  // Reminder text begins with '(', a newline, or trailing period.
+  const partnerWithMatch = (card.oracle_text || '').match(/partner with\s+([^\r\n(]+?)(?:\s*\(|\.?\s*[\r\n]|\.?\s*$)/i);
+  let target = partnerWithMatch ? partnerWithMatch[1].trim().replace(/\.+$/, '') : undefined;
+
+  // Fallback 1: Scryfall all_parts combo_piece
+  if (!target && card.all_parts && Array.isArray(card.all_parts)) {
+    const cardNameLower = (card.name || '').toLowerCase();
+    const partnerPart = card.all_parts.find(
+      (p) => p.component === 'combo_piece' && p.name.toLowerCase() !== cardNameLower
+    );
+    if (partnerPart) {
+      target = partnerPart.name;
+    }
+  }
+
+  // Fallback 2: Authoritative fallback lookup
+  if (!target && card.name) {
+    const trimmed = card.name.trim();
+    target = KNOWN_PARTNER_WITH_PAIRS[trimmed];
+    if (!target) {
+      const lower = trimmed.toLowerCase();
+      const matchKey = Object.keys(KNOWN_PARTNER_WITH_PAIRS).find((k) => k.toLowerCase() === lower);
+      if (matchKey) {
+        target = KNOWN_PARTNER_WITH_PAIRS[matchKey];
+      }
+    }
+  }
+
+  if (keywords.includes('partner with') || target || (card.oracle_text || '').toLowerCase().includes('partner with')) {
     return {
       canHavePartner: true,
       partnerType: 'partner_with',
@@ -591,6 +656,7 @@ export function getPartnerScryfallQuery(cmdr: {
   type_line?: string;
   oracle_text?: string;
   keywords?: string[];
+  all_parts?: { component?: string; name: string; type_line?: string }[];
 }): string | null {
   const pInfo = getCardPartnerInfo(cmdr);
   if (!pInfo.canHavePartner) return null;

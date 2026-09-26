@@ -56,6 +56,7 @@ interface CardSearchViewProps {
   initialTargetCategory?: DeckCategory;
   initialPartnerMode?: boolean;
   onResetPartnerSearchRequest?: () => void;
+  onUpdateDeck?: (deck: Deck) => void;
 }
 
 const CARD_TYPES = [
@@ -116,6 +117,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   initialTargetCategory = 'main',
   initialPartnerMode = false,
   onResetPartnerSearchRequest,
+  onUpdateDeck,
 }) => {
   const isDeckContext = searchContext === 'deck';
   const [targetDeckCategory, setTargetDeckCategory] = useState<DeckCategory>(initialTargetCategory);
@@ -134,92 +136,84 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const firstCmdrPartnerInfo = commanderCards.length === 1 ? getCardPartnerInfo(commanderCards[0]) : null;
   const canHavePartner = isCommanderDeck && commanderCards.length === 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
 
-  const [isPartnerMode, setIsPartnerMode] = useState<boolean>(initialPartnerMode || false);
+  // Available Partners Shelf state
+  const [isPartnerSectionExpanded, setIsPartnerSectionExpanded] = useState<boolean>(false);
+  const [availablePartners, setAvailablePartners] = useState<ScryfallCard[]>([]);
+  const [loadingPartners, setLoadingPartners] = useState<boolean>(false);
+  const [partnerFilter, setPartnerFilter] = useState<string>('');
+
+  const primaryCommander = commanderCards[0] || null;
+  const currentPartner = commanderCards.length > 1 ? commanderCards[1] : null;
 
   useEffect(() => {
     if (initialPartnerMode) {
-      setIsPartnerMode(true);
-      setSearchTerm('');
-      setSelectedColors([]);
-      setSelectedTypes([]);
-      setCustomSubtype('');
-      setSelectedSupertypes([]);
-      setOracleText('');
-      setCmcValue('');
-      setCmcMax('');
-      setSpecificManaCost('');
-      setSelectedRarity('');
-      setPage(1);
+      setIsPartnerSectionExpanded(true);
       onResetPartnerSearchRequest?.();
     }
   }, [initialPartnerMode]);
 
-  // Transition detection:
-  // After a Commander is chosen, if it can be a partner variant, show all legal options for the other card.
-  // If not, or once the other card is chosen, reset the search criteria so it just shows all cards available to choose.
-  const prevCmdrCount = useRef(commanderCards.length);
-  const prevFirstCmdrId = useRef(commanderCards[0]?.id);
-
+  // Load available legal partners/backgrounds without cluttering main search
   useEffect(() => {
-    if (!isDeckContext || !isCommanderDeck) {
+    if (!isDeckContext || !isCommanderDeck || !primaryCommander || !firstCmdrPartnerInfo?.canHavePartner) {
+      setAvailablePartners([]);
       return;
     }
 
-    const countChanged = commanderCards.length !== prevCmdrCount.current;
-    const firstCmdrChanged = commanderCards[0]?.id !== prevFirstCmdrId.current;
-
-    if (countChanged || firstCmdrChanged) {
-      prevCmdrCount.current = commanderCards.length;
-      prevFirstCmdrId.current = commanderCards[0]?.id;
-
-      if (commanderCards.length === 1) {
-        const pInfo = getCardPartnerInfo(commanderCards[0]);
-        if (pInfo.canHavePartner) {
-          // Commander is a partner variant -> show all legal options for the other card
-          setIsPartnerMode(true);
-          setSearchTerm('');
-          setSelectedColors([]);
-          setSelectedTypes([]);
-          setCustomSubtype('');
-          setSelectedSupertypes([]);
-          setOracleText('');
-          setCmcValue('');
-          setCmcMax('');
-          setSpecificManaCost('');
-          setSelectedRarity('');
-          setPage(1);
-        } else {
-          // If not -> reset search criteria to show all cards available to choose
-          setIsPartnerMode(false);
-          setSearchTerm('');
-          setSelectedColors([]);
-          setSelectedTypes([]);
-          setCustomSubtype('');
-          setSelectedSupertypes([]);
-          setOracleText('');
-          setCmcValue('');
-          setCmcMax('');
-          setSpecificManaCost('');
-          setSelectedRarity('');
-          setPage(1);
-        }
-      } else if (commanderCards.length >= 2 || commanderCards.length === 0) {
-        // Once the other card is chosen (or no commander) -> reset search criteria
-        setIsPartnerMode(false);
-        setSearchTerm('');
-        setSelectedColors([]);
-        setSelectedTypes([]);
-        setCustomSubtype('');
-        setSelectedSupertypes([]);
-        setOracleText('');
-        setCmcValue('');
-        setCmcMax('');
-        setSpecificManaCost('');
-        setSelectedRarity('');
-        setPage(1);
-      }
+    const partnerQuery = getPartnerScryfallQuery(primaryCommander);
+    if (!partnerQuery) {
+      setAvailablePartners([]);
+      return;
     }
-  }, [commanderCards.length, commanderCards[0]?.id, isDeckContext, isCommanderDeck]);
+
+    let isMounted = true;
+    setLoadingPartners(true);
+    searchCards({
+      query: partnerQuery,
+      order: 'edhrec',
+      dir: 'auto',
+      page: 1,
+      unique: 'cards',
+    })
+      .then((res) => {
+        if (isMounted) {
+          setAvailablePartners(res.data || []);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load available partners', err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoadingPartners(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [primaryCommander?.id, firstCmdrPartnerInfo?.canHavePartner, isDeckContext, isCommanderDeck]);
+
+  const handleSelectPartner = (partnerCard: ScryfallCard) => {
+    onQuickAddToDeck?.(partnerCard, 'commander');
+    setSearchTerm('');
+  };
+
+  const handleRemovePartner = () => {
+    if (!activeDeck || !currentPartner || !onUpdateDeck) return;
+    const remainingCards = activeDeck.cards.filter((c) => c.id !== currentPartner.id);
+    const primaryCmdr = commanderCards[0];
+    const newCommanderColorIdentity = primaryCmdr.color_identity || [];
+    const updated: Deck = {
+      ...activeDeck,
+      cards: remainingCards,
+      commanderName: primaryCmdr.name,
+      commanderArtUrl: primaryCmdr.imageUrl,
+      commanderId: primaryCmdr.scryfallId,
+      commanderColorIdentity: newCommanderColorIdentity,
+      updatedAt: Date.now(),
+    };
+    onUpdateDeck(updated);
+  };
 
   // Helper to get count of copies of card currently in active deck
   const getDeckCopies = (card: ScryfallCard): number => {
@@ -249,20 +243,37 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   
-  // Instantly clear results when commander changes
+  // When commander changes or is chosen, clear out search box and refresh cleanly
   const prevCommanderId = useRef(activeDeck?.commanderId);
+  const prevCommanderCount = useRef(commanderCards.length);
+
   useEffect(() => {
-    if (activeDeck?.commanderId !== prevCommanderId.current) {
+    const cmdrIdChanged = activeDeck?.commanderId !== prevCommanderId.current;
+    const cmdrCountChanged = commanderCards.length !== prevCommanderCount.current;
+
+    if (cmdrIdChanged || cmdrCountChanged) {
       if (searchContext === 'deck' && activeDeck?.format === 'commander') {
         setSortBy(activeDeck?.commanderId ? 'synergy' : 'commander_decks');
       }
+
+      // When the Commander is chosen, even for partners, clear out the search box
+      if (activeDeck?.commanderId || commanderCards.length > 0) {
+        setSearchTerm('');
+      }
+
       setResults([]);
       setTotalCount(0);
       setHasMore(false);
-      setLoading(true); // show loading immediately
+      setLoading(true);
       prevCommanderId.current = activeDeck?.commanderId;
+      prevCommanderCount.current = commanderCards.length;
+
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        executeSearch(1, false, '');
+      }, 100);
     }
-  }, [activeDeck?.commanderId]);
+  }, [activeDeck?.commanderId, commanderCards.length]);
 
   
   // Reset search options when switching context
@@ -411,18 +422,15 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     // Mandatory boundary clauses (Commander format + color identity scoping)
     const boundaryClauses: string[] = [];
     
-    // Always exclude digital-only (Alchemy, etc.) cards
-    boundaryClauses.push('not:digital');
+    // Always exclude digital-only (Alchemy, etc.) cards (only once)
+    if (!trimmedSearch.toLowerCase().includes('not:digital') && !filterClauses.some((c) => c.toLowerCase().includes('not:digital'))) {
+      boundaryClauses.push('not:digital');
+    }
 
     // ONLY apply deck-specific format/color identity constraints if we are actively searching for the deck
     if (isDeckContext) {
       if (isCommanderDeck) {
-        if (isPartnerMode && commanderCards.length === 1 && firstCmdrPartnerInfo?.canHavePartner) {
-          const partnerQuery = getPartnerScryfallQuery(commanderCards[0]);
-          if (partnerQuery) {
-            boundaryClauses.push(partnerQuery);
-          }
-        } else if (hasCommander) {
+        if (hasCommander) {
           boundaryClauses.push('f:commander');
           const idString = commanderColorIdentity.length === 0
             ? 'c'
@@ -430,6 +438,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           boundaryClauses.push(`id<=${idString}`);
         } else {
           boundaryClauses.push('f:commander');
+          boundaryClauses.push('is:commander');
         }
       } else {
         const effectiveFormat = selectedFormat || (activeDeck?.format !== 'commander' ? activeDeck?.format : '');
@@ -449,6 +458,19 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       return boundaryClauses.join(' ').trim();
     }
 
+    const sanitizeQuery = (rawStr: string): string => {
+      const tokens = rawStr.split(/\s+/).filter(Boolean);
+      let seenDigital = false;
+      const resultTokens = tokens.filter((t) => {
+        if (t.toLowerCase() === 'not:digital') {
+          if (seenDigital) return false;
+          seenDigital = true;
+        }
+        return true;
+      });
+      return resultTokens.join(' ').trim();
+    };
+
     // Combine with filterMatchMode (AND vs OR)
     if (filterMatchMode === 'OR') {
       const orClauses: string[] = [];
@@ -460,20 +482,20 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       if (orClauses.length === 0) {
         const parts: string[] = [...boundaryClauses];
         if (trimmedSearch && scopeBySearchTerm) parts.push(trimmedSearch);
-        return parts.join(' ').trim();
+        return sanitizeQuery(parts.join(' '));
       }
 
       const orExpression = orClauses.length === 1 ? orClauses[0] : `(${orClauses.join(' or ')})`;
       const parts: string[] = [...boundaryClauses];
       if (trimmedSearch && scopeBySearchTerm) parts.push(trimmedSearch);
       parts.push(orExpression);
-      return parts.join(' ').trim();
+      return sanitizeQuery(parts.join(' '));
     } else {
       // AND mode: all active criteria must match
       const parts: string[] = [...boundaryClauses];
       if (trimmedSearch) parts.push(trimmedSearch);
       parts.push(...filterClauses);
-      return parts.join(' ').trim();
+      return sanitizeQuery(parts.join(' '));
     }
   };
 
@@ -598,19 +620,11 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     const hasCommander = isCmdr ? Boolean(getDeckCommander(activeDeck).commanderName) : true;
 
     if (isActive && !prevIsActive.current) {
-      // Just became active
+      // Just became active - trigger initial search behind the scenes if deck has no commander yet
       if (isCmdr && searchContext === 'deck') {
         if (!hasCommander) {
-          const newTerm = 'is:commander ';
-          setSearchTerm(newTerm);
-          executeSearch(1, false, newTerm);
+          executeSearch(1, false);
         }
-      }
-    } else if (isActive && prevIsActive.current) {
-      // Was already active, check if commander state changed
-      if (isCmdr && searchContext === 'deck' && !prevHasCommander.current && hasCommander) {
-        setSearchTerm(prev => prev.replace(/is:commander\s*/i, '').trim());
-        // We probably don't want to auto-search on clear to avoid jarring UX, but you could
       }
     }
     
@@ -629,7 +643,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [
-    isPartnerMode,
     filterMatchMode,
     selectedColors,
     selectedTypes,
@@ -650,7 +663,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     activeDeck?.commanderName,
     activeDeck?.commanderId,
     activeDeck?.commanderColorIdentity?.join(''),
+    commanderColorIdentity.join(''),
+    commanderCards.map((c) => c.id).join(','),
   ]);
+
+  const handleClearSearch = () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    setSearchTerm('');
+    setPage(1);
+    executeSearch(1, false, '');
+  };
 
   // Autocomplete trigger
   useEffect(() => {
@@ -671,7 +693,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   }, [searchTerm]);
 
   const isColorDisabledByCommander = (colorKey: string) => {
-    if (isPartnerMode) return false;
     if (!isCommanderDeck || !hasCommander) return false;
     if (colorKey === 'C') return false;
     return !commanderColorIdentity.includes(colorKey);
@@ -869,12 +890,10 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                     <span>No Commander</span>
                     <button
                       onClick={() => {
-                        setSearchTerm('is:commander ');
                         setSelectedTypes(['creature']);
-                        // Trigger search in next tick so selectedTypes is captured
-                        setTimeout(() => executeSearch(1, false, 'is:commander '), 50);
+                        executeSearch(1, false);
                       }}
-                      className="px-2 py-0.5 rounded bg-fuchsia-500 text-slate-950 text-[10px] font-bold hover:bg-fuchsia-400 transition-colors"
+                      className="px-2 py-0.5 rounded bg-fuchsia-500 text-slate-950 text-[10px] font-bold hover:bg-fuchsia-400 transition-colors cursor-pointer"
                     >
                       Find
                     </button>
@@ -895,6 +914,180 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Dedicated Available Partners / Backgrounds Section */}
+      {isDeckContext && isCommanderDeck && commanderCards.length > 0 && firstCmdrPartnerInfo?.canHavePartner && (
+        <div className="bg-slate-900/90 border border-fuchsia-500/40 rounded-2xl overflow-hidden shadow-xl transition-all">
+          {/* Section Header / Expand Bar */}
+          <div
+            onClick={() => setIsPartnerSectionExpanded(!isPartnerSectionExpanded)}
+            className="p-3 bg-gradient-to-r from-fuchsia-950/70 via-slate-900 to-purple-950/50 flex items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-800/80 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">
+                <Crown className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-slate-100">
+                    {firstCmdrPartnerInfo.partnerType === 'choose_background' || firstCmdrPartnerInfo.partnerType === 'background'
+                      ? 'Available Backgrounds'
+                      : 'Available Partners'}
+                  </span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 font-semibold">
+                    for {commanderCards[0].name}
+                  </span>
+                  {availablePartners.length > 0 && (
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      ({availablePartners.length} legal options)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[11px]">
+                  {currentPartner ? (
+                    <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                      <Check className="w-3 h-3" />
+                      Current Partner: <strong className="text-slate-200">{currentPartner.name}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-amber-400/90">
+                      No partner selected • Choose one below or add anytime later without cluttering search
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+              >
+                <span>{isPartnerSectionExpanded ? 'Hide Options' : 'Browse Options'}</span>
+                {isPartnerSectionExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Section Body */}
+          {isPartnerSectionExpanded && (
+            <div className="p-3 border-t border-slate-800 bg-slate-950/70">
+              {loadingPartners ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-fuchsia-400" />
+                  <span className="text-xs">Loading legal options from Scryfall...</span>
+                </div>
+              ) : availablePartners.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-400">
+                  No compatible partner or background options found.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400">
+                      Select a partner to combine color identities and automatically update deck card search:
+                    </span>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={partnerFilter}
+                        onChange={(e) => setPartnerFilter(e.target.value)}
+                        placeholder="Filter by name..."
+                        className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2.5 py-1 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-fuchsia-500 w-44"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      {partnerFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setPartnerFilter('')}
+                          className="absolute right-2 top-1 text-slate-400 hover:text-slate-200 text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Horizontal Scrollable Shelf of Partners */}
+                  <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-800">
+                    {availablePartners
+                      .filter((p) => !partnerFilter || p.name.toLowerCase().includes(partnerFilter.toLowerCase()))
+                      .map((pCard) => {
+                        const isCurrent = currentPartner && (currentPartner.scryfallId === pCard.id || currentPartner.name.toLowerCase() === pCard.name.toLowerCase());
+                        const img = getCardImageUrl(pCard, 'normal');
+
+                        return (
+                          <div
+                            key={pCard.id}
+                            className={`shrink-0 w-36 bg-slate-900 border rounded-xl overflow-hidden flex flex-col justify-between transition-all ${
+                              isCurrent
+                                ? 'border-emerald-500 ring-1 ring-emerald-500/50 shadow-md shadow-emerald-500/10'
+                                : 'border-slate-800 hover:border-fuchsia-500/60'
+                            }`}
+                          >
+                            <div className="relative aspect-[5/7] bg-slate-950 overflow-hidden">
+                              {img ? (
+                                <img
+                                  src={img}
+                                  alt={pCard.name}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center p-2 text-center text-xs text-slate-500">
+                                  {pCard.name}
+                                </div>
+                              )}
+                              <div className="absolute top-1.5 right-1.5">
+                                <ManaCostBadge manaCost={pCard.mana_cost} size="sm" />
+                              </div>
+                            </div>
+
+                            <div className="p-2 flex flex-col gap-1.5 flex-1 justify-between">
+                              <div>
+                                <div className="text-[11px] font-bold text-slate-200 line-clamp-1" title={pCard.name}>
+                                  {pCard.name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 line-clamp-1">
+                                  {pCard.type_line?.split('—')[0]}
+                                </div>
+                              </div>
+
+                              {isCurrent ? (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-center font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 rounded py-0.5">
+                                    ✓ Selected
+                                  </span>
+                                  {onUpdateDeck && (
+                                    <button
+                                      type="button"
+                                      onClick={handleRemovePartner}
+                                      className="w-full py-1 rounded text-[10px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors cursor-pointer"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectPartner(pCard)}
+                                  className="w-full py-1 px-1.5 rounded-lg text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-500 text-white transition-colors cursor-pointer shadow-sm text-center"
+                                >
+                                  {currentPartner ? 'Switch Partner' : '+ Choose Partner'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search Header Bar */}
       <div className="bg-slate-900/95 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-4">
@@ -924,8 +1117,9 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             {loading && <Loader2 className="w-4 h-4 text-fuchsia-500 animate-spin shrink-0" />}
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm('')}
-                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded bg-slate-800 shrink-0"
+                type="button"
+                onClick={handleClearSearch}
+                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded bg-slate-800 shrink-0 cursor-pointer"
               >
                 Clear
               </button>
@@ -1516,36 +1710,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       </div>
 
       {/* Results Header */}
-      {isPartnerMode && commanderCards.length === 1 && firstCmdrPartnerInfo?.canHavePartner && (
-        <div className="bg-gradient-to-r from-fuchsia-950/80 via-purple-950/60 to-slate-900 border border-fuchsia-500/50 rounded-xl p-3 flex items-center justify-between gap-3 shadow-lg">
-          <div className="flex items-center gap-2.5">
-            <Crown className="w-5 h-5 text-amber-400 shrink-0" />
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-fuchsia-200">
-                  Legal Partner Options for:
-                </span>
-                <span className="text-xs font-black text-amber-300">
-                  {commanderCards[0].name}
-                </span>
-              </div>
-              <p className="text-[11px] text-fuchsia-300/80">
-                {firstCmdrPartnerInfo.description}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setIsPartnerMode(false);
-              setSearchTerm('');
-            }}
-            className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 font-medium border border-slate-700"
-          >
-            Show all cards instead
-          </button>
-        </div>
-      )}
       <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 px-1 gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <span>
@@ -1598,20 +1762,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   Maybeboard
                 </button>
               </div>
-              {!isPartnerMode && canHavePartner && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPartnerMode(true);
-                    setSearchTerm('');
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition-colors cursor-pointer flex items-center gap-1.5"
-                  title={`Find legal partner/background options for ${commanderCards[0]?.name}`}
-                >
-                  <Crown className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Find Legal Partner</span>
-                </button>
-              )}
+
             </div>
           )}
           {isBinderContext && (
@@ -1766,7 +1917,10 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           if (isCandidatePrimaryCommander) {
                             return (
                               <button
-                                onClick={() => onQuickAddToDeck(card, 'commander')}
+                                onClick={() => {
+                                  onQuickAddToDeck(card, 'commander');
+                                  setSearchTerm('');
+                                }}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/50 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
                                 title="Set this card as your Commander"
                               >
@@ -1776,10 +1930,13 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                             );
                           }
 
-                          if (isPartnerMode || isCandidatePartner) {
+                          if (isCandidatePartner) {
                             return (
                               <button
-                                onClick={() => onQuickAddToDeck(card, 'commander')}
+                                onClick={() => {
+                                  onQuickAddToDeck(card, 'commander');
+                                  setSearchTerm('');
+                                }}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
                                 title={`Designate ${card.name} as Partner Commander`}
                               >
