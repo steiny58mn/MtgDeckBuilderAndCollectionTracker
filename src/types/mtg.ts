@@ -92,6 +92,8 @@ export interface DeckCard {
   mana_cost?: string;
   cmc: number;
   type_line: string;
+  oracle_text?: string;
+  keywords?: string[];
   colors?: string[];
   color_identity?: string[];
   rarity?: CardRarity;

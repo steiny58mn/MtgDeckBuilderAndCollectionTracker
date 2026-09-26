@@ -27,6 +27,7 @@ import { getDeckCommander, isCardLegalInCommander } from './utils/deckUtils';
 export default function App() {
   const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search'>('decks');
   const [searchContext, setSearchContext] = useState<'deck' | 'binder'>('deck');
+  const [searchTargetCategory, setSearchTargetCategory] = useState<DeckCategory>('main');
   const [decks, setDecks] = useState<Deck[]>([]);
   const [collectionCards, setCollectionCards] = useState<CollectionCard[]>([]);
   const [binders, setBinders] = useState<Binder[]>([]);
@@ -284,6 +285,8 @@ export default function App() {
         mana_cost: card.mana_cost,
         cmc: card.cmc,
         type_line: card.type_line,
+        oracle_text: card.oracle_text || card.card_faces?.[0]?.oracle_text,
+        keywords: card.keywords,
         colors: card.colors,
         color_identity: card.color_identity,
         rarity: card.rarity,
@@ -562,8 +565,9 @@ export default function App() {
               }}
               onUpdateDeck={handleUpdateDeck}
               onDeleteDeck={handleDeleteDeck}
-              onOpenSearch={() => {
+              onOpenSearch={(category) => {
                 setSearchContext('deck');
+                if (category) setSearchTargetCategory(category);
                 setActiveTab('search');
               }}
               onSelectCard={(c) => setInspectedCard(c)}
@@ -622,6 +626,7 @@ export default function App() {
         <div className={activeTab === 'search' ? 'block' : 'hidden'}>
           <CardSearchView
             isActive={activeTab === 'search'}
+            initialTargetCategory={searchTargetCategory}
             searchContext={searchContext}
             onSetSearchContext={(ctx) => setSearchContext(ctx)}
             activeDeck={activeDeck}

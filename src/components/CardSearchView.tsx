@@ -29,7 +29,7 @@ import { searchCards, getAutocomplete, getCardImageUrl, SearchResult } from '../
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
 import { CommanderDeckCount, CardSynergyPercentage } from './EdhrecStats';
-import { getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
+import { getDeckCommander, isCardLegalInCommander, canBePrimaryCommander, canCardsPartnerTogether } from '../utils/deckUtils';
 
 interface CardSearchViewProps {
   isActive?: boolean;
@@ -45,6 +45,7 @@ interface CardSearchViewProps {
   onQuickAddToCollection?: (card: ScryfallCard, isFoil?: boolean) => void;
   onReturnToDeck?: () => void;
   onReturnToBinder?: () => void;
+  initialTargetCategory?: DeckCategory;
 }
 
 const CARD_TYPES = [
@@ -102,8 +103,15 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   onQuickAddToCollection,
   onReturnToDeck,
   onReturnToBinder,
+  initialTargetCategory = 'main',
 }) => {
   const isDeckContext = searchContext === 'deck';
+  const [targetDeckCategory, setTargetDeckCategory] = useState<DeckCategory>(initialTargetCategory);
+  useEffect(() => {
+    if (initialTargetCategory) {
+      setTargetDeckCategory(initialTargetCategory);
+    }
+  }, [initialTargetCategory]);
   const isBinderContext = searchContext === 'binder';
 
   const commanderInfo = activeDeck?.format === 'commander' ? getDeckCommander(activeDeck) : null;
@@ -1397,9 +1405,41 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             )}
           </span>
           {isDeckContext && activeDeck && (
-            <span className="text-slate-400">
-              · Adding to: <strong className="text-fuchsia-300">{activeDeck.name}</strong> ({activeDeck.format})
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-slate-400">
+                · Adding to: <strong className="text-fuchsia-300">{activeDeck.name}</strong> ({activeDeck.format})
+              </span>
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-0.5 rounded-lg text-xs">
+                <span className="text-[10px] text-slate-400 pl-1.5 pr-0.5 uppercase font-bold tracking-wider">Target:</span>
+                <button
+                  type="button"
+                  onClick={() => setTargetDeckCategory('main')}
+                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                    targetDeckCategory === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Mainboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetDeckCategory('sideboard')}
+                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                    targetDeckCategory === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Sideboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetDeckCategory('maybeboard')}
+                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                    targetDeckCategory === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Maybeboard
+                </button>
+              </div>
+            </div>
           )}
           {isBinderContext && (
             <span className="text-slate-400">
@@ -1540,62 +1580,120 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   <div className="mt-1 pt-1.5 border-t border-slate-800/80">
                     {isDeckContext ? (
                       activeDeck && onQuickAddToDeck ? (
-                        isCommanderDeck && !hasCommander && /Legendary/i.test(card.type_line) && (/Creature/i.test(card.type_line) || /Planeswalker/i.test(card.type_line) || (card.oracle_text && card.oracle_text.includes('can be your commander'))) ? (
-                          <button
-                            onClick={() => onQuickAddToDeck(card, 'commander')}
-                            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/50 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
-                            title="Set this card as your Commander"
-                          >
-                            <Crown className="w-3.5 h-3.5" />
-                            <span>Set as Commander</span>
-                          </button>
-                        ) : (
-                          (() => {
-                            const legality = isCommanderDeck && hasCommander
-                              ? isCardLegalInCommander(card, commanderColorIdentity)
-                              : { isLegal: true };
+                        (() => {
+                          const isCandidatePrimaryCommander =
+                            isCommanderDeck && !hasCommander && canBePrimaryCommander(card);
 
-                            if (!legality.isLegal) {
-                              return (
-                                <button
-                                  disabled
-                                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-900 border border-red-900/50 text-slate-500 text-xs font-medium cursor-not-allowed opacity-60"
-                                  title={legality.reason}
-                                >
-                                  <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                                  <span>Illegal in Deck</span>
-                                </button>
-                              );
-                            }
+                          const isCandidatePartner =
+                            isCommanderDeck &&
+                            hasCommander &&
+                            commanderInfo.commanderCards.length === 1 &&
+                            canCardsPartnerTogether(commanderInfo.commanderCards[0], card).canPartner;
 
-                            if (isAtLimit) {
-                              return (
-                                <button
-                                  disabled
-                                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-900/90 border border-fuchsia-800/40 text-fuchsia-500/60 text-xs font-semibold cursor-not-allowed"
-                                  title={`Format limit reached (${deckLimit} copies allowed)`}
-                                >
-                                  <Check className="w-3.5 h-3.5 text-fuchsia-500/70" />
-                                  <span>At Limit ({deckCopies}/{deckLimit})</span>
-                                </button>
-                              );
-                            }
-
+                          if (isCandidatePrimaryCommander) {
                             return (
                               <button
-                                onClick={() => onQuickAddToDeck(card, 'main')}
-                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 text-xs font-bold transition-all cursor-pointer shadow-sm"
-                                title="Add 1 copy to current deck"
+                                onClick={() => onQuickAddToDeck(card, 'commander')}
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/50 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
+                                title="Set this card as your Commander"
                               >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>Add to Deck</span>
-                                {deckCopies > 0 && (
-                                  <span className="text-[10px] font-mono font-semibold opacity-80">({deckCopies})</span>
-                                )}
+                                <Crown className="w-3.5 h-3.5" />
+                                <span>Set as Commander</span>
                               </button>
                             );
-                          })()
-                        )
+                          }
+
+                          const legality = isCommanderDeck && hasCommander
+                            ? isCardLegalInCommander(card, commanderColorIdentity)
+                            : { isLegal: true };
+
+                          if (!legality.isLegal) {
+                            return (
+                              <button
+                                disabled
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-900 border border-red-900/50 text-slate-500 text-xs font-medium cursor-not-allowed opacity-60"
+                                title={legality.reason}
+                              >
+                                <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                                <span>Illegal in Deck</span>
+                              </button>
+                            );
+                          }
+
+                          if (isAtLimit) {
+                            return (
+                              <button
+                                disabled
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-900/90 border border-fuchsia-800/40 text-fuchsia-500/60 text-xs font-semibold cursor-not-allowed"
+                                title={`Format limit reached (${deckLimit} copies allowed)`}
+                              >
+                                <Check className="w-3.5 h-3.5 text-fuchsia-500/70" />
+                                <span>At Limit ({deckCopies}/{deckLimit})</span>
+                              </button>
+                            );
+                          }
+
+                          return (
+                            <div className="flex items-center gap-1 w-full">
+                              <button
+                                onClick={() => onQuickAddToDeck(card, targetDeckCategory)}
+                                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 text-xs font-bold transition-all cursor-pointer shadow-sm min-w-0"
+                                title={`Add 1 copy to ${targetDeckCategory === 'main' ? 'Mainboard' : targetDeckCategory === 'sideboard' ? 'Sideboard' : 'Maybeboard'}`}
+                              >
+                                <Plus className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">
+                                  {targetDeckCategory === 'main' ? 'Deck' : targetDeckCategory === 'sideboard' ? '+ Side' : '+ Maybe'}
+                                </span>
+                                {deckCopies > 0 && (
+                                  <span className="text-[10px] font-mono font-semibold opacity-80 shrink-0">({deckCopies})</span>
+                                )}
+                              </button>
+
+                              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shrink-0 text-[10px] font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickAddToDeck(card, 'main')}
+                                  className={`px-1.5 py-1.5 transition-colors hover:bg-slate-800 cursor-pointer ${
+                                    targetDeckCategory === 'main' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Add 1 copy to Mainboard"
+                                >
+                                  Main
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickAddToDeck(card, 'sideboard')}
+                                  className={`px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 cursor-pointer ${
+                                    targetDeckCategory === 'sideboard' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Add 1 copy to Sideboard"
+                                >
+                                  Side
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickAddToDeck(card, 'maybeboard')}
+                                  className={`px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 cursor-pointer ${
+                                    targetDeckCategory === 'maybeboard' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Add 1 copy to Maybeboard"
+                                >
+                                  Maybe
+                                </button>
+                                {isCandidatePartner && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onQuickAddToDeck(card, 'commander')}
+                                    className="px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 text-amber-400 hover:text-amber-300 font-black cursor-pointer"
+                                    title="Add as Partner Commander"
+                                  >
+                                    +P
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()
                       ) : (
                         <div className="text-[11px] text-slate-500 text-center py-1">No deck selected</div>
                       )

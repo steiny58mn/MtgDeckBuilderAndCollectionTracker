@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard } from '../types/mtg';
-import { calculateDeckStats } from '../utils/deckUtils';
+import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
@@ -47,7 +47,7 @@ interface DeckBuilderProps {
   onBack: () => void;
   onUpdateDeck: (deck: Deck) => void;
   onDeleteDeck: (deckId: string) => void;
-  onOpenSearch: () => void;
+  onOpenSearch: (category?: DeckCategory) => void;
   onSelectCard: (card: ScryfallCard) => void;
   onCreateNewDeck?: (currentDeckToSave: Deck) => Promise<void> | void;
   onImportAsNewDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
@@ -120,6 +120,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   // Commander calculations
   const commanderCards = deck.cards.filter((c) => c.category === 'commander');
+  const firstCmdrPartnerInfo = commanderCards.length === 1 ? getCardPartnerInfo(commanderCards[0]) : null;
   const commanderName = commanderCards.length > 1
     ? commanderCards.map((c) => c.name).join(' // ')
     : commanderCards[0]?.name || deck.commanderName;
@@ -220,6 +221,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         setTimeout(() => setPriceRefreshMessage(null), 3500);
         return;
       }
+
+      if (currentCmdrs.length === 1) {
+        const partnerCheck = canCardsPartnerTogether(currentCmdrs[0], existingCards[idx]);
+        if (!partnerCheck.canPartner) {
+          setPriceRefreshMessage(partnerCheck.reason || 'These cards cannot partner together.');
+          setTimeout(() => setPriceRefreshMessage(null), 4000);
+          return;
+        }
+      } else if (currentCmdrs.length === 0) {
+        if (!canBePrimaryCommander(existingCards[idx])) {
+          const pInfo = getCardPartnerInfo(existingCards[idx]);
+          if (pInfo.partnerType === 'background') {
+            setPriceRefreshMessage('A Background enchantment cannot be your primary commander without a commander that has "Choose a Background".');
+          } else {
+            setPriceRefreshMessage('Card must be a Legendary Creature or a card that says "can be your commander".');
+          }
+          setTimeout(() => setPriceRefreshMessage(null), 4000);
+          return;
+        }
+      }
+
       // If moving to commander, cap quantity at 1
       if (existingCards[idx].quantity > 1) {
         existingCards[idx].quantity = 1;
@@ -509,6 +531,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       0
     );
 
+    const canShowAddPartner = commanderCards.length === 0 || (commanderCards.length === 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner));
+
     return (
       <div className="bg-slate-900 border border-fuchsia-500/40 rounded-2xl overflow-hidden shadow-xl shadow-fuchsia-500/5 mb-4">
         <div className="p-3.5 bg-gradient-to-r from-fuchsia-950/70 via-slate-950/80 to-slate-950/80 border-b border-fuchsia-500/30 flex items-center justify-between gap-3 flex-wrap">
@@ -529,7 +553,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 {commanderCards.length === 2
                   ? '2 commanders designated. Remaining mainboard is limited to 98 cards.'
                   : commanderCards.length === 1
-                  ? '1 commander designated. Remaining mainboard is limited to 99 cards.'
+                  ? firstCmdrPartnerInfo?.canHavePartner
+                    ? `1 commander designated (${firstCmdrPartnerInfo.description}). Remaining mainboard is limited to 99 cards.`
+                    : '1 commander designated (does not support Partner/Background). Remaining mainboard is limited to 99 cards.'
                   : 'Designate your legendary creature or planeswalker as Commander.'}
               </p>
             </div>
@@ -554,12 +580,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </span>
             )}
 
-            {commanderCards.length < 2 && (
+            {canShowAddPartner && (
               <button
                 type="button"
-                onClick={onOpenSearch}
+                onClick={() => onOpenSearch(activeCategoryTab)}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-xs font-bold transition-all cursor-pointer"
-                title={commanderCards.length === 0 ? 'Search and add Commander' : 'Search and add Partner Commander'}
+                title={commanderCards.length === 0 ? 'Search and add Commander' : `Search and add Partner (${firstCmdrPartnerInfo?.description})`}
               >
                 <Plus className="w-3 h-3" />
                 <span>{commanderCards.length === 0 ? 'Add Commander' : '+ Partner'}</span>
@@ -888,7 +914,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
                   {commanderCards.length === 1 && (
                     <span className="text-[11px] text-slate-400 italic">
-                      (Can add 1 Partner or Background commander)
+                      {firstCmdrPartnerInfo?.canHavePartner
+                        ? `(${firstCmdrPartnerInfo.description})`
+                        : '(Single Commander)'}
                     </span>
                   )}
                 </div>
@@ -1009,7 +1037,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
 
           <button
-            onClick={onOpenSearch}
+            onClick={() => onOpenSearch(activeCategoryTab)}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-all shadow-md cursor-pointer hover:scale-102 active:scale-98"
             title="Search and add cards to this deck"
           >
@@ -1055,7 +1083,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={onOpenSearch}
+                        onClick={() => onOpenSearch(activeCategoryTab)}
                         className="p-1 rounded-md bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 hover:text-white transition-colors cursor-pointer"
                         title={`Add cards to ${cat.title}`}
                       >
@@ -1082,7 +1110,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <Layers className="w-8 h-8 mx-auto text-slate-600" />
               <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search and add cards from Scryfall.</p>
               <button
-                onClick={onOpenSearch}
+                onClick={() => onOpenSearch(activeCategoryTab)}
                 className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
               >
                 Search Cards Now
@@ -1122,7 +1150,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       : 'Your deck is empty. Click "+ Add Cards" to search and add cards from Scryfall.'}
                   </p>
                   <button
-                    onClick={onOpenSearch}
+                    onClick={() => onOpenSearch(activeCategoryTab)}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
                   >
                     Search Cards Now
@@ -1259,13 +1287,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
     const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
 
-    const isLegendaryCreatureOrPlaneswalker = card.type_line?.includes('Legendary') && (
-      card.type_line?.includes('Creature') || 
-      card.type_line?.includes('Planeswalker') ||
-      card.type_line?.includes('Background')
-    );
     const isThisCommander = card.category === 'commander';
-    const canAddAsCommander = deck.format === 'commander' && !isThisCommander && commanderCards.length < 2 && isLegendaryCreatureOrPlaneswalker;
+    const canAddAsCommander =
+      deck.format === 'commander' &&
+      !isThisCommander &&
+      (commanderCards.length === 0
+        ? canBePrimaryCommander(card)
+        : commanderCards.length === 1
+        ? canCardsPartnerTogether(commanderCards[0], card).canPartner
+        : false);
 
     return (
       <div
@@ -1315,7 +1345,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 >
                   👑 Cmdr
                 </button>
-              ) : deck.format === 'commander' && commanderCards.length < 2 && isLegendaryCreatureOrPlaneswalker ? (
+              ) : canAddAsCommander ? (
                 <button
                   onClick={() => handleChangeCardCategory(card.id, 'commander')}
                   className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
@@ -1434,6 +1464,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
     const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
     const isThisCommander = card.category === 'commander';
+    const canAddAsCommander =
+      deck.format === 'commander' &&
+      !isThisCommander &&
+      (commanderCards.length === 0
+        ? canBePrimaryCommander(card)
+        : commanderCards.length === 1
+        ? canCardsPartnerTogether(commanderCards[0], card).canPartner
+        : false);
 
     return (
       <div
@@ -1512,8 +1550,71 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               type="button"
               onClick={() => handleRemoveCard(card.id)}
               className="p-1 rounded-md text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+              title="Remove from deck"
             >
               <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Quick Category Relocation Buttons (Main, Side, Maybe, and Commander/Partner if eligible) */}
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] font-medium shadow-xs mt-1 w-full">
+            <button
+              type="button"
+              onClick={() => handleChangeCardCategory(card.id, 'main')}
+              className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
+                card.category === 'main'
+                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+              title="Move to Mainboard"
+            >
+              Main
+            </button>
+
+            {isThisCommander ? (
+              <button
+                type="button"
+                onClick={() => handleChangeCardCategory(card.id, 'main')}
+                className="px-1.5 py-1 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
+                title="Click to remove Commander status"
+              >
+                Cmdr
+              </button>
+            ) : canAddAsCommander ? (
+              <button
+                type="button"
+                onClick={() => handleChangeCardCategory(card.id, 'commander')}
+                className="px-1.5 py-1 transition-colors border-l border-slate-800 text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
+                title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+              >
+                {commanderCards.length === 1 ? '+P' : 'Cmdr'}
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                card.category === 'sideboard'
+                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+              title="Move to Sideboard"
+            >
+              Side
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                card.category === 'maybeboard'
+                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+              title="Move to Maybeboard"
+            >
+              Maybe
             </button>
           </div>
         </div>

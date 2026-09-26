@@ -369,3 +369,195 @@ export function isCardLegalInCommander(
 
   return { isLegal: true };
 }
+
+export interface CommanderPartnerInfo {
+  canHavePartner: boolean;
+  partnerType: 'none' | 'partner' | 'partner_with' | 'choose_background' | 'background' | 'friends_forever' | 'doctors_companion' | 'doctor';
+  partnerWithTarget?: string;
+  description: string;
+}
+
+/**
+ * Checks whether a card can serve as a primary Commander in Commander/EDH format.
+ * Must be a Legendary Creature or a card with 'can be your commander'.
+ */
+export function canBePrimaryCommander(card: {
+  name?: string;
+  type_line?: string;
+  oracle_text?: string;
+}): boolean {
+  const typeLine = (card.type_line || '').toLowerCase();
+  const oracle = (card.oracle_text || '').toLowerCase();
+
+  if (oracle.includes('can be your commander')) {
+    return true;
+  }
+
+  if (typeLine.includes('legendary') && (typeLine.includes('creature') || typeLine.includes('summon'))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Analyzes Scryfall metadata (keywords, type_line, oracle_text) to determine
+ * whether a card supports Partner, Background, Friends Forever, or Doctor mechanics.
+ */
+export function getCardPartnerInfo(card: {
+  name?: string;
+  type_line?: string;
+  oracle_text?: string;
+  keywords?: string[];
+}): CommanderPartnerInfo {
+  const typeLine = (card.type_line || '').toLowerCase();
+  const oracle = (card.oracle_text || '').toLowerCase();
+  const keywords = (card.keywords || []).map((k) => k.toLowerCase());
+
+  // 1. Background enchantment
+  if (typeLine.includes('background') && typeLine.includes('enchantment')) {
+    return {
+      canHavePartner: true,
+      partnerType: 'background',
+      description: 'Background (Pairs with a Commander having "Choose a Background")',
+    };
+  }
+
+  // 2. Choose a Background
+  if (keywords.includes('choose a background') || oracle.includes('choose a background')) {
+    return {
+      canHavePartner: true,
+      partnerType: 'choose_background',
+      description: 'Choose a Background (Pairs with a Legendary Background enchantment)',
+    };
+  }
+
+  // 3. Partner with [Specific Card Name]
+  const partnerWithMatch = (card.oracle_text || '').match(new RegExp('partner with ([^\\n\\r(.,]+)', 'i'));
+  if (keywords.includes('partner with') || partnerWithMatch) {
+    const target = partnerWithMatch ? partnerWithMatch[1].trim() : undefined;
+    return {
+      canHavePartner: true,
+      partnerType: 'partner_with',
+      partnerWithTarget: target,
+      description: target ? ('Partner with ' + target) : 'Partner with specific card',
+    };
+  }
+
+  // 4. Doctor's companion
+  if (keywords.includes("doctor's companion") || oracle.includes("doctor's companion")) {
+    return {
+      canHavePartner: true,
+      partnerType: 'doctors_companion',
+      description: "Doctor's Companion (Pairs with a Time Lord Doctor)",
+    };
+  }
+
+  // 5. Time Lord Doctor
+  if (typeLine.includes('time lord') && typeLine.includes('doctor')) {
+    return {
+      canHavePartner: true,
+      partnerType: 'doctor',
+      description: "Time Lord Doctor (Pairs with a Doctor's Companion)",
+    };
+  }
+
+  // 6. Friends forever
+  if (keywords.includes('friends forever') || oracle.includes('friends forever')) {
+    return {
+      canHavePartner: true,
+      partnerType: 'friends_forever',
+      description: 'Friends Forever (Pairs with another Friends Forever commander)',
+    };
+  }
+
+  // 7. Generic Partner
+  if (keywords.includes('partner') || (/partner/i.test(oracle) && !oracle.includes('partner with'))) {
+    return {
+      canHavePartner: true,
+      partnerType: 'partner',
+      description: 'Partner (Pairs with any other Commander with Partner)',
+    };
+  }
+
+  return {
+    canHavePartner: false,
+    partnerType: 'none',
+    description: 'Does not support a Partner or Background',
+  };
+}
+
+/**
+ * Validates whether two candidate cards can legally partner together under MTG Commander rules.
+ */
+export function canCardsPartnerTogether(
+  cmdr1: { name?: string; type_line?: string; oracle_text?: string; keywords?: string[] },
+  cmdr2: { name?: string; type_line?: string; oracle_text?: string; keywords?: string[] }
+): { canPartner: boolean; reason?: string } {
+  const p1 = getCardPartnerInfo(cmdr1);
+  const p2 = getCardPartnerInfo(cmdr2);
+
+  if (!p1.canHavePartner) {
+    return {
+      canPartner: false,
+      reason: '"' + (cmdr1.name || 'Current Commander') + '" does not have Partner, Choose a Background, or a partner ability.',
+    };
+  }
+
+  if (!p2.canHavePartner) {
+    return {
+      canPartner: false,
+      reason: '"' + (cmdr2.name || 'Candidate card') + '" does not have Partner, Background, or a partner ability.',
+    };
+  }
+
+  // Generic Partner + Generic Partner
+  if (p1.partnerType === 'partner' && p2.partnerType === 'partner') {
+    return { canPartner: true };
+  }
+
+  // Choose a Background + Background Enchantment
+  if (
+    (p1.partnerType === 'choose_background' && p2.partnerType === 'background') ||
+    (p1.partnerType === 'background' && p2.partnerType === 'choose_background')
+  ) {
+    return { canPartner: true };
+  }
+
+  // Partner with [Specific Card]
+  if (p1.partnerType === 'partner_with' || p2.partnerType === 'partner_with') {
+    const target1 = p1.partnerWithTarget ? p1.partnerWithTarget.toLowerCase() : '';
+    const target2 = p2.partnerWithTarget ? p2.partnerWithTarget.toLowerCase() : '';
+    const name1 = (cmdr1.name || '').toLowerCase();
+    const name2 = (cmdr2.name || '').toLowerCase();
+
+    const matches1 = Boolean(target1 && name2.includes(target1));
+    const matches2 = Boolean(target2 && name1.includes(target2));
+
+    if (matches1 || matches2) {
+      return { canPartner: true };
+    }
+    return {
+      canPartner: false,
+      reason: '"' + cmdr1.name + '" can only partner specifically with "' + (p1.partnerWithTarget || 'its designated partner') + '" (not "' + cmdr2.name + '").',
+    };
+  }
+
+  // Friends Forever + Friends Forever
+  if (p1.partnerType === 'friends_forever' && p2.partnerType === 'friends_forever') {
+    return { canPartner: true };
+  }
+
+  // Doctor + Doctor's Companion
+  if (
+    (p1.partnerType === 'doctor' && p2.partnerType === 'doctors_companion') ||
+    (p1.partnerType === 'doctors_companion' && p2.partnerType === 'doctor')
+  ) {
+    return { canPartner: true };
+  }
+
+  return {
+    canPartner: false,
+    reason: 'Incompatible partner mechanics: "' + cmdr1.name + '" (' + p1.description + ') cannot pair with "' + cmdr2.name + '" (' + p2.description + ').',
+  };
+}
