@@ -17,7 +17,9 @@ import {
   Sparkles,
   FileCode,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ListChecks,
+  Loader2
 } from 'lucide-react';
 import { Deck, DeckCard, MTGFormat } from '../types/mtg';
 import { 
@@ -27,7 +29,9 @@ import {
   generateMTGODekXml,
   generateExcelTSV,
   generateCSV,
-  triggerFileDownload 
+  triggerFileDownload,
+  createDeckListApi,
+  createDeckPickListApi
 } from '../utils/deckExport';
 import { 
   IMPORT_FORMATS, 
@@ -58,6 +62,7 @@ interface DeckExportModalProps {
   onImportAsNewDeck: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
   onImportAppendToDeck?: (cardsToAdd: DeckCard[]) => Promise<void>;
   onImportOverwriteDeck?: (overwrittenDeck: Deck) => Promise<void>;
+  onBatchImportCompleted?: (count: number) => void;
   initialTab?: 'export' | 'import';
 }
 
@@ -69,6 +74,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   onImportAsNewDeck,
   onImportAppendToDeck,
   onImportOverwriteDeck,
+  onBatchImportCompleted,
   initialTab = 'export',
 }) => {
   const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
@@ -78,6 +84,10 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   // Export State
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatKey>('bbcode');
   const [copied, setCopied] = useState(false);
+  const [exportedContent, setExportedContent] = useState<string>('');
+  const [isApiLoading, setIsApiLoading] = useState<boolean>(false);
+  const [apiExportError, setApiExportError] = useState<string | null>(null);
+  const [retryApiTrigger, setRetryApiTrigger] = useState(0);
 
   // Import State: Single / Paste
   const [selectedImportFormat, setSelectedImportFormat] = useState<ExportFormatKey | 'auto'>('auto');
@@ -145,13 +155,61 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   }, [parsedPreview]);
 
+  // Fetch or generate export layout whenever deck or selected export format changes
+  useEffect(() => {
+    if (!deck) {
+      setExportedContent('');
+      setIsApiLoading(false);
+      setApiExportError(null);
+      return;
+    }
+
+    if (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist') {
+      let isMounted = true;
+      setIsApiLoading(true);
+      setApiExportError(null);
+      setExportedContent('');
+
+      const endpointPromise =
+        selectedExportFormat === 'bbcode'
+          ? createDeckListApi(deck)
+          : createDeckPickListApi(deck);
+
+      endpointPromise
+        .then((apiLayout) => {
+          if (isMounted) {
+            setExportedContent(apiLayout);
+            setApiExportError(null);
+          }
+        })
+        .catch((err: any) => {
+          if (isMounted) {
+            const formatName = selectedExportFormat === 'bbcode' ? 'BBCode (/mtgtools/createdecklist)' : 'Picklist (/mtgtools/createdeckpicklist)';
+            console.error(`[DeckExportModal] Failed to load ${formatName} from API:`, err);
+            setApiExportError(`Unable to connect to API for ${formatName}. ${err?.message || 'Connection error'}`);
+            setExportedContent('');
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsApiLoading(false);
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setIsApiLoading(false);
+      setApiExportError(null);
+      setExportedContent(generateExportContent(selectedExportFormat, deck));
+    }
+  }, [deck, selectedExportFormat, retryApiTrigger]);
+
   useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
   // Export handlers
   const currentExportOption = EXPORT_FORMATS.find((f) => f.key === selectedExportFormat) || EXPORT_FORMATS[0];
-  const exportedContent = deck ? generateExportContent(selectedExportFormat, deck) : '';
 
   const handleCopyExport = (textToCopy?: string) => {
     if (!deck) return;
@@ -312,6 +370,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     setIsResolvingCards(true);
     setImportError(null);
 
+    const isMultiple = uploadedBatch.length > 1;
+
     try {
       for (let i = 0; i < uploadedBatch.length; i++) {
         const item = uploadedBatch[i];
@@ -391,7 +451,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               updatedAt: Date.now(),
             };
             await DeckService.saveDeck(overwrittenDeck);
-            if (onImportOverwriteDeck) {
+            if (onImportOverwriteDeck && !isMultiple) {
               await onImportOverwriteDeck(overwrittenDeck);
             }
           }
@@ -412,12 +472,19 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
             updatedAt: Date.now(),
           };
           await DeckService.saveDeck(newDeck);
-          await onImportAsNewDeck(newDeck, false);
+          if (!isMultiple) {
+            await onImportAsNewDeck(newDeck, false);
+          }
         }
       }
 
+      const importedCount = uploadedBatch.length;
       setUploadedBatch([]);
       onClose();
+
+      if (isMultiple && onBatchImportCompleted) {
+        onBatchImportCompleted(importedCount);
+      }
     } catch (err: any) {
       console.error('Batch import execution error:', err);
       setImportError('Batch import failed: ' + (err.message || 'Error resolving cards'));
@@ -461,8 +528,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           mana_cost: matchedScry?.mana_cost,
           cmc: matchedScry?.cmc,
           type_line: matchedScry?.type_line || '',
-            oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-            keywords: matchedScry?.keywords,
+          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
+          keywords: matchedScry?.keywords,
           colors: matchedScry?.colors,
           color_identity: matchedScry?.color_identity,
           rarity: matchedScry?.rarity,
@@ -557,8 +624,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           mana_cost: matchedScry?.mana_cost,
           cmc: matchedScry?.cmc,
           type_line: matchedScry?.type_line || '',
-            oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-            keywords: matchedScry?.keywords,
+          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
+          keywords: matchedScry?.keywords,
           colors: matchedScry?.colors,
           color_identity: matchedScry?.color_identity,
           rarity: matchedScry?.rarity,
@@ -647,8 +714,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           mana_cost: matchedScry?.mana_cost,
           cmc: matchedScry?.cmc,
           type_line: matchedScry?.type_line || '',
-            oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-            keywords: matchedScry?.keywords,
+          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
+          keywords: matchedScry?.keywords,
           colors: matchedScry?.colors,
           color_identity: matchedScry?.color_identity,
           rarity: matchedScry?.rarity,
@@ -683,6 +750,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     switch (key) {
       case 'bbcode':
         return <Code className="w-4 h-4 text-fuchsia-400" />;
+      case 'picklist':
+        return <ListChecks className="w-4 h-4 text-amber-400" />;
       case 'tappedout':
       case 'moxfield':
       case 'archidekt':
@@ -730,7 +799,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               </h2>
               <p className="text-xs text-slate-400">
                 {activeTab === 'export'
-                  ? 'Export in 8 community formats including MTGNexus BBCode, MTGO, TappedOut, and Excel.'
+                  ? 'Export in 9 formats including live MTGNexus BBCode, physical picklist, MTGO, and Excel.'
                   : 'Import single or multiple deck files (.txt, .dek, .csv, .tsv) or paste text.'}
               </p>
             </div>
@@ -839,9 +908,16 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  {isApiLoading && (
+                    <span className="flex items-center gap-1.5 text-xs text-fuchsia-400 font-medium" title="Calling API...">
+                      <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                    </span>
+                  )}
+
                   <button
                     onClick={() => handleCopyExport()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shadow-sm cursor-pointer"
+                    disabled={isApiLoading || !!apiExportError || !exportedContent}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {copied ? (
                       <>
@@ -858,7 +934,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
                   <button
                     onClick={handleDownloadExport}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                    disabled={isApiLoading || !!apiExportError || !exportedContent}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Download .{currentExportOption.fileExtension}</span>
@@ -911,16 +988,50 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 </div>
               )}
 
-              <div className="mt-3 flex-1 min-h-[220px] flex flex-col">
+              {apiExportError && (
+                <div className="my-2.5 p-3 rounded-xl bg-rose-950/80 border border-rose-500/60 flex items-center justify-between gap-3 text-xs text-rose-200 shadow-lg">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-bold text-rose-300">API Connection Error</div>
+                      <div className="text-[11px] text-rose-400/90 truncate">{apiExportError}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRetryApiTrigger((prev) => prev + 1)}
+                    className="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-rose-100 rounded-lg text-xs font-semibold cursor-pointer shrink-0 transition-colors border border-rose-700/60"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-3 flex-1 min-h-[220px] flex flex-col relative">
                 <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
                   <span>Output Preview</span>
                   <span>{deck.cards.reduce((s, c) => s + c.quantity, 0)} total cards</span>
                 </div>
-                <textarea
-                  readOnly
-                  value={selectedExportFormat === 'excel' ? generateExcelTSV(deck) : exportedContent}
-                  className="flex-1 w-full min-h-[220px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-300 focus:outline-none select-all resize-none"
-                />
+                <div className="flex-1 relative flex flex-col">
+                  {isApiLoading && (
+                    <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-xs rounded-xl flex flex-col items-center justify-center gap-2 text-slate-300 text-xs z-10 border border-slate-800">
+                      <Loader2 className="w-6 h-6 animate-spin text-fuchsia-400" />
+                      <span>Requesting layout from API...</span>
+                    </div>
+                  )}
+                  <textarea
+                    readOnly
+                    value={selectedExportFormat === 'excel' ? generateExcelTSV(deck) : exportedContent}
+                    placeholder={
+                      isApiLoading
+                        ? 'Loading output from API...'
+                        : apiExportError
+                        ? 'Unable to connect to API endpoint. See error above.'
+                        : 'No content to display'
+                    }
+                    className="flex-1 w-full min-h-[220px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-300 focus:outline-none select-all resize-none"
+                  />
+                </div>
               </div>
             </div>
           </div>

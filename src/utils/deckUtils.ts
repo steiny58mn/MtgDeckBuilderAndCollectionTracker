@@ -1,4 +1,5 @@
-import { Deck, DeckCard, DeckStats, MTGFormat } from '../types/mtg';
+import { getApiBaseUrl, getRemoteDeckHistory, getRemoteDeckHistorySnapshot } from '../services/deckService';
+import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem } from '../types/mtg';
 
 export function calculateDeckStats(deck: Deck): DeckStats {
   const cards = deck.cards || [];
@@ -682,4 +683,434 @@ export function getPartnerScryfallQuery(cmdr: {
     default:
       return null;
   }
+}
+
+export function sortCardsByName<T extends { name: string }>(cards: T[]): T[] {
+  return [...cards].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function filterAvailablePartners<T extends { name: string; type_line?: string; oracle_text?: string; keywords?: string[] }>(
+  primaryCommander: { name: string; type_line?: string; oracle_text?: string; keywords?: string[] },
+  candidateCards: T[],
+  currentPartner?: { name: string } | null
+): T[] {
+  const primaryNameLower = (primaryCommander.name || '').toLowerCase();
+  const currentPartnerLower = (currentPartner?.name || '').toLowerCase();
+
+  return candidateCards.filter((card) => {
+    const cardNameLower = (card.name || '').toLowerCase();
+    if (cardNameLower === primaryNameLower) return false;
+    if (currentPartnerLower && cardNameLower === currentPartnerLower) return false;
+
+    const partnerCheck = canCardsPartnerTogether(primaryCommander, card);
+    return partnerCheck.canPartner;
+  });
+}
+
+export const DECK_COLOR_STYLES: Record<string, string> = {
+  '': 'colorless',
+  'W': 'white',
+  'U': 'blue',
+  'B': 'black',
+  'R': 'red',
+  'G': 'green',
+  'WU': 'azorius',
+  'UB': 'dimir',
+  'BR': 'rakdos',
+  'RG': 'gruul',
+  'GW': 'selesnya',
+  'WB': 'orzhov',
+  'UR': 'izzet',
+  'BG': 'golgari',
+  'RW': 'boros',
+  'GU': 'simic',
+  'WUB': 'esper',
+  'UBR': 'grixis',
+  'BRG': 'jund',
+  'RGW': 'naya',
+  'GWU': 'bant',
+  'WBR': 'mardu',
+  'URG': 'temur',
+  'BGW': 'abzan',
+  'RWU': 'jeskai',
+  'GUB': 'sultai',
+  'UBRG': 'yore',
+  'BRGW': 'dune',
+  'RGWU': 'ink',
+  'GWUB': 'witch',
+  'WUBR': 'glint',
+  'WUBRG': 'fivecolor',
+};
+
+export function getDeckColorStyle(colorIdentity: string[]): string {
+  const sorted = sortWUBRG(colorIdentity).join('').toUpperCase();
+  if (DECK_COLOR_STYLES[sorted]) return DECK_COLOR_STYLES[sorted];
+  const alphaKey = sorted.split('').sort().join('');
+  for (const [key, val] of Object.entries(DECK_COLOR_STYLES)) {
+    if (key.split('').sort().join('') === alphaKey) {
+      return val;
+    }
+  }
+  return 'default';
+}
+
+export function adjustDeckListBBCode(
+  apiOutput: string,
+  deckName?: string,
+  colorStyle?: string,
+  commanderCards: DeckCard[] = []
+): string {
+  let result = apiOutput.trim();
+
+  // Strip existing wrapping [deck...] if returned by backend to prevent double tag nesting
+  result = result.replace(/^\[deck[^\]]*\]/i, '').replace(/\[\/deck\]$/i, '').trim();
+
+  // Strip redundant [card] tags if present
+  result = result.replace(/\[card\](.*?)\[\/card\]/gi, '$1');
+
+  // Handle General / Commander section
+  if (commanderCards.length > 0) {
+    const cmdrNames = new Set(commanderCards.map((c) => c.name.toLowerCase()));
+    const cmdrCount = commanderCards.reduce((s, c) => s + c.quantity, 0);
+    const cmdrBlock = `General (${cmdrCount})\n` + commanderCards.map((c) => `${c.quantity} ${c.name}`).join('\n');
+
+    if (result.includes('General (0)')) {
+      result = result.replace(/General \(0\)/, cmdrBlock);
+    } else if (!result.includes('General (')) {
+      result = `${cmdrBlock}\n\n${result}`;
+    }
+
+    // Deduct commander cards from other sections if they appear in them
+    const lines = result.split('\n');
+    const newLines = [];
+    let currentSectionHeaderIdx = -1;
+    let currentSectionCount = 0;
+    let isInsideGeneral = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const headerMatch = line.match(/^([A-Za-z\s]+)\s*\((\d+)\)$/);
+      if (headerMatch) {
+        const secName = headerMatch[1].trim();
+        isInsideGeneral = secName === 'General';
+        currentSectionCount = parseInt(headerMatch[2], 10);
+        currentSectionHeaderIdx = newLines.length;
+        newLines.push(line);
+        continue;
+      }
+
+      if (!isInsideGeneral && line.trim()) {
+        const cardMatch = line.match(/^(\d+)\s+(.+)$/);
+        if (cardMatch) {
+          const qty = parseInt(cardMatch[1], 10);
+          const name = cardMatch[2].trim().toLowerCase();
+          if (cmdrNames.has(name) && currentSectionHeaderIdx >= 0) {
+            currentSectionCount = Math.max(0, currentSectionCount - qty);
+            const origHeader = newLines[currentSectionHeaderIdx];
+            newLines[currentSectionHeaderIdx] = origHeader.replace(/\(\d+\)/, `(${currentSectionCount})`);
+            continue;
+          }
+        }
+      }
+
+      newLines.push(line);
+    }
+    result = newLines.join('\n');
+  }
+
+  const safeDeckName = (deckName || 'Deck').replace(/[\]]/g, '');
+  const safeColorStyle = colorStyle || 'default';
+
+  return `[deck=${safeDeckName} style=${safeColorStyle}]\n${result}\n[/deck]`;
+}
+
+/**
+ * Local plain text picklist generator grouping by Color and Card Type
+ */
+export function generateDeckPickListLocal(deck: Deck): string {
+  const cards = (deck.cards || []).filter((c) => c.category !== 'maybeboard');
+  const grouped = {};
+
+  const getColorGroup = (c) => {
+    const colors = c.colors || [];
+    if (colors.length === 0) {
+      const type = (c.type_line || '').toLowerCase();
+      if (type.includes('land')) return 'Colorless (Lands)';
+      return 'Colorless (Non-Lands)';
+    }
+    if (colors.length > 1) return 'Multicolor';
+    const colorMap = {
+      W: 'White',
+      U: 'Blue',
+      B: 'Black',
+      R: 'Red',
+      G: 'Green',
+    };
+    return colorMap[colors[0]] || 'Other';
+  };
+
+  cards.forEach((c) => {
+    const grp = getColorGroup(c);
+    if (!grouped[grp]) grouped[grp] = [];
+    grouped[grp].push(c);
+  });
+
+  const sectionOrder = [
+    'White',
+    'Blue',
+    'Black',
+    'Red',
+    'Green',
+    'Multicolor',
+    'Colorless (Non-Lands)',
+    'Colorless (Lands)',
+    'Other',
+  ];
+
+  const lines = [];
+  lines.push(`// Physical Picklist: ${deck.name}`);
+  lines.push(`// Total Cards: ${cards.reduce((s, c) => s + c.quantity, 0)}`);
+  lines.push('');
+
+  sectionOrder.forEach((sec) => {
+    const list = grouped[sec];
+    if (list && list.length > 0) {
+      const secCount = list.reduce((s, c) => s + c.quantity, 0);
+      lines.push(`// --- ${sec} (${secCount}) ---`);
+      list
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((c) => {
+          lines.push(`${c.quantity}x ${c.name} [${c.type_line || 'Card'}]`);
+        });
+      lines.push('');
+    }
+  });
+
+  return lines.join('\n').trim();
+}
+
+/**
+ * Fallback local BBCode generator
+ */
+export function generateBBCodeMTGNexusLocal(deck: Deck): string {
+  const cards = deck.cards || [];
+  const commanderCards = cards.filter((c) => c.category === 'commander');
+  const mainCards = cards.filter((c) => c.category === 'main');
+  const sideCards = cards.filter((c) => c.category === 'sideboard');
+
+  const commanderInfo = getDeckCommander(deck);
+  const colorStyle = getDeckColorStyle(commanderInfo.colorIdentity);
+
+  const lines = [];
+  lines.push(`[deck=${deck.name || 'Deck'} style=${colorStyle}]`);
+
+  if (commanderCards.length > 0) {
+    const count = commanderCards.reduce((s, c) => s + c.quantity, 0);
+    lines.push(`General (${count})`);
+    commanderCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    lines.push('');
+  }
+
+  if (mainCards.length > 0) {
+    const count = mainCards.reduce((s, c) => s + c.quantity, 0);
+    lines.push(`Mainboard (${count})`);
+    mainCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    lines.push('');
+  }
+
+  if (sideCards.length > 0) {
+    const count = sideCards.reduce((s, c) => s + c.quantity, 0);
+    lines.push(`Sideboard (${count})`);
+    sideCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    lines.push('');
+  }
+
+  lines.push('[/deck]');
+  return lines.join('\n');
+}
+
+/**
+ * Calls remote C# API POST /mtgtools/createdecklist to obtain the BBCode formatted decklist.
+ * Throws if the API request fails (no local fallback).
+ */
+export async function createDeckListApi(deck: Deck): Promise<string> {
+  const baseUrl = getApiBaseUrl();
+  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/createdecklist` : '/mtgtools/createdecklist';
+
+  // Format cards for the backend parser (quantity + card name)
+  const cardLines = (deck.cards || [])
+    .filter((c) => c.category !== 'maybeboard')
+    .map((c) => `${c.quantity} ${c.name}`)
+    .join('\n');
+
+  const formData = new FormData();
+  const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  formData.append('file', new Blob([cardLines], { type: 'text/plain' }), `${safeName}.txt`);
+
+  const res = await fetch(targetUrl, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    throw new Error(`API error (${res.status}): ${errorText || res.statusText || 'Failed to generate decklist'}`);
+  }
+
+  const rawOutput = await res.text();
+  const commanderInfo = getDeckCommander(deck);
+  const colorStyle = getDeckColorStyle(commanderInfo.colorIdentity);
+  const commanderCards = (deck.cards || []).filter((c) => c.category === 'commander');
+
+  return adjustDeckListBBCode(rawOutput, deck.name, colorStyle, commanderCards);
+}
+
+/**
+ * Calls remote C# API POST /mtgtools/createdeckpicklist to obtain the physical card picklist.
+ * Throws if the API request fails (no local fallback).
+ */
+export async function createDeckPickListApi(deck: Deck): Promise<string> {
+  const baseUrl = getApiBaseUrl();
+  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/createdeckpicklist` : '/mtgtools/createdeckpicklist';
+
+  const cardLines = (deck.cards || [])
+    .filter((c) => c.category !== 'maybeboard')
+    .map((c) => `${c.quantity} ${c.name}`)
+    .join('\n');
+
+  const formData = new FormData();
+  const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  formData.append('file', new Blob([cardLines], { type: 'text/plain' }), `${safeName}.txt`);
+
+  const res = await fetch(targetUrl, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    throw new Error(`API error (${res.status}): ${errorText || res.statusText || 'Failed to generate picklist'}`);
+  }
+
+  const rawOutput = await res.text();
+  return rawOutput.trim();
+}
+
+/**
+ * Fetch all archived iterations for a deck in descending order of ArchivedAt
+ * Supports standard route: GET /deckbuilder/decks/{id}/history
+ * and alias route:          GET /deckbuilder/decks/history/{id}
+ */
+export async function fetchDeckHistory(
+  deckId: string,
+  useAliasRoute: boolean = false
+): Promise<DeckHistoryItem[]> {
+  return getRemoteDeckHistory(deckId, useAliasRoute);
+}
+
+/**
+ * Fetch a specific history snapshot by deck ID and history ID
+ * GET /deckbuilder/decks/{id}/history/{historyId}
+ */
+export async function fetchDeckHistorySnapshot(
+  deckId: string,
+  historyId: string
+): Promise<DeckHistoryItem | null> {
+  return getRemoteDeckHistorySnapshot(deckId, historyId);
+}
+
+/**
+ * Compares two deck iterations / snapshots and computes detailed card diffs
+ * (added, removed, and quantity modified cards).
+ */
+export function compareDeckSnapshots(
+  olderDeck: { cards?: DeckCard[] } | null | undefined,
+  currentDeck: { cards?: DeckCard[] } | null | undefined
+): DeckDiff {
+  const olderCards = olderDeck?.cards || [];
+  const currentCards = currentDeck?.cards || [];
+
+  const olderMap = new Map<string, { qty: number; card: DeckCard }>();
+  for (const c of olderCards) {
+    const key = `${c.name.toLowerCase()}::${c.category || 'main'}`;
+    const existing = olderMap.get(key);
+    if (existing) {
+      existing.qty += c.quantity;
+    } else {
+      olderMap.set(key, { qty: c.quantity, card: c });
+    }
+  }
+
+  const currentMap = new Map<string, { qty: number; card: DeckCard }>();
+  for (const c of currentCards) {
+    const key = `${c.name.toLowerCase()}::${c.category || 'main'}`;
+    const existing = currentMap.get(key);
+    if (existing) {
+      existing.qty += c.quantity;
+    } else {
+      currentMap.set(key, { qty: c.quantity, card: c });
+    }
+  }
+
+  const added: DeckDiffItem[] = [];
+  const removed: DeckDiffItem[] = [];
+  const changed: DeckDiffItem[] = [];
+
+  let totalAddedCount = 0;
+  let totalRemovedCount = 0;
+
+  // Check all cards in current deck vs older snapshot
+  currentMap.forEach(({ qty: currQty, card }, key) => {
+    const oldEntry = olderMap.get(key);
+    if (!oldEntry) {
+      added.push({
+        cardName: card.name,
+        category: card.category || 'main',
+        oldQuantity: 0,
+        newQuantity: currQty,
+        delta: currQty,
+        card,
+      });
+      totalAddedCount += currQty;
+    } else if (oldEntry.qty !== currQty) {
+      const delta = currQty - oldEntry.qty;
+      changed.push({
+        cardName: card.name,
+        category: card.category || 'main',
+        oldQuantity: oldEntry.qty,
+        newQuantity: currQty,
+        delta,
+        card,
+      });
+      if (delta > 0) {
+        totalAddedCount += delta;
+      } else {
+        totalRemovedCount += Math.abs(delta);
+      }
+    }
+  });
+
+  // Check cards that were removed entirely
+  olderMap.forEach(({ qty: oldQty, card }, key) => {
+    if (!currentMap.has(key)) {
+      removed.push({
+        cardName: card.name,
+        category: card.category || 'main',
+        oldQuantity: oldQty,
+        newQuantity: 0,
+        delta: -oldQty,
+        card,
+      });
+      totalRemovedCount += oldQty;
+    }
+  });
+
+  return {
+    added,
+    removed,
+    changed,
+    totalAddedCount,
+    totalRemovedCount,
+  };
 }

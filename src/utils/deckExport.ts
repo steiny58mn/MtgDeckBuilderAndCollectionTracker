@@ -1,8 +1,15 @@
 import { Deck, DeckCard } from '../types/mtg';
-import { exportDeckToText } from './deckUtils';
+import {
+  exportDeckToText,
+  generateDeckPickListLocal,
+  generateBBCodeMTGNexusLocal,
+  createDeckListApi,
+  createDeckPickListApi,
+} from './deckUtils';
 
 export type ExportFormatKey = 
   | 'bbcode'
+  | 'picklist'
   | 'tappedout'
   | 'moxfield'
   | 'mtgo'
@@ -24,8 +31,16 @@ export const EXPORT_FORMATS: ExportFormatOption[] = [
   {
     key: 'bbcode',
     label: 'BBCode (MTGNexus)',
-    badge: 'Forum',
-    description: 'Formatted [deck] tag with counts and card type categorization for MTGNexus forums.',
+    badge: 'API / Forum',
+    description: 'Formatted [deck] tag with counts and card type categorization via /mtgtools/createdecklist.',
+    fileExtension: 'txt',
+    mimeType: 'text/plain;charset=utf-8',
+  },
+  {
+    key: 'picklist',
+    label: 'Physical Picklist',
+    badge: 'API / Sorting',
+    description: 'Physical card gathering picklist categorized by color and card type via /mtgtools/createdeckpicklist.',
     fileExtension: 'txt',
     mimeType: 'text/plain;charset=utf-8',
   },
@@ -88,82 +103,10 @@ export const EXPORT_FORMATS: ExportFormatOption[] = [
 ];
 
 /**
- * 1. BBCode for MTGNexus
+ * 1. BBCode for MTGNexus (matches /mtgtools/createdecklist structure)
  */
 export function generateBBCodeMTGNexus(deck: Deck): string {
-  const commanderCards = deck.cards.filter((c) => c.category === 'commander');
-  const mainCards = deck.cards.filter((c) => c.category === 'main');
-  const sideCards = deck.cards.filter((c) => c.category === 'sideboard');
-  const maybeCards = deck.cards.filter((c) => c.category === 'maybeboard');
-
-  const creatures: DeckCard[] = [];
-  const instants: DeckCard[] = [];
-  const sorceries: DeckCard[] = [];
-  const artifacts: DeckCard[] = [];
-  const enchantments: DeckCard[] = [];
-  const planeswalkers: DeckCard[] = [];
-  const lands: DeckCard[] = [];
-  const others: DeckCard[] = [];
-
-  mainCards.forEach((c) => {
-    const t = (c.type_line || '').toLowerCase();
-    if (t.includes('creature')) creatures.push(c);
-    else if (t.includes('instant')) instants.push(c);
-    else if (t.includes('sorcery')) sorceries.push(c);
-    else if (t.includes('planeswalker')) planeswalkers.push(c);
-    else if (t.includes('artifact')) artifacts.push(c);
-    else if (t.includes('enchantment')) enchantments.push(c);
-    else if (t.includes('land')) lands.push(c);
-    else others.push(c);
-  });
-
-  const lines: string[] = [];
-  lines.push(`[deck=${deck.name || 'MTG Deck'}]`);
-
-  if (commanderCards.length > 0) {
-    const count = commanderCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`[b]Commander[/b] (${count})`);
-    commanderCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  const addSection = (title: string, list: DeckCard[]) => {
-    if (list.length === 0) return;
-    const count = list.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`[b]${title}[/b] (${count})`);
-    list.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  };
-
-  addSection('Planeswalkers', planeswalkers);
-  addSection('Creatures', creatures);
-  addSection('Instants', instants);
-  addSection('Sorceries', sorceries);
-  addSection('Artifacts', artifacts);
-  addSection('Enchantments', enchantments);
-  addSection('Lands', lands);
-  addSection('Other Spells', others);
-
-  if (sideCards.length > 0) {
-    const count = sideCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`[b]Sideboard[/b] (${count})`);
-    sideCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  if (maybeCards.length > 0) {
-    const count = maybeCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`[b]Maybeboard[/b] (${count})`);
-    maybeCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  while (lines.length > 0 && lines[lines.length - 1] === '') {
-    lines.pop();
-  }
-
-  lines.push('[/deck]');
-  return lines.join('\n');
+  return generateBBCodeMTGNexusLocal(deck);
 }
 
 /**
@@ -585,7 +528,11 @@ export function generateExcelWorkbook(deck: Deck): string {
 export function generateExportContent(format: ExportFormatKey, deck: Deck): string {
   switch (format) {
     case 'bbcode':
-      return generateBBCodeMTGNexus(deck);
+      // Exclusively retrieved via API /mtgtools/createdecklist (no local fallback)
+      return '';
+    case 'picklist':
+      // Exclusively retrieved via API /mtgtools/createdeckpicklist (no local fallback)
+      return '';
     case 'tappedout':
       return generateTappedOut(deck);
     case 'moxfield':
@@ -624,3 +571,10 @@ export function triggerFileDownload(content: string, filename: string, mimeType:
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export {
+  createDeckListApi,
+  createDeckPickListApi,
+  generateDeckPickListLocal,
+  generateBBCodeMTGNexusLocal,
+};

@@ -22,7 +22,7 @@ import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
 import { BinderList } from './components/BinderList';
 import { getCardImageUrl } from './services/scryfall';
-import { getDeckCommander, isCardLegalInCommander } from './utils/deckUtils';
+import { getDeckCommander, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search'>('decks');
@@ -122,9 +122,15 @@ export default function App() {
     showToast(`Created deck "${newDeck.name}"`);
   };
 
-  const handleUpdateDeck = async (updatedDeck: Deck) => {
-    await DeckService.saveDeck(updatedDeck);
+  const handleUpdateDeck = (updatedDeck: Deck) => {
+    DeckService.updateDeckInMemory(updatedDeck);
     setActiveDeck(updatedDeck);
+  };
+
+  const handleSaveDeck = async (deckToSave: Deck) => {
+    await DeckService.saveDeck(deckToSave);
+    setActiveDeck(deckToSave);
+    showToast(`Saved "${deckToSave.name}"!`, 'success');
   };
 
   const handleImportAsNewDeck = async (newDeck: Deck, shouldSaveCurrentDeck: boolean) => {
@@ -135,6 +141,12 @@ export default function App() {
     setActiveDeck(newDeck);
     setActiveTab('decks');
     showToast(`Imported deck "${newDeck.name}" (${newDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards)!`, 'success');
+  };
+
+  const handleBatchImportCompleted = async (count: number) => {
+    setActiveDeck(null);
+    setActiveTab('decks');
+    showToast(`Imported ${count} decks successfully!`, 'success');
   };
 
   const handleCreateNewDeckFromExisting = async (currentDeckToSave: Deck) => {
@@ -272,7 +284,16 @@ export default function App() {
       updatedCommanderArt = latestActiveDeck.commanderArtUrl || getCardImageUrl(card, 'art_crop');
       updatedCover = updatedCommanderArt;
       updatedCommanderId = otherCommanders[0]?.scryfallId || card.id;
-      updatedCommanderColorIdentity = Array.from(new Set(allCmdrs.flatMap((c) => c.color_identity || [])));
+      const combined = Array.from(
+        new Set(
+          allCmdrs.flatMap((c) => {
+            if (c.color_identity && c.color_identity.length > 0) return c.color_identity;
+            const matches = (c as any).mana_cost?.match(/[WUBRG]/gi) || [];
+            return matches.map((m: string) => m.toUpperCase());
+          })
+        )
+      );
+      updatedCommanderColorIdentity = sortWUBRG(combined);
     } else if (!updatedCover) {
       updatedCover = getCardImageUrl(card, 'art_crop');
     }
@@ -302,8 +323,8 @@ export default function App() {
         color_identity: card.color_identity,
         rarity: card.rarity,
         imageUrl: imgUrl,
-        priceUsd: card.prices.usd ? parseFloat(card.prices.usd) : undefined,
-        priceUsdFoil: card.prices.usd_foil ? parseFloat(card.prices.usd_foil) : undefined,
+        priceUsd: card.prices?.usd ? parseFloat(card.prices.usd) : undefined,
+        priceUsdFoil: card.prices?.usd_foil ? parseFloat(card.prices.usd_foil) : undefined,
       };
       currentCards.push(newDeckCard);
     }
@@ -319,7 +340,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await DeckService.saveDeck(updatedDeck);
+    DeckService.updateDeckInMemory(updatedDeck);
     setActiveDeck(updatedDeck);
     showToast(
       `Added ${quantity}x "${card.name}" to ${latestActiveDeck.name}`,
@@ -414,7 +435,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await DeckService.saveDeck(updatedDeck);
+    DeckService.updateDeckInMemory(updatedDeck);
     setActiveDeck(updatedDeck);
     showToast(
       `Added "${item.name}" from binder into ${latestActiveDeck.name}`,
@@ -456,9 +477,9 @@ export default function App() {
         ((c.binderId || 'binder-main') === targetBinderId)
     );
 
-    const priceUsd = isFoil && card.prices.usd_foil
+    const priceUsd = isFoil && card.prices?.usd_foil
       ? parseFloat(card.prices.usd_foil)
-      : (card.prices.usd ? parseFloat(card.prices.usd) : 0);
+      : (card.prices?.usd ? parseFloat(card.prices.usd) : 0);
 
     if (existing) {
       const updated: CollectionCard = {
@@ -529,10 +550,6 @@ export default function App() {
   // Top-level tab change handler:
   const handleTabChange = async (tab: 'decks' | 'collection' | 'search') => {
     if (tab === 'decks') {
-      if (activeDeck) {
-        await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
-        setActiveDeck(null);
-      }
       setActiveTab('decks');
     } else if (tab === 'collection') {
       if (activeBinder) {
@@ -568,13 +585,11 @@ export default function App() {
           activeDeck ? (
             <DeckBuilder
               deck={activeDeck}
-              onBack={async () => {
-                if (activeDeck) {
-                  await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
-                }
+              onBack={() => {
                 setActiveDeck(null);
               }}
               onUpdateDeck={handleUpdateDeck}
+              onSaveDeck={handleSaveDeck}
               onDeleteDeck={handleDeleteDeck}
               onOpenSearch={(category) => {
                 setSearchContext('deck');
@@ -590,6 +605,7 @@ export default function App() {
               onSelectCard={(c) => setInspectedCard(c)}
               onCreateNewDeck={handleCreateNewDeckFromExisting}
               onImportAsNewDeck={handleImportAsNewDeck}
+              onBatchImportCompleted={handleBatchImportCompleted}
             />
           ) : (
             <DeckList
@@ -599,6 +615,7 @@ export default function App() {
               onDuplicateDeck={handleDuplicateDeck}
               onDeleteDeck={handleDeleteDeck}
               onImportDeck={handleImportAsNewDeck}
+              onBatchImportCompleted={handleBatchImportCompleted}
             />
           )
         )}

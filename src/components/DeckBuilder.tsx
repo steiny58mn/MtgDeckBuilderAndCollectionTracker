@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { 
-  ArrowLeft, 
+  ArrowLeft,
+  Save,
+  Loader2, 
   Sparkles, 
   RefreshCw, 
   Play, 
@@ -46,22 +48,26 @@ interface DeckBuilderProps {
   deck: Deck;
   onBack: () => void;
   onUpdateDeck: (deck: Deck) => void;
+  onSaveDeck?: (deckToSave: Deck) => Promise<void> | void;
   onDeleteDeck: (deckId: string) => void;
   onOpenSearch: (category?: DeckCategory | 'partner') => void;
   onSelectCard: (card: ScryfallCard) => void;
   onCreateNewDeck?: (currentDeckToSave: Deck) => Promise<void> | void;
   onImportAsNewDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
+  onBatchImportCompleted?: (count: number) => void;
 }
 
 export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   deck,
   onBack,
   onUpdateDeck,
+  onSaveDeck,
   onDeleteDeck,
   onOpenSearch,
   onSelectCard,
   onCreateNewDeck,
   onImportAsNewDeck: onImportAsNewDeckProp,
+  onBatchImportCompleted,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [title, setTitle] = useState(deck.name);
@@ -78,6 +84,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
   const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>('name');
   const [isSavingNewDeck, setIsSavingNewDeck] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean;
     title: string;
@@ -95,7 +103,47 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setTitle(deck.name);
     setDescription(deck.description || '');
     setFormat(deck.format);
-  }, [deck.id, deck.name, deck.description, deck.format]);
+    setHasUnsavedChanges(false);
+  }, [deck.id]);
+
+  const handleSave = async (deckOverride?: Deck) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const baseDeck = deckOverride || deck;
+      const currentDeckToSave: Deck = {
+        ...baseDeck,
+        name: title.trim() || baseDeck.name,
+        description: description.trim(),
+        format: format,
+        updatedAt: Date.now(),
+      };
+      if (onSaveDeck) {
+        await onSaveDeck(currentDeckToSave);
+      } else {
+        await DeckService.saveDeck(currentDeckToSave);
+      }
+      setHasUnsavedChanges(false);
+      setPriceRefreshMessage('Deck saved & iteration snapshot created!');
+      setTimeout(() => setPriceRefreshMessage(null), 3000);
+    } catch (e: any) {
+      setPriceRefreshMessage('Failed to save deck: ' + (e.message || 'Error'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Keyboard shortcut: Ctrl+S or Cmd+S
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deck, title, description, format, onSaveDeck, isSaving]);
 
   const handleSaveAndCreateNewDeck = async () => {
     if (isSavingNewDeck) return;
@@ -207,6 +255,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       cards: existingCards,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
   };
 
   const handleChangeCardCategory = (cardId: string, newCategory: DeckCategory) => {
@@ -275,6 +324,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       coverCardUrl: newCover,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
   };
 
   const handleRemoveCard = (cardId: string) => {
@@ -300,6 +350,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       coverCardUrl: newCover,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
   };
 
   const handleLivePriceRefresh = async () => {
@@ -354,21 +405,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       cards: currentCards,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
     setPriceRefreshMessage(`Added ${cardsToAdd.reduce((s, c) => s + c.quantity, 0)} cards to deck`);
     setTimeout(() => setPriceRefreshMessage(null), 3500);
   };
 
-  // Return back to deck list and save current deck state
-  const handleBack = async () => {
-    const currentDeckToSave: Deck = {
-      ...deck,
-      name: title.trim() || deck.name,
-      description: description.trim(),
-      format: format,
-      updatedAt: Date.now(),
-    };
-    await DeckService.saveDeck(currentDeckToSave);
-    onUpdateDeck(currentDeckToSave);
+  // Return back to deck list
+  const handleBack = () => {
+    if (hasUnsavedChanges) {
+      setConfirmState({
+        isOpen: true,
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes in this deck session. Would you like to save them before leaving?',
+        onConfirm: async () => {
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          await handleSave();
+          onBack();
+        },
+      });
+      return;
+    }
     onBack();
   };
 
@@ -715,6 +771,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     const newFormat = e.target.value as MTGFormat;
                     setFormat(newFormat);
                     onUpdateDeck({ ...deck, format: newFormat, updatedAt: Date.now() });
+                    setHasUnsavedChanges(true);
                   }}
                   className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-300 capitalize font-bold outline-none cursor-pointer focus:border-violet-500/50 hover:bg-slate-800"
                 >
@@ -813,6 +870,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
               {/* Right: Condensed Action Buttons */}
               <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                {/* Save Deck Button */}
+                <button
+                  type="button"
+                  onClick={() => handleSave()}
+                  disabled={isSaving}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-sm active:scale-98 ${
+                    hasUnsavedChanges
+                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-1 ring-violet-400 shadow-indigo-500/25 animate-pulse-subtle'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700'
+                  }`}
+                  title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
+                >
+                  {isSaving ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                  ) : (
+                    <Save className={`w-3.5 h-3.5 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
+                  )}
+                  <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
+                </button>
+
                 <button
                   onClick={handleLivePriceRefresh}
                   disabled={isRefreshingPrices}
@@ -1249,6 +1326,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         />
       )}
 
+      {/* Unsaved Changes Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText="Save & Exit"
+        cancelText="Discard & Exit"
+        onConfirm={confirmState.onConfirm}
+        onCancel={() => {
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          setHasUnsavedChanges(false);
+          onBack();
+        }}
+      />
+
       {/* Export / Import Multi-format Modal */}
       <DeckExportModal
         deck={deck}
@@ -1260,6 +1352,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         onImportAsNewDeck={handleImportAsNewDeck}
         onImportAppendToDeck={handleAppendCardsToDeck}
         onImportOverwriteDeck={handleOverwriteDeck}
+        onBatchImportCompleted={(count) => {
+          setShowExportModal(false);
+          if (onBatchImportCompleted) {
+            onBatchImportCompleted(count);
+          } else {
+            onBack();
+          }
+        }}
         initialTab={exportModalInitialTab}
       />
     </div>

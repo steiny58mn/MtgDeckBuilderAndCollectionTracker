@@ -4,8 +4,14 @@
  * and manages reactive in-memory state for decks and binders.
  */
 
-import { Deck, CollectionCard, DeckCard, Binder } from '../types/mtg';
+import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem } from '../types/mtg';
 import { fetchBatchCardPrices } from './scryfall';
+import {
+  createDeckListApi,
+  createDeckPickListApi,
+  getDeckColorStyle,
+  generateDeckPickListLocal,
+} from '../utils/deckUtils';
 
 // ============================================================================
 // Types & Interfaces
@@ -77,7 +83,7 @@ export function getVaultId(): string {
     }
     const newId = generateRandomVaultId();
     localStorage.setItem(STORAGE_VAULT_KEY, newId);
-    console.info(`[DeckService] ?? Initialized new random Vault ID: "${newId}". Saved in localStorage['${STORAGE_VAULT_KEY}'].`);
+    console.info(`[DeckService] 🔑 Initialized new random Vault ID: "${newId}". Saved in localStorage['${STORAGE_VAULT_KEY}'].`);
     return newId;
   }
   return 'vault-default';
@@ -92,10 +98,10 @@ export function setVaultId(vaultId: string): void {
     if (!clean) {
       const fresh = generateRandomVaultId();
       localStorage.setItem(STORAGE_VAULT_KEY, fresh);
-      console.info(`[DeckService] ?? Vault ID cleared -> generated fresh Vault ID: "${fresh}".`);
+      console.info(`[DeckService] 🔑 Vault ID cleared -> generated fresh Vault ID: "${fresh}".`);
     } else {
       localStorage.setItem(STORAGE_VAULT_KEY, clean);
-      console.info(`[DeckService] ?? Vault ID set to: "${clean}".`);
+      console.info(`[DeckService] 🔑 Vault ID set to: "${clean}".`);
     }
   }
 }
@@ -107,7 +113,7 @@ export function resetVaultId(): string {
   const fresh = generateRandomVaultId();
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_VAULT_KEY, fresh);
-    console.info(`[DeckService] ?? Vault ID reset to: "${fresh}".`);
+    console.info(`[DeckService] 🔑 Vault ID reset to: "${fresh}".`);
   }
   return fresh;
 }
@@ -212,7 +218,7 @@ export async function getRemoteDecks(): Promise<Deck[]> {
   const vaultId = headers['X-Vault-Id'];
   const start = performance.now();
 
-  console.groupCollapsed(`[DeckService] ?? Fetching decks from ${targetUrl} [Vault: ${vaultId}]`);
+  console.groupCollapsed(`[DeckService] 📡 Fetching decks from ${targetUrl} [Vault: ${vaultId}]`);
   console.log('[DeckService] Request URL:', targetUrl);
   console.log('[DeckService] Request Headers:', headers);
 
@@ -226,7 +232,7 @@ export async function getRemoteDecks(): Promise<Deck[]> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[DeckService] ?? getRemoteDecks returned HTTP ${res.status}:`, errText);
+      console.warn(`[DeckService] ⚠️ getRemoteDecks returned HTTP ${res.status}:`, errText);
       console.groupEnd();
       return [];
     }
@@ -236,18 +242,18 @@ export async function getRemoteDecks(): Promise<Deck[]> {
     try {
       data = JSON.parse(rawText);
     } catch (parseErr) {
-      console.error('[DeckService] ? Failed to parse deck JSON response:', parseErr, { rawTextPreview: rawText.slice(0, 300) });
+      console.error('[DeckService] ❌ Failed to parse deck JSON response:', parseErr, { rawTextPreview: rawText.slice(0, 300) });
       console.groupEnd();
       return [];
     }
 
     if (!Array.isArray(data)) {
-      console.warn('[DeckService] ?? getRemoteDecks returned non-array payload:', data);
+      console.warn('[DeckService] ⚠️ getRemoteDecks returned non-array payload:', data);
       console.groupEnd();
       return [];
     }
 
-    console.log(`[DeckService] ? Loaded ${data.length} deck(s) from server (${durationMs}ms):`, data.map((d: any) => ({
+    console.log(`[DeckService] ✅ Loaded ${data.length} deck(s) from server (${durationMs}ms):`, data.map((d: any) => ({
       id: d.id,
       name: d.name,
       format: d.format,
@@ -257,14 +263,14 @@ export async function getRemoteDecks(): Promise<Deck[]> {
     })));
 
     if (data.length === 0) {
-      console.warn(`[DeckService] ?? 0 decks returned for Vault ID "${vaultId}". Note: If decks in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
+      console.warn(`[DeckService] ℹ️ 0 decks returned for Vault ID "${vaultId}". Note: If decks in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
     }
 
     console.groupEnd();
     return data;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ? Network/Fetch error in getRemoteDecks (${durationMs}ms):`, err);
+    console.error(`[DeckService] ❌ Network/Fetch error in getRemoteDecks (${durationMs}ms):`, err);
     console.groupEnd();
     return [];
   }
@@ -279,7 +285,7 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
-  console.log(`[DeckService] ?? Saving deck "${deck.name}" (${deck.id}) to ${targetUrl}...`, {
+  console.log(`[DeckService] 💾 Saving deck "${deck.name}" (${deck.id}) to ${targetUrl}...`, {
     deckId: deck.id,
     name: deck.name,
     format: deck.format,
@@ -297,16 +303,16 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.error(`[DeckService] ? Failed to save deck: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
+      console.error(`[DeckService] ❌ Failed to save deck: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
         errorBody: errText,
         deckId: deck.id,
       });
       return false;
     }
-    console.log(`[DeckService] ? Successfully saved deck "${deck.name}" (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Successfully saved deck "${deck.name}" (${durationMs}ms)`);
     return true;
   } catch (err) {
-    console.error('[DeckService] ? Error saving remote deck:', err);
+    console.error('[DeckService] ❌ Error saving remote deck:', err);
     return false;
   }
 }
@@ -320,7 +326,7 @@ export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
   const headers = getAuthHeaders();
   const start = performance.now();
 
-  console.log(`[DeckService] ??? Deleting deck ${deckId} via ${targetUrl}...`);
+  console.log(`[DeckService] 🗑️ Deleting deck ${deckId} via ${targetUrl}...`);
 
   try {
     const res = await fetch(targetUrl, {
@@ -331,16 +337,16 @@ export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.error(`[DeckService] ? Failed to delete deck: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
+      console.error(`[DeckService] ❌ Failed to delete deck: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
         errorBody: errText,
         deckId,
       });
       return false;
     }
-    console.log(`[DeckService] ? Successfully deleted deck ${deckId} (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Successfully deleted deck ${deckId} (${durationMs}ms)`);
     return true;
   } catch (err) {
-    console.error('[DeckService] ? Error deleting remote deck:', err);
+    console.error('[DeckService] ❌ Error deleting remote deck:', err);
     return false;
   }
 }
@@ -348,6 +354,128 @@ export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
 /**
  * Fetch binders from remote C# API (/deckbuilder/binders)
  */
+/**
+ * Normalizes raw deck history JSON payloads from C# API (handles camelCase and PascalCase)
+ */
+export function normalizeHistoryItem(item: any): DeckHistoryItem {
+  if (!item || typeof item !== 'object') {
+    return item;
+  }
+  return {
+    ...item,
+    id: item.id || item.Id || '',
+    deckId: item.deckId || item.DeckId || '',
+    name: item.name || item.Name || '',
+    format: (item.format || item.Format || 'commander').toLowerCase(),
+    archivedAt: item.archivedAt ?? item.ArchivedAt ?? Date.now(),
+    createdAt: item.createdAt ?? item.CreatedAt,
+    updatedAt: item.updatedAt ?? item.UpdatedAt,
+    description: item.description ?? item.Description,
+    commanderName: item.commanderName ?? item.CommanderName,
+    commanderArtUrl: item.commanderArtUrl ?? item.CommanderArtUrl,
+    commanderColorIdentity: item.commanderColorIdentity ?? item.CommanderColorIdentity ?? [],
+    cardCount: item.cardCount ?? item.CardCount ?? (Array.isArray(item.cards || item.Cards) ? (item.cards || item.Cards).length : undefined),
+    changeSummary: item.changeSummary ?? item.ChangeSummary,
+    cards: item.cards ?? item.Cards ?? [],
+  };
+}
+
+/**
+ * Fetch deck history list from C# API
+ * Primary route: GET /deckbuilder/decks/{id}/history
+ * Alias route:   GET /deckbuilder/decks/history/{id}
+ */
+export async function getRemoteDeckHistory(
+  deckId: string,
+  useAliasRoute: boolean = false
+): Promise<DeckHistoryItem[]> {
+  const baseUrl = getApiBaseUrl();
+  const routePath = useAliasRoute
+    ? `/deckbuilder/decks/history/${encodeURIComponent(deckId)}`
+    : `/deckbuilder/decks/${encodeURIComponent(deckId)}/history`;
+  const targetUrl = baseUrl ? `${baseUrl}${routePath}` : routePath;
+  const headers = getAuthHeaders();
+  const start = performance.now();
+
+  console.groupCollapsed(`[DeckService] ?? Fetching deck history from ${targetUrl}`);
+  console.log('[DeckService] Deck ID:', deckId, 'Use Alias:', useAliasRoute);
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'GET',
+      headers,
+    });
+    const durationMs = Math.round(performance.now() - start);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[DeckService] ?? getRemoteDeckHistory returned HTTP ${res.status}:`, errText);
+      console.groupEnd();
+      return [];
+    }
+
+    const data = await res.json();
+    if (!Array.isArray(data)) {
+      console.warn('[DeckService] ?? getRemoteDeckHistory returned non-array:', data);
+      console.groupEnd();
+      return [];
+    }
+
+    const normalized = data.map(normalizeHistoryItem);
+    console.log(`[DeckService] ? Loaded ${normalized.length} history snapshot(s) (${durationMs}ms)`);
+    console.groupEnd();
+    return normalized;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - start);
+    console.error(`[DeckService] ? Error in getRemoteDeckHistory (${durationMs}ms):`, err);
+    console.groupEnd();
+    return [];
+  }
+}
+
+/**
+ * Fetch specific deck history snapshot by deckId and historyId
+ * Route: GET /deckbuilder/decks/{id}/history/{historyId}
+ */
+export async function getRemoteDeckHistorySnapshot(
+  deckId: string,
+  historyId: string
+): Promise<DeckHistoryItem | null> {
+  const baseUrl = getApiBaseUrl();
+  const routePath = `/deckbuilder/decks/${encodeURIComponent(deckId)}/history/${encodeURIComponent(historyId)}`;
+  const targetUrl = baseUrl ? `${baseUrl}${routePath}` : routePath;
+  const headers = getAuthHeaders();
+  const start = performance.now();
+
+  console.groupCollapsed(`[DeckService] ?? Fetching history snapshot ${historyId} for deck ${deckId}`);
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'GET',
+      headers,
+    });
+    const durationMs = Math.round(performance.now() - start);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[DeckService] ?? getRemoteDeckHistorySnapshot returned HTTP ${res.status}:`, errText);
+      console.groupEnd();
+      return null;
+    }
+
+    const data = await res.json();
+    const normalized = normalizeHistoryItem(data);
+    console.log(`[DeckService] ? Loaded snapshot ${historyId} (${durationMs}ms)`);
+    console.groupEnd();
+    return normalized;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - start);
+    console.error(`[DeckService] ? Error in getRemoteDeckHistorySnapshot (${durationMs}ms):`, err);
+    console.groupEnd();
+    return null;
+  }
+}
+
 export async function getRemoteBinders(): Promise<Binder[]> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
@@ -355,7 +483,7 @@ export async function getRemoteBinders(): Promise<Binder[]> {
   const vaultId = headers['X-Vault-Id'];
   const start = performance.now();
 
-  console.groupCollapsed(`[DeckService] ?? Fetching binders from ${targetUrl} [Vault: ${vaultId}]`);
+  console.groupCollapsed(`[DeckService] 📡 Fetching binders from ${targetUrl} [Vault: ${vaultId}]`);
   console.log('[DeckService] Request URL:', targetUrl);
   console.log('[DeckService] Request Headers:', headers);
 
@@ -369,7 +497,7 @@ export async function getRemoteBinders(): Promise<Binder[]> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[DeckService] ?? getRemoteBinders returned HTTP ${res.status}:`, errText);
+      console.warn(`[DeckService] ⚠️ getRemoteBinders returned HTTP ${res.status}:`, errText);
       console.groupEnd();
       return [];
     }
@@ -379,18 +507,18 @@ export async function getRemoteBinders(): Promise<Binder[]> {
     try {
       data = JSON.parse(rawText);
     } catch (parseErr) {
-      console.error('[DeckService] ? Failed to parse binder JSON response:', parseErr, { rawTextPreview: rawText.slice(0, 300) });
+      console.error('[DeckService] ❌ Failed to parse binder JSON response:', parseErr, { rawTextPreview: rawText.slice(0, 300) });
       console.groupEnd();
       return [];
     }
 
     if (!Array.isArray(data)) {
-      console.warn('[DeckService] ?? getRemoteBinders returned non-array payload:', data);
+      console.warn('[DeckService] ⚠️ getRemoteBinders returned non-array payload:', data);
       console.groupEnd();
       return [];
     }
 
-    console.log(`[DeckService] ? Loaded ${data.length} binder(s) from server (${durationMs}ms):`, data.map((b: any) => ({
+    console.log(`[DeckService] ✅ Loaded ${data.length} binder(s) from server (${durationMs}ms):`, data.map((b: any) => ({
       id: b.id,
       name: b.name,
       cardCount: b.cards?.length || 0,
@@ -399,14 +527,14 @@ export async function getRemoteBinders(): Promise<Binder[]> {
     })));
 
     if (data.length === 0) {
-      console.warn(`[DeckService] ?? 0 binders returned for Vault ID "${vaultId}". Note: If binders in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
+      console.warn(`[DeckService] ℹ️ 0 binders returned for Vault ID "${vaultId}". Note: If binders in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
     }
 
     console.groupEnd();
     return data;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ? Network/Fetch error in getRemoteBinders (${durationMs}ms):`, err);
+    console.error(`[DeckService] ❌ Network/Fetch error in getRemoteBinders (${durationMs}ms):`, err);
     console.groupEnd();
     return [];
   }
@@ -421,7 +549,7 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
-  console.log(`[DeckService] ?? Saving binder "${binder.name}" (${binder.id}) to ${targetUrl}...`, {
+  console.log(`[DeckService] 💾 Saving binder "${binder.name}" (${binder.id}) to ${targetUrl}...`, {
     binderId: binder.id,
     name: binder.name,
     cardCount: binder.cards?.length || 0,
@@ -438,16 +566,16 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.error(`[DeckService] ? Failed to save binder: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
+      console.error(`[DeckService] ❌ Failed to save binder: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
         errorBody: errText,
         binderId: binder.id,
       });
       return false;
     }
-    console.log(`[DeckService] ? Successfully saved binder "${binder.name}" (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Successfully saved binder "${binder.name}" (${durationMs}ms)`);
     return true;
   } catch (err) {
-    console.error('[DeckService] ? Error saving remote binder:', err);
+    console.error('[DeckService] ❌ Error saving remote binder:', err);
     return false;
   }
 }
@@ -461,7 +589,7 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
   const headers = getAuthHeaders();
   const start = performance.now();
 
-  console.log(`[DeckService] ??? Deleting binder ${binderId} via ${targetUrl}...`);
+  console.log(`[DeckService] 🗑️ Deleting binder ${binderId} via ${targetUrl}...`);
 
   try {
     const res = await fetch(targetUrl, {
@@ -472,16 +600,16 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.error(`[DeckService] ? Failed to delete binder: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
+      console.error(`[DeckService] ❌ Failed to delete binder: HTTP ${res.status} ${res.statusText} (${durationMs}ms)`, {
         errorBody: errText,
         binderId,
       });
       return false;
     }
-    console.log(`[DeckService] ? Successfully deleted binder ${binderId} (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Successfully deleted binder ${binderId} (${durationMs}ms)`);
     return true;
   } catch (err) {
-    console.error('[DeckService] ? Error deleting remote binder:', err);
+    console.error('[DeckService] ❌ Error deleting remote binder:', err);
     return false;
   }
 }
@@ -531,12 +659,12 @@ export class DeckService {
   }
 
   private static notifyDecks() {
-    console.log(`[DeckService] ?? Notifying ${this.deckListeners.size} deck listener(s) with ${this.inMemoryDecks.length} deck(s).`);
+    console.log(`[DeckService] 📢 Notifying ${this.deckListeners.size} deck listener(s) with ${this.inMemoryDecks.length} deck(s).`);
     this.deckListeners.forEach((cb) => cb([...this.inMemoryDecks]));
   }
 
   private static notifyBinders() {
-    console.log(`[DeckService] ?? Notifying ${this.binderListeners.size} binder listener(s) with ${this.inMemoryBinders.length} binder(s).`);
+    console.log(`[DeckService] 📢 Notifying ${this.binderListeners.size} binder listener(s) with ${this.inMemoryBinders.length} binder(s).`);
     this.binderListeners.forEach((cb) => cb([...this.inMemoryBinders]));
     const col = this.getCollectionFromBinders(this.inMemoryBinders);
     this.colListeners.forEach((cb) => cb(col));
@@ -546,7 +674,7 @@ export class DeckService {
    * Fetch all decks and binders from the remote API
    */
   public static async syncWithRemote(): Promise<void> {
-    console.log('[DeckService] ?? Starting syncWithRemote()...');
+    console.log('[DeckService] 🔄 Starting syncWithRemote()...');
     this.setStatus('syncing');
 
     try {
@@ -555,7 +683,7 @@ export class DeckService {
         getRemoteBinders(),
       ]);
 
-      console.log(`[DeckService] ?? syncWithRemote resolved with ${remoteDecks.length} deck(s) and ${remoteBinders.length} binder(s).`);
+      console.log(`[DeckService] 🔄 syncWithRemote resolved with ${remoteDecks.length} deck(s) and ${remoteBinders.length} binder(s).`);
 
       this.inMemoryDecks = remoteDecks;
       this.inMemoryBinders = remoteBinders.length > 0 ? remoteBinders : [DEFAULT_BINDER];
@@ -563,9 +691,9 @@ export class DeckService {
       this.notifyDecks();
       this.notifyBinders();
       this.setStatus('synced');
-      console.log('[DeckService] ? syncWithRemote complete. State updated and status set to "synced".');
+      console.log('[DeckService] ✅ syncWithRemote complete. State updated and status set to "synced".');
     } catch (e: any) {
-      console.error('[DeckService] ? Error syncing with remote API:', e);
+      console.error('[DeckService] ❌ Error syncing with remote API:', e);
       this.setStatus('offline', e?.message);
     }
   }
@@ -578,25 +706,25 @@ export class DeckService {
 
   static subscribeDecks(onUpdate: (decks: Deck[]) => void): Unsubscribe {
     this.deckListeners.add(onUpdate);
-    console.log(`[DeckService] ?? Subscribed new deck listener (total: ${this.deckListeners.size}). Initializing with ${this.inMemoryDecks.length} cached deck(s).`);
+    console.log(`[DeckService] 📥 Subscribed new deck listener (total: ${this.deckListeners.size}). Initializing with ${this.inMemoryDecks.length} cached deck(s).`);
     onUpdate([...this.inMemoryDecks]);
     this.initSync();
 
     return () => {
       this.deckListeners.delete(onUpdate);
-      console.log(`[DeckService] ?? Unsubscribed deck listener (remaining: ${this.deckListeners.size}).`);
+      console.log(`[DeckService] 📤 Unsubscribed deck listener (remaining: ${this.deckListeners.size}).`);
     };
   }
 
   static subscribeBinders(onUpdate: (binders: Binder[]) => void): Unsubscribe {
     this.binderListeners.add(onUpdate);
-    console.log(`[DeckService] ?? Subscribed new binder listener (total: ${this.binderListeners.size}). Initializing with ${this.inMemoryBinders.length} cached binder(s).`);
+    console.log(`[DeckService] 📥 Subscribed new binder listener (total: ${this.binderListeners.size}). Initializing with ${this.inMemoryBinders.length} cached binder(s).`);
     onUpdate([...this.inMemoryBinders]);
     this.initSync();
 
     return () => {
       this.binderListeners.delete(onUpdate);
-      console.log(`[DeckService] ?? Unsubscribed binder listener (remaining: ${this.binderListeners.size}).`);
+      console.log(`[DeckService] 📤 Unsubscribed binder listener (remaining: ${this.binderListeners.size}).`);
     };
   }
 
@@ -809,7 +937,8 @@ export class DeckService {
   /**
    * Real-time refresh prices for all cards in binders
    */
-  static async refreshCollectionPrices(cards: CollectionCard[]): Promise<CollectionCard[]> {    const scryfallIds = cards.map((c) => c.scryfallId).filter(Boolean);
+  static async refreshCollectionPrices(cards: CollectionCard[]): Promise<CollectionCard[]> {
+    const scryfallIds = cards.map((c) => c.scryfallId).filter(Boolean);
     if (scryfallIds.length === 0) return cards;
 
     this.setStatus('syncing');
@@ -841,7 +970,44 @@ export class DeckService {
 
     return this.getLocalCollection();
   }
+
+  /**
+   * Request remote BBCode layout from /mtgtools/createdecklist
+   */
+  static async createDeckList(deck: Deck): Promise<string> {
+    return createDeckListApi(deck);
+  }
+
+  /**
+   * Request remote physical picklist layout from /mtgtools/createdeckpicklist
+   */
+  static async createDeckPickList(deck: Deck): Promise<string> {
+    return createDeckPickListApi(deck);
+  }
+
+  /**
+   * Fetch all archived iterations for a deck in descending order of ArchivedAt
+   * GET /deckbuilder/decks/{id}/history (or alias GET /deckbuilder/decks/history/{id})
+   */
+  static async getDeckHistory(deckId: string, useAliasRoute = false): Promise<DeckHistoryItem[]> {
+    return getRemoteDeckHistory(deckId, useAliasRoute);
+  }
+
+  /**
+   * Fetch a specific history snapshot by deck ID and history ID
+   * GET /deckbuilder/decks/{id}/history/{historyId}
+   */
+  static async getDeckHistorySnapshot(deckId: string, historyId: string): Promise<DeckHistoryItem | null> {
+    return getRemoteDeckHistorySnapshot(deckId, historyId);
+  }
+
+  
 }
+
+/**
+ * Re-export remote API layout and picklist helpers
+ */
+export { createDeckListApi, createDeckPickListApi, getDeckColorStyle, generateDeckPickListLocal };
 
 /**
  * Backward compatibility alias

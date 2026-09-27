@@ -6,12 +6,8 @@ import {
   Layers, 
   Copy, 
   Trash2, 
-  ExternalLink, 
   Search, 
-  Sparkles, 
   FolderPlus,
-  Play,
-  Check,
   Upload
 } from 'lucide-react';
 import { Deck, MTGFormat } from '../types/mtg';
@@ -26,6 +22,7 @@ interface DeckListProps {
   onDuplicateDeck: (deck: Deck) => void;
   onDeleteDeck: (deckId: string) => void;
   onImportDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
+  onBatchImportCompleted?: (count: number) => void;
 }
 
 export const DeckList: React.FC<DeckListProps> = ({
@@ -35,6 +32,7 @@ export const DeckList: React.FC<DeckListProps> = ({
   onDuplicateDeck,
   onDeleteDeck,
   onImportDeck,
+  onBatchImportCompleted,
 }) => {
   const [filterFormat, setFilterFormat] = useState<string>('all');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
@@ -91,7 +89,16 @@ export const DeckList: React.FC<DeckListProps> = ({
     setShowCreateModal(false);
   };
 
-  const formats: { id: string; label: string }[] = [    { id: 'all', label: 'All Formats' },    { id: 'commander', label: 'Commander / EDH' },    { id: 'modern', label: 'Modern' },    { id: 'standard', label: 'Standard' },    { id: 'pioneer', label: 'Pioneer' },    { id: 'legacy', label: 'Legacy' },    { id: 'pauper', label: 'Pauper' },    { id: 'casual', label: 'Casual' },  ];
+  const formats: { id: string; label: string }[] = [
+    { id: 'all', label: 'All Formats' },
+    { id: 'commander', label: 'Commander / EDH' },
+    { id: 'modern', label: 'Modern' },
+    { id: 'standard', label: 'Standard' },
+    { id: 'pioneer', label: 'Pioneer' },
+    { id: 'legacy', label: 'Legacy' },
+    { id: 'pauper', label: 'Pauper' },
+    { id: 'casual', label: 'Casual' },
+  ];
 
   return (
     <div className="space-y-6">
@@ -368,6 +375,12 @@ export const DeckList: React.FC<DeckListProps> = ({
             await DeckService.saveDeck(overwrittenDeck);
             setShowImportModal(false);
             onSelectDeck(overwrittenDeck);
+          }}
+          onBatchImportCompleted={(count) => {
+            setShowImportModal(false);
+            if (onBatchImportCompleted) {
+              onBatchImportCompleted(count);
+            }
           }}
           initialTab="import"
         />

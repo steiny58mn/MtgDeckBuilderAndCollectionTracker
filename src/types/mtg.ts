@@ -182,3 +182,38 @@ export interface DeckStats {
   typeBreakdown: Record<string, number>;
   illegalCards: string[];
 }
+
+export interface DeckHistoryItem {
+  id: string; // history snapshot ID
+  deckId: string;
+  name: string;
+  format: MTGFormat;
+  archivedAt: number | string;
+  createdAt?: number | string;
+  updatedAt?: number | string;
+  description?: string;
+  commanderName?: string;
+  commanderArtUrl?: string;
+  commanderColorIdentity?: string[];
+  cardCount?: number;
+  changeSummary?: string;
+  cards?: DeckCard[];
+  [key: string]: any;
+}
+
+export interface DeckDiffItem {
+  cardName: string;
+  category: DeckCategory;
+  oldQuantity: number;
+  newQuantity: number;
+  delta: number;
+  card?: DeckCard;
+}
+
+export interface DeckDiff {
+  added: DeckDiffItem[];
+  removed: DeckDiffItem[];
+  changed: DeckDiffItem[];
+  totalAddedCount: number;
+  totalRemovedCount: number;
+}

@@ -24,7 +24,7 @@ import {
   AlertCircle,
   ShieldAlert
 } from 'lucide-react';
-import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder } from '../types/mtg';
+import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
 import { searchCards, getAutocomplete, getCardImageUrl, SearchResult } from '../services/scryfall';
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -36,7 +36,10 @@ import {
   canCardsPartnerTogether,
   getCardPartnerInfo,
   getPartnerScryfallQuery,
-  getCardCategorySortOrder
+  getCardCategorySortOrder,
+  sortWUBRG,
+  sortCardsByName,
+  filterAvailablePartners
 } from '../utils/deckUtils';
 
 interface CardSearchViewProps {
@@ -133,10 +136,57 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const hasCommander = Boolean(commanderInfo?.commanderName);
   const commanderColorIdentity = commanderInfo?.colorIdentity || [];
   const commanderCards = (activeDeck?.cards || []).filter((c) => c.category === 'commander');
-  const firstCmdrPartnerInfo = commanderCards.length === 1 ? getCardPartnerInfo(commanderCards[0]) : null;
-  const canHavePartner = isCommanderDeck && commanderCards.length === 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
+  const firstCmdrPartnerInfo = commanderCards.length >= 1 ? getCardPartnerInfo(commanderCards[0]) : null;
+  const canHavePartner = isCommanderDeck && commanderCards.length >= 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
 
   // Available Partners Shelf state
+  // Hover preview pop-up state
+  const [hoveredCardPreview, setHoveredCardPreview] = useState<{
+    card: ScryfallCard;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Clear hover preview on scroll or window resize
+  useEffect(() => {
+    const handleDismissPreview = () => setHoveredCardPreview(null);
+    window.addEventListener('scroll', handleDismissPreview, true);
+    window.addEventListener('resize', handleDismissPreview);
+    return () => {
+      window.removeEventListener('scroll', handleDismissPreview, true);
+      window.removeEventListener('resize', handleDismissPreview);
+    };
+  }, []);
+
+  const isDoubleFacedHover = Boolean(
+    hoveredCardPreview?.card.card_faces &&
+    hoveredCardPreview.card.card_faces.length > 1 &&
+    hoveredCardPreview.card.card_faces[0]?.image_uris &&
+    hoveredCardPreview.card.card_faces[1]?.image_uris
+  );
+
+  const hoverPreviewPos = hoveredCardPreview
+    ? (() => {
+        const isWide = isDoubleFacedHover && typeof window !== 'undefined' && window.innerWidth >= 640;
+        const popWidth = isWide ? 530 : 280;
+        const popHeight = 392;
+        const padding = 16;
+        const winWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+        const winHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+        let left = hoveredCardPreview.x + 20;
+        if (left + popWidth + padding > winWidth) {
+          left = hoveredCardPreview.x - popWidth - 20;
+        }
+        left = Math.max(padding, Math.min(winWidth - popWidth - padding, left));
+
+        let top = hoveredCardPreview.y - popHeight / 2;
+        top = Math.max(padding, Math.min(winHeight - popHeight - padding, top));
+
+        return { left, top };
+      })()
+    : null;
+
   const [isPartnerSectionExpanded, setIsPartnerSectionExpanded] = useState<boolean>(false);
   const [availablePartners, setAvailablePartners] = useState<ScryfallCard[]>([]);
   const [loadingPartners, setLoadingPartners] = useState<boolean>(false);
@@ -169,14 +219,15 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     setLoadingPartners(true);
     searchCards({
       query: partnerQuery,
-      order: 'edhrec',
-      dir: 'auto',
+      order: 'name',
+      dir: 'asc',
       page: 1,
       unique: 'cards',
     })
       .then((res) => {
         if (isMounted) {
-          setAvailablePartners(res.data || []);
+          const valid = filterAvailablePartners(primaryCommander, res.data || [], currentPartner);
+          setAvailablePartners(sortCardsByName(valid));
         }
       })
       .catch((err) => {
@@ -191,28 +242,153 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [primaryCommander?.id, firstCmdrPartnerInfo?.canHavePartner, isDeckContext, isCommanderDeck]);
+  }, [
+    primaryCommander?.id,
+    currentPartner?.id,
+    currentPartner?.scryfallId,
+    currentPartner?.name,
+    firstCmdrPartnerInfo?.canHavePartner,
+    isDeckContext,
+    isCommanderDeck,
+  ]);
+
+  const handleSelectPrimaryCommander = (card: ScryfallCard) => {
+    if (activeDeck && onUpdateDeck) {
+      const otherCards = (activeDeck.cards || []).filter((c) => c.category !== 'commander');
+      const newCmdrDeckCard: DeckCard = {
+        id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        scryfallId: card.id,
+        name: card.name,
+        set: card.set,
+        set_name: card.set_name,
+        collector_number: card.collector_number,
+        category: 'commander',
+        quantity: 1,
+        isFoil: false,
+        mana_cost: card.mana_cost,
+        cmc: card.cmc,
+        type_line: card.type_line,
+        oracle_text: card.oracle_text || card.card_faces?.[0]?.oracle_text,
+        keywords: card.keywords,
+        colors: card.colors,
+        color_identity: card.color_identity,
+        rarity: card.rarity,
+        imageUrl: getCardImageUrl(card, 'normal'),
+        priceUsd: card.prices?.usd ? parseFloat(card.prices.usd) : undefined,
+        priceUsdFoil: card.prices?.usd_foil ? parseFloat(card.prices.usd_foil) : undefined,
+      };
+
+      const cmdrIdentity = sortWUBRG(
+        card.color_identity && card.color_identity.length > 0
+          ? card.color_identity
+          : (card.colors || [])
+      );
+
+      const updated: Deck = {
+        ...activeDeck,
+        cards: [...otherCards, newCmdrDeckCard],
+        commanderName: card.name,
+        commanderArtUrl: getCardImageUrl(card, 'art_crop') || newCmdrDeckCard.imageUrl,
+        commanderId: card.id,
+        commanderColorIdentity: cmdrIdentity,
+        coverCardUrl: getCardImageUrl(card, 'art_crop') || newCmdrDeckCard.imageUrl,
+        updatedAt: Date.now(),
+      };
+
+      onUpdateDeck(updated);
+      setSearchTerm('');
+    } else {
+      onQuickAddToDeck?.(card, 'commander');
+      setSearchTerm('');
+    }
+  };
 
   const handleSelectPartner = (partnerCard: ScryfallCard) => {
-    onQuickAddToDeck?.(partnerCard, 'commander');
-    setSearchTerm('');
+    if (activeDeck && onUpdateDeck) {
+      const existingCmdrs = (activeDeck.cards || []).filter((c) => c.category === 'commander');
+      const otherCards = (activeDeck.cards || []).filter((c) => c.category !== 'commander');
+      const primaryCmdr = existingCmdrs[0];
+
+      const newPartnerDeckCard: DeckCard = {
+        id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        scryfallId: partnerCard.id,
+        name: partnerCard.name,
+        set: partnerCard.set,
+        set_name: partnerCard.set_name,
+        collector_number: partnerCard.collector_number,
+        category: 'commander',
+        quantity: 1,
+        isFoil: false,
+        mana_cost: partnerCard.mana_cost,
+        cmc: partnerCard.cmc,
+        type_line: partnerCard.type_line,
+        oracle_text: partnerCard.oracle_text || partnerCard.card_faces?.[0]?.oracle_text,
+        keywords: partnerCard.keywords,
+        colors: partnerCard.colors,
+        color_identity: partnerCard.color_identity,
+        rarity: partnerCard.rarity,
+        imageUrl: getCardImageUrl(partnerCard, 'normal'),
+        priceUsd: partnerCard.prices?.usd ? parseFloat(partnerCard.prices.usd) : undefined,
+        priceUsdFoil: partnerCard.prices?.usd_foil ? parseFloat(partnerCard.prices.usd_foil) : undefined,
+      };
+
+      const newCommanderCards = primaryCmdr ? [primaryCmdr, newPartnerDeckCard] : [newPartnerDeckCard];
+      const combinedIdentity = sortWUBRG(
+        Array.from(
+          new Set(
+            newCommanderCards.flatMap((c) => {
+              if (c.color_identity && c.color_identity.length > 0) return c.color_identity;
+              if (c.colors && c.colors.length > 0) return c.colors;
+              if (c.mana_cost) {
+                const matches = c.mana_cost.match(/[WUBRG]/gi) || [];
+                return matches.map((m) => m.toUpperCase());
+              }
+              return [];
+            })
+          )
+        )
+      );
+
+      const updated: Deck = {
+        ...activeDeck,
+        cards: [...otherCards, ...newCommanderCards],
+        commanderName: newCommanderCards.map((c) => c.name).join(' // '),
+        commanderArtUrl: primaryCmdr?.imageUrl || newPartnerDeckCard.imageUrl,
+        commanderId: primaryCmdr?.scryfallId || newPartnerDeckCard.scryfallId,
+        commanderColorIdentity: combinedIdentity,
+        updatedAt: Date.now(),
+      };
+
+      onUpdateDeck(updated);
+      setSearchTerm('');
+    } else {
+      onQuickAddToDeck?.(partnerCard, 'commander');
+      setSearchTerm('');
+    }
   };
 
   const handleRemovePartner = () => {
     if (!activeDeck || !currentPartner || !onUpdateDeck) return;
     const remainingCards = activeDeck.cards.filter((c) => c.id !== currentPartner.id);
     const primaryCmdr = commanderCards[0];
-    const newCommanderColorIdentity = primaryCmdr.color_identity || [];
+    const newCommanderColorIdentity = primaryCmdr
+      ? sortWUBRG(
+          primaryCmdr.color_identity && primaryCmdr.color_identity.length > 0
+            ? primaryCmdr.color_identity
+            : (primaryCmdr.colors || [])
+        )
+      : [];
     const updated: Deck = {
       ...activeDeck,
       cards: remainingCards,
-      commanderName: primaryCmdr.name,
-      commanderArtUrl: primaryCmdr.imageUrl,
-      commanderId: primaryCmdr.scryfallId,
+      commanderName: primaryCmdr?.name || null,
+      commanderArtUrl: primaryCmdr?.imageUrl || null,
+      commanderId: primaryCmdr?.scryfallId || null,
       commanderColorIdentity: newCommanderColorIdentity,
       updatedAt: Date.now(),
     };
     onUpdateDeck(updated);
+    setSearchTerm('');
   };
 
   // Helper to get count of copies of card currently in active deck
@@ -246,12 +422,14 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   // When commander changes or is chosen, clear out search box and refresh cleanly
   const prevCommanderId = useRef(activeDeck?.commanderId);
   const prevCommanderCount = useRef(commanderCards.length);
+  const prevCommanderIdentity = useRef(commanderColorIdentity.join(''));
 
   useEffect(() => {
     const cmdrIdChanged = activeDeck?.commanderId !== prevCommanderId.current;
     const cmdrCountChanged = commanderCards.length !== prevCommanderCount.current;
+    const identityChanged = commanderColorIdentity.join('') !== prevCommanderIdentity.current;
 
-    if (cmdrIdChanged || cmdrCountChanged) {
+    if (cmdrIdChanged || cmdrCountChanged || identityChanged) {
       if (searchContext === 'deck' && activeDeck?.format === 'commander') {
         setSortBy(activeDeck?.commanderId ? 'synergy' : 'commander_decks');
       }
@@ -267,13 +445,14 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       setLoading(true);
       prevCommanderId.current = activeDeck?.commanderId;
       prevCommanderCount.current = commanderCards.length;
+      prevCommanderIdentity.current = commanderColorIdentity.join('');
 
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       searchDebounceRef.current = setTimeout(() => {
         executeSearch(1, false, '');
       }, 100);
     }
-  }, [activeDeck?.commanderId, commanderCards.length]);
+  }, [activeDeck?.commanderId, commanderCards.length, commanderColorIdentity.join('')]);
 
   
   // Reset search options when switching context
@@ -656,6 +835,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     selectedRarity,
     selectedFormat,
     scopeBySearchTerm,
+    searchTerm,
     sortBy,
     sortDir,
     activeDeck?.id,
@@ -945,10 +1125,25 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 </div>
                 <div className="flex items-center gap-2 mt-0.5 text-[11px]">
                   {currentPartner ? (
-                    <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                      <Check className="w-3 h-3" />
-                      Current Partner: <strong className="text-slate-200">{currentPartner.name}</strong>
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                        <Check className="w-3 h-3" />
+                        Current Partner: <strong className="text-slate-200">{currentPartner.name}</strong>
+                      </span>
+                      {onUpdateDeck && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePartner();
+                          }}
+                          className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors cursor-pointer"
+                          title="Remove current partner"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <span className="text-amber-400/90">
                       No partner selected • Choose one below or add anytime later without cluttering search
@@ -1010,22 +1205,30 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
                   {/* Horizontal Scrollable Shelf of Partners */}
                   <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-800">
-                    {availablePartners
-                      .filter((p) => !partnerFilter || p.name.toLowerCase().includes(partnerFilter.toLowerCase()))
-                      .map((pCard) => {
-                        const isCurrent = currentPartner && (currentPartner.scryfallId === pCard.id || currentPartner.name.toLowerCase() === pCard.name.toLowerCase());
+                    {sortCardsByName<ScryfallCard>(
+                      filterAvailablePartners(
+                        primaryCommander,
+                        availablePartners.filter((p) => !partnerFilter || p.name.toLowerCase().includes(partnerFilter.toLowerCase())),
+                        currentPartner
+                      )
+                    ).map((pCard) => {
                         const img = getCardImageUrl(pCard, 'normal');
 
                         return (
                           <div
                             key={pCard.id}
-                            className={`shrink-0 w-36 bg-slate-900 border rounded-xl overflow-hidden flex flex-col justify-between transition-all ${
-                              isCurrent
-                                ? 'border-emerald-500 ring-1 ring-emerald-500/50 shadow-md shadow-emerald-500/10'
-                                : 'border-slate-800 hover:border-fuchsia-500/60'
-                            }`}
+                            className="shrink-0 w-36 bg-slate-900 border border-slate-800 hover:border-fuchsia-500/60 rounded-xl overflow-hidden flex flex-col justify-between transition-all"
                           >
-                            <div className="relative aspect-[5/7] bg-slate-950 overflow-hidden">
+                            <div
+                              onClick={() => {
+                                setHoveredCardPreview(null);
+                                onSelectCard(pCard);
+                              }}
+                              onMouseEnter={(e) => setHoveredCardPreview({ card: pCard, x: e.clientX, y: e.clientY })}
+                              onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card: pCard, x: e.clientX, y: e.clientY })}
+                              onMouseLeave={() => setHoveredCardPreview(null)}
+                              className="relative aspect-[5/7] bg-slate-950 overflow-hidden cursor-pointer"
+                            >
                               {img ? (
                                 <img
                                   src={img}
@@ -1045,7 +1248,17 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
                             <div className="p-2 flex flex-col gap-1.5 flex-1 justify-between">
                               <div>
-                                <div className="text-[11px] font-bold text-slate-200 line-clamp-1" title={pCard.name}>
+                                <div
+                                  onClick={() => {
+                                    setHoveredCardPreview(null);
+                                    onSelectCard(pCard);
+                                  }}
+                                  onMouseEnter={(e) => setHoveredCardPreview({ card: pCard, x: e.clientX, y: e.clientY })}
+                                  onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card: pCard, x: e.clientX, y: e.clientY })}
+                                  onMouseLeave={() => setHoveredCardPreview(null)}
+                                  className="text-[11px] font-bold text-slate-200 line-clamp-1 hover:text-fuchsia-400 cursor-pointer"
+                                  title={pCard.name}
+                                >
                                   {pCard.name}
                                 </div>
                                 <div className="text-[10px] text-slate-400 line-clamp-1">
@@ -1053,30 +1266,13 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                                 </div>
                               </div>
 
-                              {isCurrent ? (
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[10px] text-center font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 rounded py-0.5">
-                                    ✓ Selected
-                                  </span>
-                                  {onUpdateDeck && (
-                                    <button
-                                      type="button"
-                                      onClick={handleRemovePartner}
-                                      className="w-full py-1 rounded text-[10px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors cursor-pointer"
-                                    >
-                                      Remove
-                                    </button>
-                                  )}
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSelectPartner(pCard)}
-                                  className="w-full py-1 px-1.5 rounded-lg text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-500 text-white transition-colors cursor-pointer shadow-sm text-center"
-                                >
-                                  {currentPartner ? 'Switch Partner' : '+ Choose Partner'}
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleSelectPartner(pCard)}
+                                className="w-full py-1 px-1.5 rounded-lg text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-500 text-white transition-colors cursor-pointer shadow-sm text-center"
+                              >
+                                {currentPartner ? 'Switch Partner' : '+ Choose Partner'}
+                              </button>
                             </div>
                           </div>
                         );
@@ -1803,7 +1999,13 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               >
                 {/* Image Container with Click to Inspect */}
                 <div 
-                  onClick={() => onSelectCard(card)}
+                  onClick={() => {
+                    setHoveredCardPreview(null);
+                    onSelectCard(card);
+                  }}
+                  onMouseEnter={(e) => setHoveredCardPreview({ card, x: e.clientX, y: e.clientY })}
+                  onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card, x: e.clientX, y: e.clientY })}
+                  onMouseLeave={() => setHoveredCardPreview(null)}
                   className="cursor-pointer relative overflow-hidden aspect-[5/7] bg-slate-950"
                 >
                                     {/* Edhrec Stats */}
@@ -1871,7 +2073,13 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 <div className="p-2.5 flex flex-col gap-1.5">
                   <div className="flex items-start justify-between gap-1">
                     <h4 
-                      onClick={() => onSelectCard(card)}
+                      onClick={() => {
+                        setHoveredCardPreview(null);
+                        onSelectCard(card);
+                      }}
+                      onMouseEnter={(e) => setHoveredCardPreview({ card, x: e.clientX, y: e.clientY })}
+                      onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card, x: e.clientX, y: e.clientY })}
+                      onMouseLeave={() => setHoveredCardPreview(null)}
                       className="text-xs font-semibold text-slate-200 line-clamp-1 hover:text-fuchsia-400 cursor-pointer"
                       title={card.name}
                     >
@@ -1917,10 +2125,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           if (isCandidatePrimaryCommander) {
                             return (
                               <button
-                                onClick={() => {
-                                  onQuickAddToDeck(card, 'commander');
-                                  setSearchTerm('');
-                                }}
+                                onClick={() => handleSelectPrimaryCommander(card)}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/50 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
                                 title="Set this card as your Commander"
                               >
@@ -1933,10 +2138,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           if (isCandidatePartner) {
                             return (
                               <button
-                                onClick={() => {
-                                  onQuickAddToDeck(card, 'commander');
-                                  setSearchTerm('');
-                                }}
+                                onClick={() => handleSelectPartner(card)}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
                                 title={`Designate ${card.name} as Partner Commander`}
                               >
@@ -2108,6 +2310,66 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
             {loading ? 'Loading next page...' : 'Load More Cards'}
           </button>
+        </div>
+      )}
+
+      {/* Hover Card Preview Pop-up */}
+      {hoveredCardPreview && hoverPreviewPos && (
+        <div
+          className="pointer-events-none fixed z-50 transition-opacity duration-150 shadow-2xl rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950/95 backdrop-blur-md p-1.5 animate-in fade-in zoom-in-95 duration-100"
+          style={{
+            left: `${hoverPreviewPos.left}px`,
+            top: `${hoverPreviewPos.top}px`,
+          }}
+        >
+          {isDoubleFacedHover && hoveredCardPreview.card.card_faces ? (
+            <div className="flex gap-2">
+              <div className="relative">
+                <img
+                  src={
+                    hoveredCardPreview.card.card_faces[0].image_uris?.large ||
+                    hoveredCardPreview.card.card_faces[0].image_uris?.normal ||
+                    getCardImageUrl(hoveredCardPreview.card, 'large')
+                  }
+                  alt={hoveredCardPreview.card.name}
+                  className="w-[250px] h-auto rounded-xl object-contain shadow-xl"
+                  loading="eager"
+                  referrerPolicy="no-referrer"
+                />
+                <span className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-slate-950/80 text-[10px] text-slate-300 font-medium">
+                  Front
+                </span>
+              </div>
+              <div className="relative">
+                <img
+                  src={
+                    hoveredCardPreview.card.card_faces[1].image_uris?.large ||
+                    hoveredCardPreview.card.card_faces[1].image_uris?.normal
+                  }
+                  alt={`${hoveredCardPreview.card.name} (Back)`}
+                  className="w-[250px] h-auto rounded-xl object-contain shadow-xl"
+                  loading="eager"
+                  referrerPolicy="no-referrer"
+                />
+                <span className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-slate-950/80 text-[10px] text-slate-300 font-medium">
+                  Back
+                </span>
+              </div>
+            </div>
+          ) : (
+            <img
+              src={getCardImageUrl(hoveredCardPreview.card, 'large')}
+              alt={hoveredCardPreview.card.name}
+              className="w-[280px] h-auto rounded-xl object-contain shadow-xl"
+              loading="eager"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                if (hoveredCardPreview.card.id && !e.currentTarget.src.includes('format=image')) {
+                  e.currentTarget.src = `https://api.scryfall.com/cards/${hoveredCardPreview.card.id}?format=image&version=large`;
+                }
+              }}
+            />
+          )}
         </div>
       )}
 
