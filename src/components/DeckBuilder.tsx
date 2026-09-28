@@ -2365,7 +2365,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       }
 
       const children = containerRef.current.children;
-      const BUTTON_ZONE_HEIGHT = 70; // px: gives plenty of room to click the buttons on the card before switching
+      const BUTTON_ZONE_HEIGHT = 65; // px: gives plenty of room to click the buttons on the card before switching
 
       setActiveCardIndex((currentIdx) => {
         if (currentIdx === null) {
@@ -2434,7 +2434,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     return (
       <div
-        className="grid justify-center justify-items-center gap-2 sm:gap-2.5 items-start pt-2 pb-16 w-full"
+        className="grid justify-center justify-items-center gap-2 sm:gap-2.5 items-start pt-2 pb-36 w-full"
         style={{
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 125px), 1fr))',
         }}
@@ -2498,7 +2498,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         })}
         className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-150 select-none cursor-pointer border bg-slate-950 ${
           isActive
-            ? 'z-50 shadow-2xl scale-[1.02] border-violet-400'
+            ? 'z-50 shadow-2xl scale-[1.55] origin-top border-violet-400 ring-2 ring-violet-500/70 shadow-black/90'
             : isThisCommander
             ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
             : 'border-slate-800'
@@ -2547,80 +2547,29 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
         )}
 
-        {/* Hover Action Bar at Top of Card (only visible when hovering over card) */}
+        {/* Sleek Floating Glass Action Bar on Hover */}
         <div
-          className={`absolute inset-x-0 top-0 p-1 sm:p-1.5 bg-gradient-to-b from-slate-950 via-slate-950/95 to-transparent transition-all flex flex-col gap-1 z-30 ${
-            isActive ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          className={`absolute top-1.5 inset-x-1.5 px-1.5 py-1 bg-slate-950/85 backdrop-blur-md rounded-lg border border-slate-700/60 shadow-xl transition-all duration-150 flex items-center justify-between gap-1 z-30 ${
+            isActive ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'
           }`}
         >
-          {/* Top Row: Stepper, Price, Trash */}
-          <div className="flex items-center justify-between gap-0.5 sm:gap-1 w-full">
-            <div className="flex items-center gap-0.5 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm shrink-0">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleUpdateCardQuantity(card.id, -1);
-                }}
-                className="p-0.5 sm:p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title="Decrease quantity"
-              >
-                <Minus className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-              </button>
-              <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-200 px-0.5 sm:px-1">
-                {card.quantity}
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleUpdateCardQuantity(card.id, 1);
-                }}
-                disabled={isThisCommander && card.quantity >= 1}
-                className="p-0.5 sm:p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase quantity'}
-              >
-                <Plus className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-              </button>
-            </div>
-
-            {isThisCommander && (
-              <span className="px-1 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[9px] sm:text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5 truncate">
-                <Crown className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-fuchsia-400" /> Cmdr
-              </span>
-            )}
-
-            {unitPrice && (
-              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1 py-0.5 rounded border border-slate-800 truncate">
-                ${unitPrice}
-              </span>
-            )}
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRemoveCard(card.id);
-              }}
-              className="p-0.5 sm:p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer shrink-0"
-              title="Remove from deck"
-            >
-              <Trash2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-            </button>
-          </div>
-
-          {/* Bottom Row: Main / Side / Maybe Category Buttons (EXCLUDED from Commander) */}
-          {!isThisCommander && (
-            <div className="flex items-center justify-center bg-slate-950/90 border border-slate-800 rounded-md overflow-hidden text-[9px] sm:text-[10px] font-medium shadow-sm w-full">
+          {/* Left: Category Selector (or Commander Badge) */}
+          {isThisCommander ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/30 shrink-0">
+              <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
+            </span>
+          ) : (
+            <div className="flex items-center bg-slate-900/90 border border-slate-800 rounded overflow-hidden text-[9px] font-medium shrink-0">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleChangeCardCategory(card.id, 'main');
                 }}
-                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors cursor-pointer ${
+                className={`px-1.5 py-0.5 text-center transition-colors cursor-pointer ${
                   card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                 }`}
+                title="Move to Mainboard"
               >
                 Main
               </button>
@@ -2630,9 +2579,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   e.stopPropagation();
                   handleChangeCardCategory(card.id, 'sideboard');
                 }}
-                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                className={`px-1.5 py-0.5 text-center transition-colors border-l border-slate-800 cursor-pointer ${
                   card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                 }`}
+                title="Move to Sideboard"
               >
                 Side
               </button>
@@ -2642,14 +2592,65 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   e.stopPropagation();
                   handleChangeCardCategory(card.id, 'maybeboard');
                 }}
-                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                className={`px-1.5 py-0.5 text-center transition-colors border-l border-slate-800 cursor-pointer ${
                   card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                 }`}
+                title="Move to Maybeboard"
               >
                 Maybe
               </button>
             </div>
           )}
+
+          {/* Center: Compact Stepper */}
+          <div className="flex items-center gap-0.5 bg-slate-900/90 rounded px-1 py-0.5 border border-slate-800 shadow-xs shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUpdateCardQuantity(card.id, -1);
+              }}
+              className="p-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Decrease quantity"
+            >
+              <Minus className="w-2.5 h-2.5" />
+            </button>
+            <span className="text-[10px] font-mono font-bold text-slate-200 px-0.5 min-w-[14px] text-center">
+              {card.quantity}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUpdateCardQuantity(card.id, 1);
+              }}
+              disabled={isThisCommander && card.quantity >= 1}
+              className="p-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
+              title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase quantity'}
+            >
+              <Plus className="w-2.5 h-2.5" />
+            </button>
+          </div>
+
+          {/* Right: Price & Trash */}
+          <div className="flex items-center gap-1 shrink-0">
+            {unitPrice && (
+              <span className="text-[9px] font-mono text-emerald-400 font-semibold bg-slate-900/80 px-1 py-0.5 rounded border border-slate-800">
+                ${unitPrice}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemoveCard(card.id);
+              }}
+              className="p-1 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-700/50 text-rose-300 transition-colors cursor-pointer"
+              title="Remove from deck"
+            >
+              <Trash2 className="w-2.5 h-2.5" />
+            </button>
+          </div>
         </div>
       </div>
     );
