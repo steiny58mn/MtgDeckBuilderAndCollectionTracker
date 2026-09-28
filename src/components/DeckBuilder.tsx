@@ -2344,44 +2344,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return piles;
   }
 
-  function renderPilesView(cards: DeckCard[]) {
-    if (cards.length === 0) return null;
-    const piles = groupCardsIntoPiles(cards, sortCardsBy);
-
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4 items-start pt-2 pb-16">
-        {piles.map((pile) => (
-          <div key={pile.id} className="flex flex-col min-w-0 bg-slate-900/40 rounded-xl p-2 sm:p-2.5 border border-slate-800/60 shadow-sm">
-            {/* Pile Header */}
-            <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800 text-xs">
-              <span className="font-bold text-slate-200 truncate">{pile.title}</span>
-              <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-violet-300 font-bold">
-                  {pile.totalQuantity}
-                </span>
-                <span className="text-slate-400">
-                  ${pile.totalPrice.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Cascading Cards Stack with Scrub-down Hover */}
-            <PileCardsColumn
-              pile={pile}
-              renderCardPileItem={renderCardPileItem}
-            />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   interface PileCardsColumnProps {
     pile: PileGroup;
     renderCardPileItem: (card: DeckCard, index: number, totalInPile: number, isActive: boolean) => React.ReactNode;
   }
 
-  const PileCardsColumn: React.FC<PileCardsColumnProps> = ({ pile, renderCardPileItem }) => {
+  function PileCardsColumn({ pile, renderCardPileItem }: PileCardsColumnProps) {
     const [activeCardIndex, setActiveCardIndex] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -2427,7 +2395,39 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         )}
       </div>
     );
-  };
+  }
+
+  function renderPilesView(cards: DeckCard[]) {
+    if (cards.length === 0) return null;
+    const piles = groupCardsIntoPiles(cards, sortCardsBy);
+
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4 items-start pt-2 pb-16">
+        {piles.map((pile) => (
+          <div key={pile.id} className="flex flex-col min-w-0 bg-slate-900/40 rounded-xl p-2 sm:p-2.5 border border-slate-800/60 shadow-sm">
+            {/* Pile Header */}
+            <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800 text-xs">
+              <span className="font-bold text-slate-200 truncate">{pile.title}</span>
+              <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-violet-300 font-bold">
+                  {pile.totalQuantity}
+                </span>
+                <span className="text-slate-400">
+                  ${pile.totalPrice.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Cascading Cards Stack with Scrub-down Hover */}
+            <PileCardsColumn
+              pile={pile}
+              renderCardPileItem={renderCardPileItem}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   function renderCardPileItem(card: DeckCard, index: number, totalInPile: number, isActive: boolean) {
     const unitPrice = getCardUnitPrice(card);
@@ -2503,55 +2503,98 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         {/* Hover Action Bar at Bottom of Full Card */}
         <div
-          className={`absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent transition-all flex items-center justify-between gap-1 z-20 ${
+          className={`absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent transition-all flex flex-col gap-1 z-20 ${
             isActive ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
-          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
+          {/* Top Row: Stepper, Price, Trash */}
+          <div className="flex items-center justify-between gap-1 w-full">
+            <div className="flex items-center gap-0.5 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUpdateCardQuantity(card.id, -1);
+                }}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Decrease quantity"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
+                {card.quantity}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUpdateCardQuantity(card.id, 1);
+                }}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Increase quantity"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
+            {unitPrice && (
+              <span className="text-[10px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
+                ${unitPrice}
+              </span>
+            )}
+
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handleUpdateCardQuantity(card.id, -1);
+                handleRemoveCard(card.id);
               }}
-              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Decrease quantity"
+              className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
+              title="Remove from deck"
             >
-              <Minus className="w-3 h-3" />
-            </button>
-            <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
-              {card.quantity}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleUpdateCardQuantity(card.id, 1);
-              }}
-              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Increase quantity"
-            >
-              <Plus className="w-3 h-3" />
+              <Trash2 className="w-3 h-3" />
             </button>
           </div>
 
-          {unitPrice && (
-            <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
-              ${unitPrice}
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRemoveCard(card.id);
-            }}
-            className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
-            title="Remove from deck"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
+          {/* Bottom Row: Main / Side / Maybe Category Buttons */}
+          <div className="flex items-center justify-center bg-slate-950/90 border border-slate-800 rounded-md overflow-hidden text-[10px] font-medium shadow-sm w-full">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleChangeCardCategory(card.id, 'main');
+              }}
+              className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
+                card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              Main
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleChangeCardCategory(card.id, 'sideboard');
+              }}
+              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              Side
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleChangeCardCategory(card.id, 'maybeboard');
+              }}
+              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              Maybe
+            </button>
+          </div>
         </div>
       </div>
     );
