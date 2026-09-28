@@ -1047,7 +1047,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     {
       id: 'sideboard',
       title: 'Sideboard',
-      icon: <Bookmark className="w-4 h-4 text-rose-400" />,
+      icon: <Shield className="w-4 h-4 text-sky-400" />,
       cards: sideCards,
       totalQty: sideCards.reduce((s, c) => s + c.quantity, 0),
       totalPrice: sideCards.reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
@@ -1056,7 +1056,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       ? [{
           id: 'maybeboard',
           title: 'Maybeboard',
-          icon: <HelpCircle className="w-4 h-4 text-slate-400" />,
+          icon: <HelpCircle className="w-4 h-4 text-amber-400" />,
           cards: maybeCards,
           totalQty: maybeCards.reduce((s, c) => s + c.quantity, 0),
           totalPrice: maybeCards.reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
@@ -1670,13 +1670,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onClick={() => {
               setActiveCategoryTab('main');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
               activeCategoryTab === 'main'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Mainboard ({deck.format === 'commander' ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})
+            <Layers className="w-3.5 h-3.5" />
+            <span>Mainboard ({deck.format === 'commander' ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})</span>
           </button>
 
           <button
@@ -1684,13 +1685,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onClick={() => {
               setActiveCategoryTab('sideboard');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
               activeCategoryTab === 'sideboard'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Sideboard ({stats.sideboardCount})
+            <Shield className="w-3.5 h-3.5" />
+            <span>Sideboard ({stats.sideboardCount})</span>
           </button>
 
           <button
@@ -1698,13 +1700,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onClick={() => {
               setActiveCategoryTab('maybeboard');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
               activeCategoryTab === 'maybeboard'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Maybeboard ({stats.maybeboardCount})
+            <HelpCircle className="w-3.5 h-3.5" />
+            <span>Maybeboard ({stats.maybeboardCount})</span>
           </button>
         </div>
 
@@ -1900,7 +1903,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Sideboard Tab */}
           {activeCategoryTab === 'sideboard' && (
             <div className="space-y-3">
-              <h3 className="text-xs uppercase font-semibold text-slate-400">Sideboard ({stats.sideboardCount})</h3>
+              <h3 className="flex items-center gap-1.5 text-xs uppercase font-semibold text-slate-400"><Shield className="w-3.5 h-3.5 text-sky-400" /><span>Sideboard ({stats.sideboardCount})</span></h3>
               {sideCards.length > 0 ? (
                 viewMode === 'piles' ? renderPilesView(sideCards) : renderCardListOrGrid(sideCards)
               ) : (
@@ -1914,7 +1917,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Maybeboard Tab */}
           {activeCategoryTab === 'maybeboard' && (
             <div className="space-y-3">
-              <h3 className="text-xs uppercase font-semibold text-slate-400">Maybeboard / Tech ({stats.maybeboardCount})</h3>
+              <h3 className="flex items-center gap-1.5 text-xs uppercase font-semibold text-slate-400"><HelpCircle className="w-3.5 h-3.5 text-amber-400" /><span>Maybeboard / Tech ({stats.maybeboardCount})</span></h3>
               {maybeCards.length > 0 ? (
                 viewMode === 'piles' ? renderPilesView(maybeCards) : renderCardListOrGrid(maybeCards)
               ) : (
@@ -2684,63 +2687,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
         )}
 
-        {/* Sleek Floating Glass Action Bar on Hover */}
+        {/* Transparent Floating Action Bar on Hover */}
         <div
-          className={`absolute top-1.5 inset-x-1.5 px-1.5 py-1 bg-slate-950/85 backdrop-blur-md rounded-lg border border-slate-700/60 shadow-xl transition-all duration-150 flex items-center justify-between gap-1 z-30 ${
-            isActive ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'
+          className={`absolute top-1.5 inset-x-1.5 px-0.5 py-0.5 bg-transparent transition-all duration-150 flex items-center justify-between gap-1 z-30 pointer-events-none ${
+            isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
           }`}
         >
-          {/* Left: Category Selector (or Commander Badge) */}
-          {isThisCommander ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/30 shrink-0">
-              <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
-            </span>
-          ) : (
-            <div className="flex items-center bg-slate-900/90 border border-slate-800 rounded overflow-hidden divide-x divide-slate-800 text-[10px] font-bold shrink-0">
-              {card.category !== 'main' && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleChangeCardCategory(card.id, 'main');
-                  }}
-                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  title="Move to Mainboard"
-                >
-                  M
-                </button>
-              )}
-              {card.category !== 'sideboard' && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleChangeCardCategory(card.id, 'sideboard');
-                  }}
-                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  title="Move to Sideboard"
-                >
-                  S
-                </button>
-              )}
-              {card.category !== 'maybeboard' && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleChangeCardCategory(card.id, 'maybeboard');
-                  }}
-                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  title="Move to Maybeboard"
-                >
-                  Mb
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Center: Compact Stepper */}
-          <div className="flex items-center gap-0.5 bg-slate-900/90 rounded px-1 py-0.5 border border-slate-800 shadow-xs shrink-0">
+          {/* Left: Compact Quantity Stepper */}
+          <div className="flex items-center gap-0.5 bg-slate-950/75 backdrop-blur-xs rounded px-1 py-0.5 border border-slate-700/60 shadow-md shrink-0 pointer-events-auto">
             <button
               type="button"
               onClick={(e) => {
@@ -2769,15 +2723,65 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           </div>
 
-          {/* Right: Trash */}
-          <div className="flex items-center shrink-0">
+          {/* Right: Other Action Buttons (Category Selectors + Trash) */}
+          <div className="flex items-center gap-1 shrink-0 pointer-events-auto">
+            {/* Category Selector (or Commander Badge) */}
+            {isThisCommander ? (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/30 shrink-0">
+                <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
+              </span>
+            ) : (
+              <div className="flex items-center bg-slate-950/75 backdrop-blur-xs border border-slate-700/60 rounded overflow-hidden divide-x divide-slate-800 text-[10px] font-bold shadow-md shrink-0">
+                {card.category !== 'main' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChangeCardCategory(card.id, 'main');
+                    }}
+                    className="p-1 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Move to Mainboard"
+                  >
+                    <Layers className="w-3 h-3 text-violet-400" />
+                  </button>
+                )}
+                {card.category !== 'sideboard' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChangeCardCategory(card.id, 'sideboard');
+                    }}
+                    className="p-1 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Move to Sideboard"
+                  >
+                    <Shield className="w-3 h-3 text-sky-400" />
+                  </button>
+                )}
+                {card.category !== 'maybeboard' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChangeCardCategory(card.id, 'maybeboard');
+                    }}
+                    className="p-1 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Move to Maybeboard"
+                  >
+                    <HelpCircle className="w-3 h-3 text-amber-400" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Trash button */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handleRemoveCard(card.id);
               }}
-              className="p-1 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-700/50 text-rose-300 transition-colors cursor-pointer"
+              className="p-1 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-700/50 text-rose-300 transition-colors cursor-pointer shadow-md"
               title="Remove from deck"
             >
               <Trash2 className="w-2.5 h-2.5" />
@@ -2950,41 +2954,41 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
                 {/* Category Quick Move Buttons (EXCLUDED from Commander and current section) */}
                 {!isThisCommander && (
-                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 text-[10px] shrink-0 font-medium shadow-sm">
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 shrink-0 font-medium shadow-sm">
                     {card.category !== 'main' && (
                       <button
                         onClick={() => handleChangeCardCategory(card.id, 'main')}
-                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        className="p-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-violet-300 cursor-pointer"
                         title="Move to Mainboard"
                       >
-                        Main
+                        <Layers className="w-3.5 h-3.5" />
                       </button>
                     )}
                     {canAddAsCommander && (
                       <button
                         onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
+                        className="p-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
                         title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
                       >
-                        {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
+                        <Crown className="w-3.5 h-3.5" />
                       </button>
                     )}
                     {card.category !== 'sideboard' && (
                       <button
                         onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        className="p-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-sky-300 cursor-pointer"
                         title="Move to Sideboard"
                       >
-                        Side
+                        <Shield className="w-3.5 h-3.5" />
                       </button>
                     )}
                     {card.category !== 'maybeboard' && (
                       <button
                         onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        className="p-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-amber-300 cursor-pointer"
                         title="Move to Maybeboard"
                       >
-                        Maybe
+                        <HelpCircle className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -3149,15 +3153,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Quick Category Relocation Buttons (EXCLUDED from Commander and current section) */}
           {!isThisCommander && (
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 text-[10px] font-medium shadow-xs mt-1 w-full">
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 shadow-xs mt-1 w-full justify-around">
               {card.category !== 'main' && (
                 <button
                   type="button"
                   onClick={() => handleChangeCardCategory(card.id, 'main')}
-                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  className="flex-1 py-1 flex items-center justify-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-violet-300 cursor-pointer"
                   title="Move to Mainboard"
                 >
-                  Main
+                  <Layers className="w-3.5 h-3.5" />
                 </button>
               )}
 
@@ -3165,10 +3169,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 <button
                   type="button"
                   onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                  className="px-1.5 py-1 transition-colors text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
+                  className="flex-1 py-1 flex items-center justify-center transition-colors text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
                   title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
                 >
-                  {commanderCards.length === 1 ? '+P' : 'Cmdr'}
+                  <Crown className="w-3.5 h-3.5" />
                 </button>
               )}
 
@@ -3176,10 +3180,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 <button
                   type="button"
                   onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  className="flex-1 py-1 flex items-center justify-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-sky-300 cursor-pointer"
                   title="Move to Sideboard"
                 >
-                  Side
+                  <Shield className="w-3.5 h-3.5" />
                 </button>
               )}
 
@@ -3187,10 +3191,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 <button
                   type="button"
                   onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  className="flex-1 py-1 flex items-center justify-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-amber-300 cursor-pointer"
                   title="Move to Maybeboard"
                 >
-                  Maybe
+                  <HelpCircle className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
