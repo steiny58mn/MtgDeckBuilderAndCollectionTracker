@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
   // Target API backend for local dev proxy (default to localhost:5205 for local C# debugging, or https://api.frostpointlabs.com)
-  const API_TARGET = env.VITE_API_BASE_URL || env.API_BASE_URL || 'http://localhost:5205';
+  const API_TARGET = env.VITE_API_BASE_URL || env.API_BASE_URL || 'https://api.frostpointlabs.com';
 
   return {
     plugins: [react(), tailwindcss()],

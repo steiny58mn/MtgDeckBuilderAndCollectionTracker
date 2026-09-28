@@ -11,7 +11,7 @@ export interface Env {
   [key: string]: any;
 }
 
-export const DEFAULT_API_BASE = 'http://localhost:5205';
+export const DEFAULT_API_BASE = 'https://api.frostpointlabs.com';
 
 /**
  * Resolve target backend base URL from environment variables or optional header override
