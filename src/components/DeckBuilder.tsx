@@ -2359,24 +2359,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const rect = containerRef.current.getBoundingClientRect();
       const mouseY = e.clientY - rect.top;
 
-      const total = pile.cards.length;
-      // Step size is the exposed height of each stacked card (8.5% of card height at -91.5% overlap)
-      const cardHeight = rect.width * 1.4;
-      const step = Math.max(16, (1 - 0.915) * cardHeight);
-
-      // Stacked cards occupy index 0 to total - 2
-      const stackedCount = total - 1;
-      const stackedAreaHeight = stackedCount * step;
-
       if (mouseY < 0) {
         setActiveCardIndex(null);
-      } else if (mouseY < stackedAreaHeight) {
-        const idx = Math.min(stackedCount - 1, Math.max(0, Math.floor(mouseY / step)));
-        setActiveCardIndex(idx);
-      } else {
-        // Mouse is down over the bottom card's full body
-        setActiveCardIndex(total - 1);
+        return;
       }
+
+      const children = containerRef.current.children;
+      let matchedIndex = 0;
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i] as HTMLElement;
+        if (child && mouseY >= child.offsetTop) {
+          matchedIndex = i;
+          break;
+        }
+      }
+
+      setActiveCardIndex(matchedIndex);
     };
 
     const handleMouseLeave = () => {
@@ -2440,7 +2438,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       <div
         key={card.id}
         style={{
-          marginTop: index > 0 ? '-91.5%' : '0',
+          marginTop: index > 0 ? 'calc(-140% + 30px)' : '0',
           zIndex: isActive ? 50 : undefined,
         }}
         onClick={() => {
