@@ -32,8 +32,8 @@ export function useCardDualClickPeek() {
   const handleCardMouseDown = (e: React.MouseEvent, cardInfo: DualClickCardInfo) => {
     const now = Date.now();
 
-    // Middle-click (scroll wheel) also opens quick peek
-    if (e.button === 1) {
+    // Right-click OR Middle-click (scroll wheel) triggers large card peek
+    if (e.button === 2 || e.button === 1) {
       triggerChord(e, cardInfo);
       return;
     }
@@ -41,27 +41,25 @@ export function useCardDualClickPeek() {
     if (e.button === 0) {
       isLeftDownRef.current = true;
       lastLeftDownTimeRef.current = now;
-    } else if (e.button === 2) {
-      isRightDownRef.current = true;
-      lastRightDownTimeRef.current = now;
+
+      // If right button was clicked recently or is held down
+      if ((e.buttons & 2) !== 0 || now - lastRightDownTimeRef.current < 600) {
+        triggerChord(e, cardInfo);
+        return;
+      }
     }
 
-    // Condition 1: Both buttons currently held down
+    // Both buttons currently held down
     const bothButtonsHeld = (e.buttons & 1) !== 0 && (e.buttons & 2) !== 0;
 
-    // Condition 2: Both buttons pressed down within 500ms of each other
+    // Both buttons pressed down within 500ms of each other
     const bothPressedRecently =
       Math.abs(lastLeftDownTimeRef.current - lastRightDownTimeRef.current) < 500 &&
       lastLeftDownTimeRef.current > 0 &&
       lastRightDownTimeRef.current > 0 &&
       now - Math.max(lastLeftDownTimeRef.current, lastRightDownTimeRef.current) < 600;
 
-    // Condition 3: One button held while the other was just pressed
-    const oneHeldOneRecent =
-      ((e.buttons & 1) !== 0 && now - lastRightDownTimeRef.current < 500) ||
-      ((e.buttons & 2) !== 0 && now - lastLeftDownTimeRef.current < 500);
-
-    if (bothButtonsHeld || bothPressedRecently || oneHeldOneRecent) {
+    if (bothButtonsHeld || bothPressedRecently) {
       triggerChord(e, cardInfo);
     }
   };
@@ -80,20 +78,14 @@ export function useCardDualClickPeek() {
   };
 
   const handleCardContextMenu = (e: React.MouseEvent, cardInfo?: DualClickCardInfo) => {
-    // ALWAYS suppress browser context menu on cards
+    // ALWAYS suppress browser context menu on cards and trigger large card peek
     e.preventDefault();
     e.stopPropagation();
 
     const now = Date.now();
     lastRightDownTimeRef.current = now;
 
-    // If left button was clicked recently or is held down, trigger chord
-    if (
-      cardInfo &&
-      (isLeftDownRef.current ||
-        (e.buttons & 1) !== 0 ||
-        now - lastLeftDownTimeRef.current < 500)
-    ) {
+    if (cardInfo) {
       triggerChord(e, cardInfo);
     }
   };
@@ -101,7 +93,7 @@ export function useCardDualClickPeek() {
   const handleCardAuxClick = (e: React.MouseEvent, cardInfo: DualClickCardInfo) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.button === 1) {
+    if (e.button === 1 || e.button === 2) {
       triggerChord(e, cardInfo);
     }
   };
@@ -187,7 +179,7 @@ export const DualClickCardModal: React.FC<DualClickCardModalProps> = ({ card, on
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-150 select-none cursor-pointer"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-150 select-none cursor-pointer"
       onClick={onClose}
     >
       <div

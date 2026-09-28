@@ -2365,8 +2365,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </div>
             </div>
 
-            {/* Compact Cards Stack: Title bar + very little art */}
-            <div className="flex flex-col gap-1 w-full">
+            {/* Cascading Cards Stack: Full cards overlapping, hover brings card to forefront */}
+            <div className="flex flex-col relative w-full pt-1 pb-1">
               {pile.cards.map((card, idx) => renderCardPileItem(card, idx, pile.cards.length))}
             </div>
           </div>
@@ -2381,161 +2381,41 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) ||
       (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
     const isThisCommander = card.category === 'commander';
-    const isBottomCard = index === totalInPile - 1;
 
-    const chordProps = getCardChordProps({
-      name: card.name,
-      imageUrl: getCardLargeImageUrl(card),
-      backImageUrl: card.backImageUrl,
-      scryfallId: card.scryfallId,
-      manaCost: card.manaCost || card.mana_cost,
-      typeLine: card.type_line || card.typeLine,
-      price: unitPrice,
-      isFoil: card.isFoil,
-    });
-
-    const handleMouseEnterWithPreview = (e: React.MouseEvent) => {
-      onImageMouseEnter(e, {
-        name: card.name,
-        imageUrl: getCardLargeImageUrl(card),
-        backImageUrl: card.backImageUrl,
-        scryfallId: card.scryfallId,
-      });
-    };
-
-    if (isBottomCard) {
-      // Bottom card of the pile shows the ENTIRE card
-      return (
-        <div
-          key={card.id}
-          onClick={() => {
-            if (wasChordTriggeredRecently()) return;
-            onImageClearPreview();
-            onSelectCard(toScryfallCard(card));
-          }}
-          {...chordProps}
-          onMouseEnter={handleMouseEnterWithPreview}
-          onMouseMove={onImageMouseMove}
-          onMouseLeave={onImageMouseLeave}
-          className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-200 select-none cursor-pointer border ${
-            isThisCommander
-              ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
-              : 'border-slate-800 hover:border-violet-400 hover:shadow-xl hover:z-30 hover:-translate-y-1'
-          }`}
-          title="Click to inspect, hover to preview, or Right+Left click together to pop up large card"
-        >
-          {/* Full Card Image */}
-          <img
-            src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}
-            alt={card.name}
-            loading="lazy"
-            className="w-full h-full object-cover pointer-events-none select-none"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal`;
-              }
-            }}
-          />
-
-          {/* Badges on Top */}
-          <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
-            {card.quantity > 1 && (
-              <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[11px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
-                {card.quantity}x
-              </span>
-            )}
-            {isThisCommander && (
-              <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
-                <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
-              </span>
-            )}
-          </div>
-
-          {card.isFoil && (
-            <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
-              <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-            </div>
-          )}
-
-          {/* Hover Action Bar at Bottom of Full Card */}
-          <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-20">
-            <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleUpdateCardQuantity(card.id, -1);
-                }}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title="Decrease quantity"
-              >
-                <Minus className="w-3 h-3" />
-              </button>
-              <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
-                {card.quantity}
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleUpdateCardQuantity(card.id, 1);
-                }}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title="Increase quantity"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            </div>
-
-            {unitPrice && (
-              <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
-                ${unitPrice}
-              </span>
-            )}
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRemoveCard(card.id);
-              }}
-              className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
-              title="Remove from deck"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // Stacked card above the bottom: Compact strip showing title bar + very little art
     return (
       <div
         key={card.id}
+        style={{
+          marginTop: index > 0 ? '-84%' : '0',
+        }}
         onClick={() => {
           if (wasChordTriggeredRecently()) return;
           onImageClearPreview();
           onSelectCard(toScryfallCard(card));
         }}
-        {...chordProps}
-        onMouseEnter={handleMouseEnterWithPreview}
-        onMouseMove={onImageMouseMove}
-        onMouseLeave={onImageMouseLeave}
-        className={`group relative h-11 sm:h-12 w-full rounded-lg overflow-hidden shadow-sm transition-all duration-150 select-none cursor-pointer border ${
+        {...getCardChordProps({
+          name: card.name,
+          imageUrl: getCardLargeImageUrl(card),
+          backImageUrl: card.backImageUrl,
+          scryfallId: card.scryfallId,
+          manaCost: card.manaCost || card.mana_cost,
+          typeLine: card.type_line || card.typeLine,
+          price: unitPrice,
+          isFoil: card.isFoil,
+        })}
+        className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-150 select-none cursor-pointer border bg-slate-950 hover:z-50 hover:shadow-2xl hover:scale-[1.02] ${
           isThisCommander
-            ? 'border-fuchsia-500/80 shadow-fuchsia-500/10'
-            : 'border-slate-800 hover:border-violet-400 hover:shadow-md hover:z-30 hover:-translate-y-0.5'
+            ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
+            : 'border-slate-800 hover:border-violet-400'
         }`}
-        title="Click to inspect, hover to preview, or Right+Left click together to pop up large card"
+        title="Click to inspect, hover to bring to forefront, or Right-Click / Dual-Click to pop up large image"
       >
-        {/* Card Artwork & Title Bar Banner */}
+        {/* Full Card Image */}
         <img
           src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}
           alt={card.name}
           loading="lazy"
-          className="absolute inset-x-0 top-0 w-full min-h-[220px] object-cover object-top pointer-events-none select-none"
+          className="w-full h-full object-cover pointer-events-none select-none"
           referrerPolicy="no-referrer"
           onError={(e) => {
             if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
@@ -2545,28 +2425,28 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         />
 
         {/* Badges on Top */}
-        <div className="absolute top-1 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
+        <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
           {card.quantity > 1 && (
-            <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[10px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
+            <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[11px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
               {card.quantity}x
             </span>
           )}
           {isThisCommander && (
-            <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[9px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
+            <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
               <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
             </span>
           )}
         </div>
 
         {card.isFoil && (
-          <div className="absolute top-1 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none group-hover:opacity-0 transition-opacity">
+          <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
             <Sparkles className="w-2.5 h-2.5 text-amber-400" />
           </div>
         )}
 
-        {/* Hover Action Bar on the right side */}
-        <div className="absolute inset-y-0 right-0 px-2 bg-gradient-to-l from-slate-950 via-slate-950/90 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1.5 z-20">
-          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
+        {/* Hover Action Bar at Bottom of Full Card */}
+        <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-20">
+          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
             <button
               type="button"
               onClick={(e) => {
@@ -2594,13 +2474,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           </div>
 
+          {unitPrice && (
+            <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
+              ${unitPrice}
+            </span>
+          )}
+
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               handleRemoveCard(card.id);
             }}
-            className="p-1.5 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer shadow-sm"
+            className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
             title="Remove from deck"
           >
             <Trash2 className="w-3 h-3" />
