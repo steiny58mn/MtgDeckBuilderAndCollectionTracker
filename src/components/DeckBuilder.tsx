@@ -27,7 +27,8 @@ import {
   Shield,
   Mountain,
   Bookmark,
-  HelpCircle
+  HelpCircle,
+  FileText
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem } from '../types/mtg';
@@ -38,6 +39,7 @@ import { ManaCurveChart } from './ManaCurveChart';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
+import { GameSummaryModal } from './GameSummaryModal';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -80,6 +82,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>('main');
   const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
@@ -900,6 +903,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     <Share2 className="w-3.5 h-3.5 text-violet-400" />
                     <span>Export</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowGameSummaryModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Generate Game Summary BBCode (BBCodeType 3 via /mtgtools/getbbcode)"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Game Summary</span>
+                  </button>
                 </div>
 
                 {/* Badges to the right of the buttons */}
@@ -1344,6 +1357,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         deck={deck}
         historyList={historyList}
       />
+
+      {/* Game Summary Modal */}
+      {showGameSummaryModal && (
+        <GameSummaryModal
+          isOpen={showGameSummaryModal}
+          onClose={() => setShowGameSummaryModal(false)}
+          deck={deck}
+        />
+      )}
     </div>
   );
 

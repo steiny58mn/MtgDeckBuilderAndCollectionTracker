@@ -764,6 +764,110 @@ export function getDeckColorStyle(colorIdentity: string[]): string {
   return 'default';
 }
 
+export const MTG_COLOR_NAMES = [
+  'Abzan',
+  'Azorius',
+  'Bant',
+  'Black',
+  'Blue',
+  'Boros',
+  'Colorless',
+  'Dimir',
+  'Esper',
+  'Golgari',
+  'Green',
+  'Grixis',
+  'Gruul',
+  'Izzet',
+  'Jeskai',
+  'Jund',
+  'Mardu',
+  'Naya',
+  'Orzhov',
+  'Rakdos',
+  'Red',
+  'Selesnya',
+  'Simic',
+  'Sultai',
+  'Temur',
+  'UBRG',
+  'WBRG',
+  'White',
+  'WUBG',
+  'WUBR',
+  'WUBRG',
+  'WURG',
+] as const;
+
+export const DECK_COLOR_NAME_MAP: Record<string, string> = {
+  '': 'Colorless',
+  'W': 'White',
+  'U': 'Blue',
+  'B': 'Black',
+  'R': 'Red',
+  'G': 'Green',
+  'WU': 'Azorius',
+  'UB': 'Dimir',
+  'BR': 'Rakdos',
+  'RG': 'Gruul',
+  'GW': 'Selesnya',
+  'WB': 'Orzhov',
+  'UR': 'Izzet',
+  'BG': 'Golgari',
+  'RW': 'Boros',
+  'GU': 'Simic',
+  'WUB': 'Esper',
+  'UBR': 'Grixis',
+  'BRG': 'Jund',
+  'RGW': 'Naya',
+  'GWU': 'Bant',
+  'WBR': 'Mardu',
+  'URG': 'Temur',
+  'BGW': 'Abzan',
+  'RWU': 'Jeskai',
+  'GUB': 'Sultai',
+  'UBRG': 'UBRG',
+  'BRGW': 'WBRG',
+  'RGWU': 'WURG',
+  'GWUB': 'WUBG',
+  'WUBR': 'WUBR',
+  'WUBRG': 'WUBRG',
+};
+
+/**
+ * Resolves the deck's primary color or color combination name
+ * corresponding to C# API Colors.ColorList() (e.g. 'Izzet', 'Esper', 'White', 'Colorless').
+ */
+export function getDeckColorName(deck: Deck): string {
+  const commanderInfo = getDeckCommander(deck);
+  let colorIdentity = commanderInfo.colorIdentity;
+  if (!colorIdentity || colorIdentity.length === 0) {
+    if (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0) {
+      colorIdentity = deck.commanderColorIdentity;
+    } else {
+      const allColors = new Set<string>();
+      (deck.cards || []).forEach((c) => {
+        (c.color_identity || (c as any).colorIdentity || c.colors || []).forEach((col: string) => {
+          if (['W', 'U', 'B', 'R', 'G'].includes(col.toUpperCase())) {
+            allColors.add(col.toUpperCase());
+          }
+        });
+      });
+      colorIdentity = Array.from(allColors);
+    }
+  }
+
+  const sorted = sortWUBRG(colorIdentity).join('').toUpperCase();
+  if (DECK_COLOR_NAME_MAP[sorted]) return DECK_COLOR_NAME_MAP[sorted];
+  const alphaKey = sorted.split('').sort().join('');
+  for (const [key, val] of Object.entries(DECK_COLOR_NAME_MAP)) {
+    if (key.split('').sort().join('') === alphaKey) {
+      return val;
+    }
+  }
+  return 'Colorless';
+}
+
 export function adjustDeckListBBCode(
   apiOutput: string,
   deckName?: string,

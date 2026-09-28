@@ -11,6 +11,8 @@ import {
   createDeckPickListApi,
   getDeckColorStyle,
   generateDeckPickListLocal,
+  getDeckColorName,
+  MTG_COLOR_NAMES,
 } from '../utils/deckUtils';
 
 // ============================================================================
@@ -1520,6 +1522,53 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
  * Deck & Collection Service
  * Maintains reactive in-memory state and syncs directly with remote C# Web API.
  */
+/**
+ * Calls remote C# API GET /mtgtools/getbbcode to retrieve generated BBCode markup.
+ * @param color The MTG color or color combination name (e.g. 'Izzet', 'Esper', 'White', 'Colorless')
+ * @param bbCodeType 1 = DeckUpdate, 2 = SetReviews, 3 = GameSummary
+ */
+export async function getRemoteBBCode(color: string, bbCodeType: number = 3): Promise<string> {
+  const baseUrl = getApiBaseUrl();
+  const query = `?color=${encodeURIComponent(color)}&bbCodeType=${bbCodeType}`;
+  const candidates: string[] = [];
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    window.location &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  if (isLocalDev) {
+    candidates.push(`/mtgtools/getbbcode${query}`);
+  }
+  if (baseUrl) {
+    candidates.push(`${baseUrl.replace(/\/+$/, '')}/mtgtools/getbbcode${query}`);
+  }
+  if (!candidates.some((c) => c.startsWith('/mtgtools/getbbcode'))) {
+    candidates.push(`/mtgtools/getbbcode${query}`);
+  }
+
+  let lastError: any = null;
+  for (const targetUrl of candidates) {
+    try {
+      const res = await fetch(targetUrl, { method: 'GET' });
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        throw new Error(`API error (${res.status}): ${errorText || res.statusText}`);
+      }
+      let text = await res.text();
+      try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed === 'string') text = parsed;
+      } catch {
+        // raw string
+      }
+      return text;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('Failed to fetch BBCode from /mtgtools/getbbcode');
+}
+
 export class DeckService {
   private static statusListeners: Set<(status: SyncStatus, error?: string) => void> = new Set();
   private static currentStatus: SyncStatus = 'syncing';
@@ -2184,6 +2233,30 @@ export class DeckService {
 
   static async enrichDeckCards(deck: Deck): Promise<Deck> {
     return enrichDeckCards(deck);
+  }
+
+  /**
+   * Request BBCode markup from /mtgtools/getbbcode
+   * @param color The MTG color or color combination name (e.g. 'Izzet', 'White', 'Colorless')
+   * @param bbCodeType 1 = DeckUpdate, 2 = SetReviews, 3 = GameSummary (default: 3)
+   */
+  static async getBBCode(color: string, bbCodeType: number = 3): Promise<string> {
+    return getRemoteBBCode(color, bbCodeType);
+  }
+
+  /**
+   * Resolve canonical deck color name (e.g. 'Izzet', 'Azorius', 'Esper', 'White', 'Colorless')
+   */
+  static getDeckColorName(deck: Deck): string {
+    return getDeckColorName(deck);
+  }
+
+  /**
+   * Generates Game Summary BBCode (BBCodeType = 3) for a deck by passing in its color
+   */
+  static async getGameSummaryBBCode(deck: Deck): Promise<string> {
+    const color = getDeckColorName(deck);
+    return getRemoteBBCode(color, 3);
   }
 
   
