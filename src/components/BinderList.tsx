@@ -24,9 +24,9 @@ export const BinderList: React.FC<BinderListProps> = ({
   const [newBinderDesc, setNewBinderDesc] = useState('');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
 
-  const filteredBinders = binders.filter(
-    (b) => !searchQuery.trim() || b.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredBinders = binders
+    .filter((b) => !searchQuery.trim() || b.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 
   useEffect(() => {
     console.log(`[BinderList] 📁 State check: ${binders.length} total binder(s), ${filteredBinders.length} matching filter.`, {

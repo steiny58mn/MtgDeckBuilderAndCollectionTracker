@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  X, 
+  X,
+  Trash2, 
   GitCompare, 
   Loader2, 
   Copy, 
@@ -24,6 +25,7 @@ interface DeckCompareModalProps {
   historyList: DeckHistoryItem[];
   initialBaseId?: string;
   initialTargetId?: string;
+  onDeleteIteration?: (historyId: string) => Promise<void> | void;
 }
 
 export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
@@ -33,6 +35,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   historyList,
   initialBaseId,
   initialTargetId = 'current',
+  onDeleteIteration,
 }) => {
   // If initialBaseId is provided, use it; otherwise default to the first (most recent) historical snapshot if available, or 'current'
   const defaultBaseId = initialBaseId || (historyList.length > 0 ? (historyList[0].id || historyList[0].historyId) : 'current');
@@ -246,26 +249,44 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
 
         {/* Iteration Selectors Bar */}
         <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-col sm:flex-row items-center gap-3">
-          {/* Base Iteration Dropdown */}
+                    {/* Base Iteration Dropdown */}
           <div className="flex-1 w-full">
             <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
               Base / Older Iteration
             </label>
-            <select
-              value={baseId}
-              onChange={(e) => handleBaseChange(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-hidden focus:border-violet-500/50"
-            >
-              <option value="current">Current Version (Live Draft - {currentTotalCards} cards)</option>
-              {historyList.map((item, idx) => {
-                const optKey = item.id || item.historyId || `base-${idx}`;
-                return (
-                  <option key={optKey} value={optKey}>
-                    {formatIterationLabel(item, idx)}
-                  </option>
-                );
-              })}
-            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={baseId}
+                onChange={(e) => handleBaseChange(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-hidden focus:border-violet-500/50"
+              >
+                <option value="current">Current Version (Live Draft - {currentTotalCards} cards)</option>
+                {historyList.map((item, idx) => {
+                  const optKey = item.id || item.historyId || `base-${idx}`;
+                  return (
+                    <option key={optKey} value={optKey}>
+                      {formatIterationLabel(item, idx)}
+                    </option>
+                  );
+                })}
+              </select>
+              {baseId !== 'current' && onDeleteIteration && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onDeleteIteration(baseId);
+                    const remaining = historyList.filter((h) => (h.id || h.historyId) !== baseId && h.historyId !== baseId);
+                    const nextBase = remaining.length > 0 ? (remaining[0].id || remaining[0].historyId) : 'current';
+                    setBaseId(nextBase);
+                    handleRunComparison(nextBase, targetId);
+                  }}
+                  className="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-400 hover:text-rose-200 transition-colors cursor-pointer shrink-0"
+                  title="Delete this historical iteration"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Swap Button */}
@@ -280,26 +301,44 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
             </button>
           </div>
 
-          {/* Target Iteration Dropdown */}
+                    {/* Target Iteration Dropdown */}
           <div className="flex-1 w-full">
             <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
               Comparison / Newer Iteration
             </label>
-            <select
-              value={targetId}
-              onChange={(e) => handleTargetChange(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-hidden focus:border-violet-500/50"
-            >
-              <option value="current">Current Version (Live Draft - {currentTotalCards} cards)</option>
-              {historyList.map((item, idx) => {
-                const optKey = item.id || item.historyId || `target-${idx}`;
-                return (
-                  <option key={optKey} value={optKey}>
-                    {formatIterationLabel(item, idx)}
-                  </option>
-                );
-              })}
-            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={targetId}
+                onChange={(e) => handleTargetChange(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-hidden focus:border-violet-500/50"
+              >
+                <option value="current">Current Version (Live Draft - {currentTotalCards} cards)</option>
+                {historyList.map((item, idx) => {
+                  const optKey = item.id || item.historyId || `target-${idx}`;
+                  return (
+                    <option key={optKey} value={optKey}>
+                      {formatIterationLabel(item, idx)}
+                    </option>
+                  );
+                })}
+              </select>
+              {targetId !== 'current' && onDeleteIteration && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onDeleteIteration(targetId);
+                    const remaining = historyList.filter((h) => (h.id || h.historyId) !== targetId && h.historyId !== targetId);
+                    const nextTarget = remaining.length > 0 ? (remaining[0].id || remaining[0].historyId) : 'current';
+                    setTargetId(nextTarget);
+                    handleRunComparison(baseId, nextTarget);
+                  }}
+                  className="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-400 hover:text-rose-200 transition-colors cursor-pointer shrink-0"
+                  title="Delete this historical iteration"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Re-run button */}

@@ -21,7 +21,9 @@ interface DeckListProps {
   onCreateDeck: (newDeck: Partial<Deck>) => void;
   onDuplicateDeck: (deck: Deck) => void;
   onDeleteDeck: (deckId: string) => void;
+  onSaveDeck?: (deckToSave: Deck) => Promise<void> | void;
   onImportDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
+  onImportOverwriteDeck?: (overwrittenDeck: Deck, originalDeck?: Deck) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
 }
 
@@ -31,7 +33,9 @@ export const DeckList: React.FC<DeckListProps> = ({
   onCreateDeck,
   onDuplicateDeck,
   onDeleteDeck,
+  onSaveDeck,
   onImportDeck,
+  onImportOverwriteDeck,
   onBatchImportCompleted,
 }) => {
   const [filterFormat, setFilterFormat] = useState<string>('all');
@@ -46,15 +50,17 @@ export const DeckList: React.FC<DeckListProps> = ({
   const [newDeckFormat, setNewDeckFormat] = useState<MTGFormat>('commander');
   const [newDeckDesc, setNewDeckDesc] = useState('');
 
-  const filteredDecks = decks.filter((d) => {
-    const matchFormat = filterFormat === 'all' || d.format === filterFormat;
-    const matchSearch = 
-      !searchQuery.trim() || 
-      d.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      d.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.commanderName?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchFormat && matchSearch;
-  });
+  const filteredDecks = decks
+    .filter((d) => {
+      const matchFormat = filterFormat === 'all' || d.format === filterFormat;
+      const matchSearch = 
+        !searchQuery.trim() || 
+        d.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        d.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        d.commanderName?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchFormat && matchSearch;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 
   useEffect(() => {
     console.log(`[DeckList] 📋 State check: ${decks.length} total deck(s), ${filteredDecks.length} matching filter.`, {
@@ -371,10 +377,26 @@ export const DeckList: React.FC<DeckListProps> = ({
             }
             setShowImportModal(false);
           }}
-          onImportOverwriteDeck={async (overwrittenDeck) => {
-            await DeckService.saveDeck(overwrittenDeck);
+          onImportOverwriteDeck={async (overwrittenDeck, targetDeck) => {
+            if (onImportOverwriteDeck) {
+              await onImportOverwriteDeck(overwrittenDeck, targetDeck);
+            } else {
+              const existingDeck = targetDeck || decks.find((d) => d.id === overwrittenDeck.id);
+              if (existingDeck) {
+                if (onSaveDeck) {
+                  await onSaveDeck(existingDeck);
+                } else {
+                  await DeckService.saveDeck(existingDeck);
+                }
+              }
+              if (onSaveDeck) {
+                await onSaveDeck(overwrittenDeck);
+              } else {
+                await DeckService.saveDeck(overwrittenDeck);
+              }
+              onSelectDeck(overwrittenDeck);
+            }
             setShowImportModal(false);
-            onSelectDeck(overwrittenDeck);
           }}
           onBatchImportCompleted={(count) => {
             setShowImportModal(false);

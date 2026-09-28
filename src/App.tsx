@@ -233,6 +233,23 @@ export default function App() {
     showToast(`Imported deck "${newDeck.name}" (${newDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards)!`, 'success');
   };
 
+  const handleImportOverwriteDeck = async (overwrittenDeck: Deck, originalDeck?: Deck) => {
+    if (!requireAuth(`Please sign in or create an account to save "${overwrittenDeck.name}"!`, () => handleImportOverwriteDeck(overwrittenDeck, originalDeck))) {
+      return;
+    }
+
+    // 1. Save existing deck so it gets committed and archived into DeckHistory
+    if (originalDeck) {
+      await DeckService.saveDeck({ ...originalDeck, updatedAt: Date.now() });
+    }
+
+    // 2. Save newly imported overwritten deck, updating active deck and triggering history snapshot
+    await DeckService.saveDeck(overwrittenDeck);
+    setActiveDeck(overwrittenDeck);
+    setActiveTab('decks');
+    showToast(`Deck "${overwrittenDeck.name}" updated! Previous version saved to history.`, 'success');
+  };
+
   const handleBatchImportCompleted = async (count: number) => {
     setActiveDeck(null);
     setActiveTab('decks');
@@ -631,12 +648,13 @@ export default function App() {
   // Top-level tab change handler:
   const handleTabChange = async (tab: 'decks' | 'collection' | 'search' | 'login') => {
     if (tab === 'decks') {
+      setActiveDeck(null);
       setActiveTab('decks');
     } else if (tab === 'collection') {
       if (activeBinder && AuthService.isLoggedIn()) {
         await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
-        setActiveBinder(null);
       }
+      setActiveBinder(null);
       setActiveTab('collection');
     } else {
       setActiveTab(tab);
@@ -711,7 +729,9 @@ export default function App() {
               onCreateDeck={handleCreateDeck}
               onDuplicateDeck={handleDuplicateDeck}
               onDeleteDeck={handleDeleteDeck}
+              onSaveDeck={handleSaveDeck}
               onImportDeck={handleImportAsNewDeck}
+              onImportOverwriteDeck={handleImportOverwriteDeck}
               onBatchImportCompleted={handleBatchImportCompleted}
             />
           )

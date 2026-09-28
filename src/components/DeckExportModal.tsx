@@ -62,7 +62,7 @@ interface DeckExportModalProps {
   onClose: () => void;
   onImportAsNewDeck: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
   onImportAppendToDeck?: (cardsToAdd: DeckCard[]) => Promise<void>;
-  onImportOverwriteDeck?: (overwrittenDeck: Deck) => Promise<void>;
+  onImportOverwriteDeck?: (overwrittenDeck: Deck, originalDeck: Deck) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
   initialTab?: 'export' | 'import';
 }
@@ -79,6 +79,12 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   onBatchImportCompleted,
   initialTab = 'export',
 }) => {
+  const sortedExistingDecks = useMemo(() => {
+    return [...existingDecks].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+    );
+  }, [existingDecks]);
+
   const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
   const [targetDeckToOverwrite, setTargetDeckToOverwrite] = useState<Deck | null>(deck || (existingDecks.length > 0 ? existingDecks[0] : null));
   const [activeTab, setActiveTab] = useState<'export' | 'import'>(initialTab);
@@ -475,9 +481,10 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               coverCardUrl: commanderArtUrl || resolvedCards[0]?.imageUrl || target.coverCardUrl,
               updatedAt: Date.now(),
             };
+            await DeckService.saveDeck(target);
             await DeckService.saveDeck(overwrittenDeck);
             if (onImportOverwriteDeck && !isMultiple) {
-              await onImportOverwriteDeck(overwrittenDeck);
+              await onImportOverwriteDeck(overwrittenDeck, target);
             }
           }
         } else {
@@ -699,7 +706,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         updatedAt: Date.now(),
       };
 
-      await onImportOverwriteDeck(overwrittenDeck);
+      await onImportOverwriteDeck(overwrittenDeck, targetDeck);
       setShowOverwriteConfirmModal(false);
       onClose();
     } catch (err: any) {

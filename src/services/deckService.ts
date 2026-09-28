@@ -632,6 +632,51 @@ export async function getRemoteDeckHistorySnapshot(
 }
 
 /**
+ * Delete deck history snapshot from C# API
+ * Primary route: DELETE /deckbuilder/decks/{id}/history/{historyId}
+ * Alias route:   DELETE /deckbuilder/decks/history/{historyId}
+ */
+export async function deleteRemoteDeckHistory(
+  deckId: string,
+  historyId: string
+): Promise<boolean> {
+  const routePath = `/deckbuilder/decks/${encodeURIComponent(deckId)}/history/${encodeURIComponent(historyId)}`;
+  const start = performance.now();
+
+  console.groupCollapsed(`[DeckService] 🗑️ Deleting deck history snapshot ${historyId} for deck ${deckId}`);
+
+  try {
+    const res = await apiFetch(routePath, {
+      method: 'DELETE',
+    });
+    const durationMs = Math.round(performance.now() - start);
+
+    if (!res.ok) {
+      // Try alias route DELETE /deckbuilder/decks/history/{historyId}
+      const aliasPath = `/deckbuilder/decks/history/${encodeURIComponent(historyId)}`;
+      const resAlias = await apiFetch(aliasPath, {
+        method: 'DELETE',
+      });
+      if (!resAlias.ok) {
+        const errText = await resAlias.text().catch(() => '');
+        console.warn(`[DeckService] ⚠️ deleteRemoteDeckHistory failed: HTTP ${resAlias.status}:`, errText);
+        console.groupEnd();
+        return false;
+      }
+    }
+
+    console.log(`[DeckService] ✅ Successfully deleted snapshot ${historyId} (${durationMs}ms)`);
+    console.groupEnd();
+    return true;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - start);
+    console.error(`[DeckService] ❌ Error in deleteRemoteDeckHistory (${durationMs}ms):`, err);
+    console.groupEnd();
+    return false;
+  }
+}
+
+/**
  * Known canonical MTG split and aftermath cards (printed on a single card face with 2 castable halves).
  * For these cards, MTG APIs and parsers expect the full combined name (e.g. "Life // Death").
  * For all other multi-faced cards (MDFCs, Transform DFCs, Adventures, Flip cards),
@@ -1471,6 +1516,7 @@ export class DeckService {
 
   private static inMemoryDecks: Deck[] = [];
   private static inMemoryBinders: Binder[] = [];
+  private static inMemoryDeckHistory: Map<string, DeckHistoryItem[]> = new Map();
   private static hasInitialized = false;
 
   private static unsavedDeckIds: Set<string> = new Set();
@@ -1503,11 +1549,13 @@ export class DeckService {
   }
 
   private static notifyDecks() {
+    this.inMemoryDecks.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
     console.log(`[DeckService] 📢 Notifying ${this.deckListeners.size} deck listener(s) with ${this.inMemoryDecks.length} deck(s).`);
     this.deckListeners.forEach((cb) => cb([...this.inMemoryDecks]));
   }
 
   private static notifyBinders() {
+    this.inMemoryBinders.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
     console.log(`[DeckService] 📢 Notifying ${this.binderListeners.size} binder listener(s) with ${this.inMemoryBinders.length} binder(s).`);
     this.binderListeners.forEach((cb) => cb([...this.inMemoryBinders]));
     const col = this.getCollectionFromBinders(this.inMemoryBinders);
@@ -1671,11 +1719,15 @@ export class DeckService {
   }
 
   static getLocalDecks(): Deck[] {
-    return [...this.inMemoryDecks];
+    return [...this.inMemoryDecks].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+    );
   }
 
   static getLocalBinders(): Binder[] {
-    return [...this.inMemoryBinders];
+    return [...this.inMemoryBinders].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+    );
   }
 
   static getLocalCollection(): CollectionCard[] {
@@ -1712,6 +1764,30 @@ export class DeckService {
 
     const idx = this.inMemoryDecks.findIndex((d) => d.id === updated.id);
     if (idx >= 0) {
+      const existing = this.inMemoryDecks[idx];
+      if (existing && existing.cards && existing.cards.length > 0) {
+        const snapshotId = `deckhist-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        const historyItem: DeckHistoryItem = {
+          id: snapshotId,
+          historyId: snapshotId,
+          deckId: existing.id,
+          name: existing.name,
+          description: existing.description,
+          format: existing.format,
+          commanderId: existing.commanderId,
+          commanderName: existing.commanderName,
+          commanderArtUrl: existing.commanderArtUrl,
+          commanderColorIdentity: existing.commanderColorIdentity,
+          coverCardUrl: existing.coverCardUrl,
+          totalCards: (existing.cards || []).reduce((s, c) => s + (c.quantity || 1), 0),
+          createdAt: existing.createdAt,
+          updatedAt: existing.updatedAt,
+          archivedAt: Date.now(),
+          cards: JSON.parse(JSON.stringify(existing.cards)),
+        };
+        const currentHist = this.inMemoryDeckHistory.get(existing.id) || [];
+        this.inMemoryDeckHistory.set(existing.id, [historyItem, ...currentHist]);
+      }
       this.inMemoryDecks[idx] = updated;
     } else {
       this.inMemoryDecks.unshift(updated);
@@ -2009,7 +2085,11 @@ export class DeckService {
    * GET /deckbuilder/decks/{id}/history (or alias GET /deckbuilder/decks/history/{id})
    */
   static async getDeckHistory(deckId: string, useAliasRoute = false): Promise<DeckHistoryItem[]> {
-    return getRemoteDeckHistory(deckId, useAliasRoute);
+    const remote = await getRemoteDeckHistory(deckId, useAliasRoute);
+    if (remote && remote.length > 0) {
+      return remote;
+    }
+    return this.inMemoryDeckHistory.get(deckId) || [];
   }
 
   /**
@@ -2049,6 +2129,19 @@ export class DeckService {
     this.updateDeckInMemory(restoredDeck);
     await this.saveDeck(restoredDeck);
     return restoredDeck;
+  }
+
+  /**
+   * Delete a specific historical iteration snapshot from Turso DB and memory
+   * DELETE /deckbuilder/decks/{id}/history/{historyId}
+   */
+  static async deleteDeckHistory(deckId: string, historyId: string): Promise<boolean> {
+    const inMem = this.inMemoryDeckHistory.get(deckId) || [];
+    this.inMemoryDeckHistory.set(
+      deckId,
+      inMem.filter((h) => (h.id || h.historyId) !== historyId && h.historyId !== historyId && h.id !== historyId)
+    );
+    return deleteRemoteDeckHistory(deckId, historyId);
   }
 
   /**
@@ -2163,6 +2256,7 @@ export class DeckService {
   public static clearUserData(): void {
     console.log('[DeckService] 🧹 Clearing user data on logout.');
     this.inMemoryDecks = [];
+    this.inMemoryDeckHistory.clear();
     this.lastSavedDecks.clear();
     this.unsavedDeckIds.clear();
     this.inMemoryBinders = [DEFAULT_BINDER];

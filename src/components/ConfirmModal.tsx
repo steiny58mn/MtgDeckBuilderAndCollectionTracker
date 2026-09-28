@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface ConfirmModalProps {
@@ -35,17 +35,18 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         <p className="text-slate-400 text-sm mb-6">{message}</p>
         <div className="flex justify-end gap-3">
           <button
+            type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors cursor-pointer"
           >
             {cancelText}
           </button>
           <button
+            type="button"
             onClick={() => {
               onConfirm();
-              onCancel();
             }}
-            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-colors"
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-colors cursor-pointer"
           >
             {confirmText}
           </button>

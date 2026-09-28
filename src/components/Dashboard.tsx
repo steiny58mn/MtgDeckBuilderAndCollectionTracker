@@ -222,7 +222,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         isOpen={confirmState.isOpen}
         title={confirmState.title}
         message={confirmState.message}
-        onConfirm={confirmState.onConfirm}
+        onConfirm={() => {
+          confirmState.onConfirm();
+          setConfirmState(prev => ({ ...prev, isOpen: false }));
+        }}
         onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
         confirmText="Delete"
       />

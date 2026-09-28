@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   GitCompare,
   Save,
+  RotateCcw,
+  Clock,
   Loader2, 
   Sparkles, 
   RefreshCw, 
@@ -33,7 +35,7 @@ import {
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem } from '../types/mtg';
 import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander, getCardCategorySortOrder } from '../utils/deckUtils';
-import { DeckService } from '../services/deckService';
+import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { SampleHandSimulator } from './SampleHandSimulator';
@@ -89,13 +91,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>('name');
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [historyList, setHistoryList] = useState<DeckHistoryItem[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
+  const [isHistoricalLoading, setIsHistoricalLoading] = useState<boolean>(false);
+  const [historicalDeck, setHistoricalDeck] = useState<Deck | null>(null);
+
+  const isHistoricalView = selectedHistoryId !== 'current';
+  const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
+  const selectedHistoryItem = historyList.find(
+    (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
+    confirmText?: string;
+    cancelText?: string;
     onConfirm: () => void;
+    onCancel?: () => void;
   }>({
     isOpen: false,
     title: '',
@@ -108,6 +122,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setTitle(deck.name);
     setDescription(deck.description || '');
     setFormat(deck.format);
+    setSelectedHistoryId('current');
+    setHistoricalDeck(null);
     setHasUnsavedChanges(DeckService.hasUnsavedChanges(deck.id));
   }, [deck.id]);
 
@@ -139,6 +155,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       }
       setHasUnsavedChanges(false);
       DeckService.setDeckHasUnsavedChanges(deck.id, false);
+      await refreshHistory();
       setPriceRefreshMessage('Deck saved & iteration snapshot created!');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
     } catch (e: any) {
@@ -160,18 +177,182 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [deck, title, description, format, onSaveDeck, isSaving]);
 
+  // Refresh deck history snapshots
+  const refreshHistory = async () => {
+    if (deck?.id) {
+      try {
+        const items = await DeckService.getDeckHistory(deck.id);
+        setHistoryList(items || []);
+      } catch (err) {
+        console.warn('Failed to load history list', err);
+      }
+    }
+  };
+
   React.useEffect(() => {
     if (deck?.id) {
-      DeckService.getDeckHistory(deck.id)
-        .then((items) => setHistoryList(items || []))
-        .catch((err) => console.warn('Failed to load history list for compare modal', err));
+      refreshHistory();
     }
   }, [deck?.id]);
 
-  const stats = calculateDeckStats(deck);
+  // Load snapshot cards when an iteration is selected
+  React.useEffect(() => {
+    if (selectedHistoryId === 'current') {
+      setHistoricalDeck(null);
+      return;
+    }
+
+    const existing = historyList.find(
+      (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
+    );
+
+    if (existing && Array.isArray(existing.cards) && existing.cards.length > 0) {
+      setHistoricalDeck({
+        ...deck,
+        name: existing.name || deck.name,
+        description: existing.description ?? deck.description,
+        format: (existing.format as MTGFormat) || deck.format,
+        commanderId: existing.commanderId ?? deck.commanderId,
+        commanderName: existing.commanderName ?? deck.commanderName,
+        commanderArtUrl: existing.commanderArtUrl ?? deck.commanderArtUrl,
+        commanderColorIdentity: existing.commanderColorIdentity ?? deck.commanderColorIdentity,
+        cards: existing.cards,
+        updatedAt: existing.archivedAt || deck.updatedAt,
+      });
+      return;
+    }
+
+    let isMounted = true;
+    setIsHistoricalLoading(true);
+    DeckService.getDeckHistorySnapshot(deck.id, selectedHistoryId)
+      .then((snapshot) => {
+        if (!isMounted) return;
+        if (snapshot) {
+          setHistoricalDeck({
+            ...deck,
+            name: snapshot.name || deck.name,
+            description: snapshot.description ?? deck.description,
+            format: (snapshot.format as MTGFormat) || deck.format,
+            commanderId: snapshot.commanderId ?? deck.commanderId,
+            commanderName: snapshot.commanderName ?? deck.commanderName,
+            commanderArtUrl: snapshot.commanderArtUrl ?? deck.commanderArtUrl,
+            commanderColorIdentity: snapshot.commanderColorIdentity ?? deck.commanderColorIdentity,
+            cards: snapshot.cards || [],
+            updatedAt: snapshot.archivedAt || deck.updatedAt,
+          });
+        } else {
+          setPriceRefreshMessage('Unable to load historical snapshot.');
+          setTimeout(() => setPriceRefreshMessage(null), 3000);
+          setSelectedHistoryId('current');
+        }
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error('Failed to fetch snapshot:', err);
+        setSelectedHistoryId('current');
+      })
+      .finally(() => {
+        if (isMounted) setIsHistoricalLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedHistoryId, deck.id, historyList]);
+
+  const formatIterationLabel = (item: DeckHistoryItem, idx?: number): string => {
+    const ts = parseTimestamp(item.archivedAt);
+    const d = new Date(ts);
+    const dateStr = !isNaN(d.getTime())
+      ? d.toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : `Iteration #${idx !== undefined ? historyList.length - idx : ''}`;
+    const cardsSum = Array.isArray(item.cards) && item.cards.length > 0
+      ? item.cards.reduce((sum, c) => sum + (c.quantity || 1), 0)
+      : undefined;
+    const count = item.cardCount ?? cardsSum ?? (item as any).totalCards ?? 0;
+    const prefix = idx !== undefined ? `Iteration #${historyList.length - idx} • ` : '';
+    return `${prefix}${dateStr} (${count} cards)`;
+  };
+
+  const handleRestoreHistoricalIteration = async () => {
+    if (!isHistoricalView || selectedHistoryId === 'current') return;
+    const selectedItem = historyList.find((h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId);
+    const label = selectedItem ? formatIterationLabel(selectedItem) : 'this historical iteration';
+
+    setConfirmState({
+      isOpen: true,
+      title: 'Restore Historical Version',
+      message: `Are you sure you want to restore ${label}? This will replace your current deck list with this snapshot and commit it as your active version.`,
+      confirmText: 'Restore Version',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setConfirmState((prev) => ({ ...prev, isOpen: false }));
+        try {
+          setIsSaving(true);
+          const restored = await DeckService.revertToIteration(deck.id, selectedHistoryId);
+          if (restored) {
+            onUpdateDeck(restored);
+            setSelectedHistoryId('current');
+            setHistoricalDeck(null);
+            setHasUnsavedChanges(false);
+            DeckService.setDeckHasUnsavedChanges(deck.id, false);
+            await refreshHistory();
+            setPriceRefreshMessage('Restored historical version successfully!');
+            setTimeout(() => setPriceRefreshMessage(null), 3500);
+          }
+        } catch (err: any) {
+          setPriceRefreshMessage('Failed to restore iteration: ' + (err.message || 'Error'));
+          setTimeout(() => setPriceRefreshMessage(null), 4000);
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    });
+  };
+
+  const handleDeleteHistoricalIteration = (historyIdToDelete: string) => {
+    if (!historyIdToDelete || historyIdToDelete === 'current') return;
+    const targetItem = historyList.find((h) => (h.id || h.historyId) === historyIdToDelete || h.historyId === historyIdToDelete);
+    const label = targetItem ? formatIterationLabel(targetItem) : 'this historical iteration';
+
+    setConfirmState({
+      isOpen: true,
+      title: 'Delete Historical Snapshot',
+      message: `Are you sure you want to permanently delete ${label}? This snapshot cannot be recovered.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        try {
+          const success = await DeckService.deleteDeckHistory(deck.id, historyIdToDelete);
+          if (success) {
+            // Keep the same deck open and just display the current live version
+            setSelectedHistoryId('current');
+            setHistoricalDeck(null);
+            setShowCompareModal(false);
+            await refreshHistory();
+            setPriceRefreshMessage('Historical snapshot deleted. Displaying current live version.');
+            setTimeout(() => setPriceRefreshMessage(null), 3000);
+          } else {
+            setPriceRefreshMessage('Failed to delete historical snapshot.');
+            setTimeout(() => setPriceRefreshMessage(null), 3000);
+          }
+        } catch (err: any) {
+          setPriceRefreshMessage('Error deleting snapshot: ' + (err.message || 'Error'));
+          setTimeout(() => setPriceRefreshMessage(null), 3000);
+        }
+      },
+    });
+  };
+
+  const stats = calculateDeckStats(activeDeck);
 
   // Commander calculations
-  const commanderCards = deck.cards.filter((c) => c.category === 'commander');
+  const commanderCards = activeDeck.cards.filter((c) => c.category === 'commander');
   const firstCmdrPartnerInfo = commanderCards.length === 1 ? getCardPartnerInfo(commanderCards[0]) : null;
   const commanderName = commanderCards.length > 1
     ? commanderCards.map((c) => c.name).join(' // ')
@@ -378,13 +559,48 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
   };
 
-  const handleOverwriteDeck = async (overwrittenDeck: Deck) => {
-    await DeckService.saveDeck(overwrittenDeck);
+  const handleOverwriteDeck = async (overwrittenDeck: Deck, originalTargetDeck?: Deck) => {
+    // 1. Gather the current state of the existing deck before overwriting
+    const existingDeckToArchive: Deck = originalTargetDeck || {
+      ...deck,
+      name: title,
+      description: description,
+      format: format,
+      updatedAt: Date.now(),
+    };
+
+    // 2. Call the save function on the existing deck so it gets committed and preserved in history
+    if (onSaveDeck) {
+      await onSaveDeck(existingDeckToArchive);
+    } else {
+      await DeckService.saveDeck(existingDeckToArchive);
+    }
+
+    // 3. Now save the newly imported overwritten deck, which replaces the current deck in DB
+    // and triggers the backend to snapshot the existing deck in history
+    if (onSaveDeck) {
+      await onSaveDeck(overwrittenDeck);
+    } else {
+      await DeckService.saveDeck(overwrittenDeck);
+    }
+
+    // 4. Update the editor state to reflect the newly imported deck
     onUpdateDeck(overwrittenDeck);
     setTitle(overwrittenDeck.name);
     setFormat(overwrittenDeck.format);
     setDescription(overwrittenDeck.description || '');
-    setPriceRefreshMessage(`Deck "${overwrittenDeck.name}" overwritten with ${overwrittenDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards!`);
+    setHasUnsavedChanges(false);
+    DeckService.setDeckHasUnsavedChanges(overwrittenDeck.id, false);
+
+    // 5. Refresh history list so that comparison and rollback immediately reflect the archived iteration
+    try {
+      const updatedHistory = await DeckService.getDeckHistory(overwrittenDeck.id);
+      setHistoryList(updatedHistory || []);
+    } catch (e) {
+      console.warn('Failed to refresh deck history after overwrite:', e);
+    }
+
+    setPriceRefreshMessage(`Deck "${overwrittenDeck.name}" overwritten with ${overwrittenDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards! Existing deck saved to history.`);
     setTimeout(() => setPriceRefreshMessage(null), 3500);
   };
 
@@ -427,9 +643,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         isOpen: true,
         title: 'Unsaved Changes',
         message: 'You have unsaved changes in this deck session. Would you like to save them before leaving?',
+        confirmText: 'Save & Exit',
+        cancelText: 'Discard & Exit',
         onConfirm: async () => {
-          setConfirmState((prev) => ({ ...prev, isOpen: false }));
           await handleSave();
+          onBack();
+        },
+        onCancel: () => {
+          setHasUnsavedChanges(false);
+          DeckService.revertDeck(deck.id);
           onBack();
         },
       });
@@ -473,9 +695,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   // Main cards include all mainboard cards; commanders are kept separate in their own panel at the top
-  const mainCards = sortCards(deck.cards.filter((c) => c.category === 'main'));
-  const sideCards = sortCards(deck.cards.filter((c) => c.category === 'sideboard'));
-  const maybeCards = sortCards(deck.cards.filter((c) => c.category === 'maybeboard'));
+  const mainCards = sortCards(activeDeck.cards.filter((c) => c.category === 'main'));
+  const sideCards = sortCards(activeDeck.cards.filter((c) => c.category === 'sideboard'));
+  const maybeCards = sortCards(activeDeck.cards.filter((c) => c.category === 'maybeboard'));
 
   // Subgroup mainboard cards by Type
   const groupCardsByType = (cards: DeckCard[]) => {
@@ -829,26 +1051,43 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </div>
               )}
 
-              {/* Top Right: Save Deck Button (Slightly bigger) */}
+              {/* Top Right: Save Deck Button or Restore Version Button */}
               <div className="flex items-center gap-2 shrink-0 sm:ml-auto lg:ml-0">
-                <button
-                  type="button"
-                  onClick={() => handleSave()}
-                  disabled={isSaving}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-98 ${
-                    hasUnsavedChanges
-                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600'
-                  }`}
-                  title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
-                >
-                  {isSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  ) : (
-                    <Save className={`w-4 h-4 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
-                  )}
-                  <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
-                </button>
+                {isHistoricalView ? (
+                  <button
+                    type="button"
+                    onClick={handleRestoreHistoricalIteration}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                    title="Restore this historical version as your active deck"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : (
+                      <RotateCcw className="w-4 h-4 text-white" />
+                    )}
+                    <span>{isSaving ? 'Restoring...' : 'Restore Version'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSave()}
+                    disabled={isSaving}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-98 ${
+                      hasUnsavedChanges
+                        ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600'
+                    }`}
+                    title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : (
+                      <Save className={`w-4 h-4 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
+                    )}
+                    <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -888,7 +1127,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     title="Compare deck iterations via /mtgtools/comparefiles"
                   >
                     <GitCompare className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Compare</span>
+                    <span>{isHistoricalView ? 'Compare with Live' : 'Compare'}</span>
                   </button>
 
                   <button
@@ -929,8 +1168,47 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </div>
               </div>
 
-              {/* Far Right below the Save button: Notice & Format dropdown */}
-              <div className="flex items-center gap-2 shrink-0 ml-auto">
+              {/* Far Right below the Save button: Notice, Historical Dropdown, & Format dropdown */}
+              <div className="flex items-center gap-2 shrink-0 ml-auto flex-wrap">
+                {/* Historical Version Dropdown */}
+                <div
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs shadow-xs transition-colors border ${
+                    isHistoricalView
+                      ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  <Clock className={`w-3.5 h-3.5 shrink-0 ${isHistoricalView ? 'text-amber-400' : 'text-slate-400'}`} />
+                  <select
+                    value={selectedHistoryId}
+                    onChange={(e) => setSelectedHistoryId(e.target.value)}
+                    className="bg-transparent text-xs font-semibold outline-none cursor-pointer capitalize pr-1 text-inherit max-w-[200px] sm:max-w-xs truncate"
+                    title="Select historical iteration to view"
+                  >
+                    <option value="current" className="bg-slate-900 text-slate-200">
+                      Current Version {historyList.length === 0 ? '(No History)' : '(Live Draft)'}
+                    </option>
+                    {historyList.map((item, idx) => {
+                      const hId = item.id || item.historyId;
+                      return (
+                        <option key={hId || idx} value={hId} className="bg-slate-900 text-slate-200">
+                          {formatIterationLabel(item, idx)}
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {isHistoricalView && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteHistoricalIteration(selectedHistoryId)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors cursor-pointer shrink-0 ml-0.5"
+                      title="Delete this historical iteration"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    </button>
+                  )}
+                </div>
                 {/* Format Notice Dropdown */}
                 {stats.illegalCards.length > 0 && (
                   <div className="relative shrink-0 z-50">
@@ -1008,6 +1286,82 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           )}
         </div>
       </div>
+
+      {/* Historical Loading Indicator */}
+      {isHistoricalLoading && (
+        <div className="mb-4 p-4 rounded-2xl bg-slate-900/90 border border-amber-500/40 flex items-center justify-center gap-2 text-xs text-amber-300 shadow-md">
+          <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+          <span>Loading historical iteration snapshot...</span>
+        </div>
+      )}
+
+      {/* Historical Version Active Banner */}
+      {isHistoricalView && !isHistoricalLoading && (
+        <div className="mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xl animate-in fade-in duration-200">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-amber-200 text-sm">
+                  Historical Snapshot: {selectedHistoryItem ? formatIterationLabel(selectedHistoryItem) : 'Archived Iteration'}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold uppercase tracking-wider">
+                  Read-Only
+                </span>
+              </div>
+              <p className="text-amber-300/70 text-[11px] mt-0.5">
+                You are viewing an archived snapshot of this deck. Restore this version to make it your current active deck, or delete it from history.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap">
+            <button
+              type="button"
+              onClick={() => setShowCompareModal(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs shadow-md shadow-violet-600/25 active:scale-98 transition-all cursor-pointer"
+              title="Compare this historical snapshot against the current live version"
+            >
+              <GitCompare className="w-3.5 h-3.5" />
+              <span>Compare with Live Version</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleRestoreHistoricalIteration}
+              disabled={isSaving}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-md shadow-amber-600/25 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+              title="Restore this version as your current working deck"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Restore Version</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDeleteHistoricalIteration(selectedHistoryId)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 font-semibold text-xs transition-colors cursor-pointer"
+              title="Permanently delete this snapshot from history"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Delete Snapshot</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedHistoryId('current');
+                setHistoricalDeck(null);
+              }}
+              className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition-colors cursor-pointer"
+              title="Return to the live current version of this deck"
+            >
+              <span>Live Version &rarr;</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Category Navigation & Layout Options Row */}
       <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3 flex-wrap">
@@ -1099,9 +1453,20 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
 
           <button
-            onClick={() => onOpenSearch(activeCategoryTab)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-all shadow-md cursor-pointer hover:scale-102 active:scale-98"
-            title="Search and add cards to this deck"
+            onClick={() => {
+              if (isHistoricalView) {
+                setPriceRefreshMessage('Cannot add cards to a historical iteration. Restore this version first.');
+                setTimeout(() => setPriceRefreshMessage(null), 3000);
+                return;
+              }
+              onOpenSearch(activeCategoryTab);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer ${
+              isHistoricalView
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20 hover:scale-102 active:scale-98'
+            }`}
+            title={isHistoricalView ? 'Historical snapshot is read-only' : 'Search and add cards to this deck'}
           >
             <Plus className="w-3.5 h-3.5" />
             <span>+ Add Cards</span>
@@ -1290,16 +1655,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </button>
       </div>
 
-      {/* Delete Confirmation Modal */}
+      {/* Confirmation Modal */}
       <ConfirmModal
         isOpen={confirmState.isOpen}
         title={confirmState.title}
         message={confirmState.message}
+        confirmText={confirmState.confirmText || 'Confirm'}
+        cancelText={confirmState.cancelText || 'Cancel'}
         onConfirm={() => {
           confirmState.onConfirm();
           setConfirmState((prev) => ({ ...prev, isOpen: false }));
         }}
-        onCancel={() => setConfirmState((prev) => ({ ...prev, isOpen: false }))}
+        onCancel={() => {
+          if (confirmState.onCancel) {
+            confirmState.onCancel();
+          }
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+        }}
       />
 
       {/* Card Detail / Oracle Inspector */}
@@ -1312,25 +1684,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         />
       )}
 
-      {/* Unsaved Changes Confirmation Modal */}
-      <ConfirmModal
-        isOpen={confirmState.isOpen}
-        title={confirmState.title}
-        message={confirmState.message}
-        confirmText="Save & Exit"
-        cancelText="Discard & Exit"
-        onConfirm={confirmState.onConfirm}
-        onCancel={() => {
-          setConfirmState((prev) => ({ ...prev, isOpen: false }));
-          setHasUnsavedChanges(false);
-          DeckService.revertDeck(deck.id);
-          onBack();
-        }}
-      />
-
       {/* Export / Import Multi-format Modal */}
       <DeckExportModal
-        deck={deck}
+        deck={{
+          ...activeDeck,
+          name: isHistoricalView ? activeDeck.name : title,
+          description: isHistoricalView ? activeDeck.description : description,
+          format: activeDeck.format,
+        }}
+        isHistorical={isHistoricalView}
         existingDecks={DeckService.getLocalDecks()}
         isOpen={showExportModal}
         onClose={() => {
@@ -1356,6 +1718,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         onClose={() => setShowCompareModal(false)}
         deck={deck}
         historyList={historyList}
+        initialBaseId={isHistoricalView ? selectedHistoryId : undefined}
+        onDeleteIteration={handleDeleteHistoricalIteration}
       />
 
       {/* Game Summary Modal */}
@@ -1363,7 +1727,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         <GameSummaryModal
           isOpen={showGameSummaryModal}
           onClose={() => setShowGameSummaryModal(false)}
-          deck={deck}
+          deck={activeDeck}
         />
       )}
     </div>
@@ -1409,101 +1773,122 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       >
         {/* Top Row: Controls (Quantity, Location, Commander status, Remove) */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Quantity stepper */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shrink-0 shadow-sm">
-              <button
-                onClick={() => handleUpdateCardQuantity(card.id, -1)}
-                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                title="Decrease"
-              >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <span className="w-7 text-center text-xs font-bold text-slate-100">{card.quantity}</span>
-              <button
-                onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                disabled={isThisCommander && card.quantity >= 1}
-                className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Category Quick Move Buttons */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
-              <button
-                onClick={() => handleChangeCardCategory(card.id, 'main')}
-                className={`px-2 py-1.5 transition-colors cursor-pointer ${
-                  card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                Main
-              </button>
-              {isThisCommander ? (
-                <button
-                  onClick={() => handleChangeCardCategory(card.id, 'main')}
-                  className="px-2 py-1.5 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
-                  title="Click to remove Commander status"
-                >
-                  👑 Cmdr
-                </button>
-              ) : canAddAsCommander ? (
-                <button
-                  onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                  className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
-                  title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
-                >
-                  {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
-                </button>
-              ) : null}
-              <button
-                onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                Side
-              </button>
-              <button
-                onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                Maybe
-              </button>
-            </div>
-
-            {/* Commander Badge if active commander */}
-            {isThisCommander && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold">
-                <Crown className="w-3 h-3 text-fuchsia-400" />
-                <span>{commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}</span>
+          {isHistoricalView ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-slate-200 shadow-sm">
+                {card.quantity}x
               </span>
-            )}
+              {isThisCommander && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold">
+                  <Crown className="w-3 h-3 text-fuchsia-400" />
+                  <span>{commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}</span>
+                </span>
+              )}
+              {card.isFoil && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold">
+                  <Sparkles className="w-2.5 h-2.5" /> Foil
+                </span>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Quantity stepper */}
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shrink-0 shadow-sm">
+                  <button
+                    onClick={() => handleUpdateCardQuantity(card.id, -1)}
+                    className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Decrease"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-7 text-center text-xs font-bold text-slate-100">{card.quantity}</span>
+                  <button
+                    onClick={() => handleUpdateCardQuantity(card.id, 1)}
+                    disabled={isThisCommander && card.quantity >= 1}
+                    className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-            {/* Set as Commander / Partner Button */}
-            {canAddAsCommander && (
+                {/* Category Quick Move Buttons */}
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
+                  <button
+                    onClick={() => handleChangeCardCategory(card.id, 'main')}
+                    className={`px-2 py-1.5 transition-colors cursor-pointer ${
+                      card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    Main
+                  </button>
+                  {isThisCommander ? (
+                    <button
+                      onClick={() => handleChangeCardCategory(card.id, 'main')}
+                      className="px-2 py-1.5 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
+                      title="Click to remove Commander status"
+                    >
+                      👑 Cmdr
+                    </button>
+                  ) : canAddAsCommander ? (
+                    <button
+                      onClick={() => handleChangeCardCategory(card.id, 'commander')}
+                      className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
+                      title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+                    >
+                      {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+                    className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                      card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    Side
+                  </button>
+                  <button
+                    onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+                    className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                      card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    Maybe
+                  </button>
+                </div>
+
+                {/* Commander Badge if active commander */}
+                {isThisCommander && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold">
+                    <Crown className="w-3 h-3 text-fuchsia-400" />
+                    <span>{commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}</span>
+                  </span>
+                )}
+
+                {/* Set as Commander / Partner Button */}
+                {canAddAsCommander && (
+                  <button
+                    onClick={() => handleChangeCardCategory(card.id, 'commander')}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold transition-colors shadow-sm cursor-pointer"
+                    title={commanderCards.length === 1 ? 'Set as Partner Commander' : 'Set as Commander'}
+                  >
+                    <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
+                    <span>{commanderCards.length === 1 ? '+ Partner' : 'Set Commander'}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Remove Card */}
               <button
-                onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold transition-colors shadow-sm cursor-pointer"
-                title={commanderCards.length === 1 ? 'Set as Partner Commander' : 'Set as Commander'}
+                onClick={() => handleRemoveCard(card.id)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+                title="Remove card"
               >
-                <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
-                <span>{commanderCards.length === 1 ? '+ Partner' : 'Set Commander'}</span>
+                <X className="w-4 h-4" />
               </button>
-            )}
-          </div>
-
-          {/* Remove Card */}
-          <button
-            onClick={() => handleRemoveCard(card.id)}
-            className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
-            title="Remove card"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            </>
+          )}
         </div>
 
         {/* Bottom Row: Card Details */}
@@ -1627,36 +2012,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
 
           <div className="flex items-center justify-between border-t border-slate-800/60 pt-2">
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-md overflow-hidden text-xs">
-              <button
-                type="button"
-                onClick={() => handleUpdateCardQuantity(card.id, -1)}
-                className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                <Minus className="w-2.5 h-2.5" />
-              </button>
-              <span className="w-6 text-center font-bold text-slate-200 text-[11px] font-mono">
-                {card.quantity}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                disabled={isThisCommander && card.quantity >= 1}
-                className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
-              >
-                <Plus className="w-2.5 h-2.5" />
-              </button>
-            </div>
+            {isHistoricalView ? (
+              <div className="flex items-center justify-between w-full text-xs text-slate-400 font-mono">
+                <span className="font-bold text-slate-200">{card.quantity}x</span>
+                <span className="text-[10px] uppercase font-semibold text-amber-400/80">Archived</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-md overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateCardQuantity(card.id, -1)}
+                    className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
+                  >
+                    <Minus className="w-2.5 h-2.5" />
+                  </button>
+                  <span className="w-6 text-center font-bold text-slate-200 text-[11px] font-mono">
+                    {card.quantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateCardQuantity(card.id, 1)}
+                    disabled={isThisCommander && card.quantity >= 1}
+                    className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                  </button>
+                </div>
 
-            <button
-              type="button"
-              onClick={() => handleRemoveCard(card.id)}
-              className="p-1 rounded-md text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-              title="Remove from deck"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveCard(card.id)}
+                  className="p-1 rounded-md text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                  title="Remove from deck"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Quick Category Relocation Buttons (Main, Side, Maybe, and Commander/Partner if eligible) */}
