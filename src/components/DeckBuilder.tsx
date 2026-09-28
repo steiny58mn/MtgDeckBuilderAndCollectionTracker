@@ -1784,11 +1784,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <button
             type="button"
             onClick={() => {
-              setViewMode('tabbed');
               setActiveCategoryTab('main');
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-              viewMode === 'tabbed' && activeCategoryTab === 'main'
+              activeCategoryTab === 'main'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -1799,11 +1798,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <button
             type="button"
             onClick={() => {
-              setViewMode('tabbed');
               setActiveCategoryTab('sideboard');
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-              viewMode === 'tabbed' && activeCategoryTab === 'sideboard'
+              activeCategoryTab === 'sideboard'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -1814,11 +1812,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <button
             type="button"
             onClick={() => {
-              setViewMode('tabbed');
               setActiveCategoryTab('maybeboard');
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-              viewMode === 'tabbed' && activeCategoryTab === 'maybeboard'
+              activeCategoryTab === 'maybeboard'
                 ? 'bg-slate-800 text-violet-400 border border-fuchsia-500/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -2353,8 +2350,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const [activeCardIndex, setActiveCardIndex] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
+    const handleMouseEnter = () => {
+      if (pile.cards.length === 1) {
+        setActiveCardIndex(0);
+      }
+    };
+
     const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!containerRef.current || pile.cards.length <= 1) return;
+      if (!containerRef.current || pile.cards.length === 0) return;
+
+      if (pile.cards.length === 1) {
+        setActiveCardIndex(0);
+        return;
+      }
 
       const rect = containerRef.current.getBoundingClientRect();
       const mouseY = e.clientY - rect.top;
@@ -2417,6 +2425,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return (
       <div
         ref={containerRef}
+        onMouseEnter={handleMouseEnter}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         className="flex flex-col relative w-full pt-1 pb-1"
@@ -2559,46 +2568,46 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
             </span>
           ) : (
-            <div className="flex items-center bg-slate-900/90 border border-slate-800 rounded overflow-hidden text-[9px] font-medium shrink-0">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleChangeCardCategory(card.id, 'main');
-                }}
-                className={`px-1.5 py-0.5 text-center transition-colors cursor-pointer ${
-                  card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Mainboard"
-              >
-                Main
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleChangeCardCategory(card.id, 'sideboard');
-                }}
-                className={`px-1.5 py-0.5 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Sideboard"
-              >
-                Side
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleChangeCardCategory(card.id, 'maybeboard');
-                }}
-                className={`px-1.5 py-0.5 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Maybeboard"
-              >
-                Maybe
-              </button>
+            <div className="flex items-center bg-slate-900/90 border border-slate-800 rounded overflow-hidden divide-x divide-slate-800 text-[10px] font-bold shrink-0">
+              {card.category !== 'main' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleChangeCardCategory(card.id, 'main');
+                  }}
+                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Move to Mainboard"
+                >
+                  M
+                </button>
+              )}
+              {card.category !== 'sideboard' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleChangeCardCategory(card.id, 'sideboard');
+                  }}
+                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Move to Sideboard"
+                >
+                  S
+                </button>
+              )}
+              {card.category !== 'maybeboard' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleChangeCardCategory(card.id, 'maybeboard');
+                  }}
+                  className="px-1.5 py-0.5 text-center text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Move to Maybeboard"
+                >
+                  Mb
+                </button>
+              )}
             </div>
           )}
 
@@ -2632,13 +2641,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           </div>
 
-          {/* Right: Price & Trash */}
-          <div className="flex items-center gap-1 shrink-0">
-            {unitPrice && (
-              <span className="text-[9px] font-mono text-emerald-400 font-semibold bg-slate-900/80 px-1 py-0.5 rounded border border-slate-800">
-                ${unitPrice}
-              </span>
-            )}
+          {/* Right: Trash */}
+          <div className="flex items-center shrink-0">
             <button
               type="button"
               onClick={(e) => {
@@ -2816,42 +2820,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </button>
                 </div>
 
-                {/* Category Quick Move Buttons (EXCLUDED from Commander) */}
+                {/* Category Quick Move Buttons (EXCLUDED from Commander and current section) */}
                 {!isThisCommander && (
-                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
-                    <button
-                      onClick={() => handleChangeCardCategory(card.id, 'main')}
-                      className={`px-2 py-1.5 transition-colors cursor-pointer ${
-                        card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                      }`}
-                    >
-                      Main
-                    </button>
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 text-[10px] shrink-0 font-medium shadow-sm">
+                    {card.category !== 'main' && (
+                      <button
+                        onClick={() => handleChangeCardCategory(card.id, 'main')}
+                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        title="Move to Mainboard"
+                      >
+                        Main
+                      </button>
+                    )}
                     {canAddAsCommander && (
                       <button
                         onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                        className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
+                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
                         title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
                       >
                         {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
                       </button>
                     )}
-                    <button
-                      onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                      className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                        card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                      }`}
-                    >
-                      Side
-                    </button>
-                    <button
-                      onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                      className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                        card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                      }`}
-                    >
-                      Maybe
-                    </button>
+                    {card.category !== 'sideboard' && (
+                      <button
+                        onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        title="Move to Sideboard"
+                      >
+                        Side
+                      </button>
+                    )}
+                    {card.category !== 'maybeboard' && (
+                      <button
+                        onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+                        className="px-2 py-1.5 transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                        title="Move to Maybeboard"
+                      >
+                        Maybe
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -3012,58 +3019,52 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             )}
           </div>
 
-          {/* Quick Category Relocation Buttons (EXCLUDED from Commander) */}
+          {/* Quick Category Relocation Buttons (EXCLUDED from Commander and current section) */}
           {!isThisCommander && (
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] font-medium shadow-xs mt-1 w-full">
-              <button
-                type="button"
-                onClick={() => handleChangeCardCategory(card.id, 'main')}
-                className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
-                  card.category === 'main'
-                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Mainboard"
-              >
-                Main
-              </button>
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 text-[10px] font-medium shadow-xs mt-1 w-full">
+              {card.category !== 'main' && (
+                <button
+                  type="button"
+                  onClick={() => handleChangeCardCategory(card.id, 'main')}
+                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  title="Move to Mainboard"
+                >
+                  Main
+                </button>
+              )}
 
               {canAddAsCommander && (
                 <button
                   type="button"
                   onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                  className="px-1.5 py-1 transition-colors border-l border-slate-800 text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
+                  className="px-1.5 py-1 transition-colors text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
                   title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
                 >
                   {commanderCards.length === 1 ? '+P' : 'Cmdr'}
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'sideboard'
-                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Sideboard"
-              >
-                Side
-              </button>
+              {card.category !== 'sideboard' && (
+                <button
+                  type="button"
+                  onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  title="Move to Sideboard"
+                >
+                  Side
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                  card.category === 'maybeboard'
-                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-                title="Move to Maybeboard"
-              >
-                Maybe
-              </button>
+              {card.category !== 'maybeboard' && (
+                <button
+                  type="button"
+                  onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+                  className="flex-1 py-1 text-center transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                  title="Move to Maybeboard"
+                >
+                  Maybe
+                </button>
+              )}
             </div>
           )}
         </div>
