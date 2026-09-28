@@ -14,59 +14,102 @@ export interface DualClickCardInfo {
 
 export function useCardDualClickPeek() {
   const [peekCard, setPeekCard] = useState<DualClickCardInfo | null>(null);
-  const leftDownTimeRef = useRef<number>(0);
-  const rightDownTimeRef = useRef<number>(0);
+  const lastLeftDownTimeRef = useRef<number>(0);
+  const lastRightDownTimeRef = useRef<number>(0);
   const isLeftDownRef = useRef<boolean>(false);
   const isRightDownRef = useRef<boolean>(false);
   const chordTriggeredRef = useRef<boolean>(false);
   const chordTriggeredTimeRef = useRef<number>(0);
 
+  const triggerChord = (e: React.SyntheticEvent, cardInfo: DualClickCardInfo) => {
+    chordTriggeredRef.current = true;
+    chordTriggeredTimeRef.current = Date.now();
+    e.preventDefault();
+    e.stopPropagation();
+    setPeekCard(cardInfo);
+  };
+
   const handleCardMouseDown = (e: React.MouseEvent, cardInfo: DualClickCardInfo) => {
     const now = Date.now();
-    if (e.button === 0) {
-      isLeftDownRef.current = true;
-      leftDownTimeRef.current = now;
-    } else if (e.button === 2) {
-      isRightDownRef.current = true;
-      rightDownTimeRef.current = now;
+
+    // Middle-click (scroll wheel) also opens quick peek
+    if (e.button === 1) {
+      triggerChord(e, cardInfo);
+      return;
     }
 
-    // Check if both buttons are down or were pressed within 350ms of each other
-    const bothButtonsHeld = (e.buttons & 1) !== 0 && (e.buttons & 2) !== 0;
-    const bothPressedRecently =
-      isLeftDownRef.current &&
-      isRightDownRef.current &&
-      Math.abs(leftDownTimeRef.current - rightDownTimeRef.current) < 350;
+    if (e.button === 0) {
+      isLeftDownRef.current = true;
+      lastLeftDownTimeRef.current = now;
+    } else if (e.button === 2) {
+      isRightDownRef.current = true;
+      lastRightDownTimeRef.current = now;
+    }
 
-    if (bothButtonsHeld || bothPressedRecently) {
-      chordTriggeredRef.current = true;
-      chordTriggeredTimeRef.current = now;
-      e.preventDefault();
-      e.stopPropagation();
-      setPeekCard(cardInfo);
+    // Condition 1: Both buttons currently held down
+    const bothButtonsHeld = (e.buttons & 1) !== 0 && (e.buttons & 2) !== 0;
+
+    // Condition 2: Both buttons pressed down within 500ms of each other
+    const bothPressedRecently =
+      Math.abs(lastLeftDownTimeRef.current - lastRightDownTimeRef.current) < 500 &&
+      lastLeftDownTimeRef.current > 0 &&
+      lastRightDownTimeRef.current > 0 &&
+      now - Math.max(lastLeftDownTimeRef.current, lastRightDownTimeRef.current) < 600;
+
+    // Condition 3: One button held while the other was just pressed
+    const oneHeldOneRecent =
+      ((e.buttons & 1) !== 0 && now - lastRightDownTimeRef.current < 500) ||
+      ((e.buttons & 2) !== 0 && now - lastLeftDownTimeRef.current < 500);
+
+    if (bothButtonsHeld || bothPressedRecently || oneHeldOneRecent) {
+      triggerChord(e, cardInfo);
     }
   };
 
-  const handleCardContextMenu = (e: React.MouseEvent) => {
+  const handleCardMouseUp = (e: React.MouseEvent, cardInfo: DualClickCardInfo) => {
     const now = Date.now();
-    // Prevent browser context menu if dual click was triggered or left was down
+    const bothPressedRecently =
+      Math.abs(lastLeftDownTimeRef.current - lastRightDownTimeRef.current) < 500 &&
+      lastLeftDownTimeRef.current > 0 &&
+      lastRightDownTimeRef.current > 0 &&
+      now - Math.max(lastLeftDownTimeRef.current, lastRightDownTimeRef.current) < 600;
+
+    if (bothPressedRecently) {
+      triggerChord(e, cardInfo);
+    }
+  };
+
+  const handleCardContextMenu = (e: React.MouseEvent, cardInfo?: DualClickCardInfo) => {
+    // ALWAYS suppress browser context menu on cards
+    e.preventDefault();
+    e.stopPropagation();
+
+    const now = Date.now();
+    lastRightDownTimeRef.current = now;
+
+    // If left button was clicked recently or is held down, trigger chord
     if (
-      chordTriggeredRef.current ||
-      isLeftDownRef.current ||
-      (e.buttons & 1) !== 0 ||
-      now - leftDownTimeRef.current < 450 ||
-      now - chordTriggeredTimeRef.current < 500
+      cardInfo &&
+      (isLeftDownRef.current ||
+        (e.buttons & 1) !== 0 ||
+        now - lastLeftDownTimeRef.current < 500)
     ) {
-      e.preventDefault();
-      e.stopPropagation();
-      chordTriggeredRef.current = false;
+      triggerChord(e, cardInfo);
+    }
+  };
+
+  const handleCardAuxClick = (e: React.MouseEvent, cardInfo: DualClickCardInfo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.button === 1) {
+      triggerChord(e, cardInfo);
     }
   };
 
   const wasChordTriggeredRecently = () => {
     return (
       chordTriggeredRef.current ||
-      Date.now() - chordTriggeredTimeRef.current < 400
+      Date.now() - chordTriggeredTimeRef.current < 600
     );
   };
 
@@ -89,7 +132,9 @@ export function useCardDualClickPeek() {
     wasChordTriggeredRecently,
     getCardChordProps: (cardInfo: DualClickCardInfo) => ({
       onMouseDown: (e: React.MouseEvent) => handleCardMouseDown(e, cardInfo),
-      onContextMenu: handleCardContextMenu,
+      onMouseUp: (e: React.MouseEvent) => handleCardMouseUp(e, cardInfo),
+      onContextMenu: (e: React.MouseEvent) => handleCardContextMenu(e, cardInfo),
+      onAuxClick: (e: React.MouseEvent) => handleCardAuxClick(e, cardInfo),
     }),
   };
 }

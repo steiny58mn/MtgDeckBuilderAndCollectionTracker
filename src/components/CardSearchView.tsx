@@ -2398,6 +2398,9 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
         </div>
       )}
 
+      {/* Dual Click Card Popup Modal */}
+      <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
+
       {/* Sticky Floating Return to Deck Button */}
       {activeDeck && onReturnToDeck && (
         <div className="fixed bottom-6 left-6 z-30">

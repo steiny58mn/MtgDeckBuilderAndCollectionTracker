@@ -2162,6 +2162,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
       {/* 1-Second Delayed Image Hover Popup */}
       <ImageHoverPopup preview={hoverPreview} />
+      <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
     </div>
   );
 
@@ -2348,9 +2349,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const piles = groupCardsIntoPiles(cards, sortCardsBy);
 
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-5 items-start pt-2 pb-16">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4 items-start pt-2 pb-16">
         {piles.map((pile) => (
-          <div key={pile.id} className="flex flex-col min-w-0">
+          <div key={pile.id} className="flex flex-col min-w-0 bg-slate-900/40 rounded-xl p-2 sm:p-2.5 border border-slate-800/60 shadow-sm">
             {/* Pile Header */}
             <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800 text-xs">
               <span className="font-bold text-slate-200 truncate">{pile.title}</span>
@@ -2364,8 +2365,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </div>
             </div>
 
-            {/* Cascading Cards Stack */}
-            <div className="flex flex-col relative w-full pt-1">
+            {/* Compact Cards Stack: Title bar + very little art */}
+            <div className="flex flex-col gap-1 w-full">
               {pile.cards.map((card, idx) => renderCardPileItem(card, idx, pile.cards.length))}
             </div>
           </div>
@@ -2376,42 +2377,59 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   function renderCardPileItem(card: DeckCard, index: number, totalInPile: number) {
     const unitPrice = getCardUnitPrice(card);
-    const thumbUrl = (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
+    const thumbUrl =
+      (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) ||
+      (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
     const isThisCommander = card.category === 'commander';
+    const isBottomCard = index === totalInPile - 1;
 
-    return (
-      <div
-        key={card.id}
-        style={{ marginTop: index > 0 ? '-68%' : '0' }}
-        className={`group relative rounded-xl overflow-hidden shadow-md transition-all duration-200 hover:z-40 hover:-translate-y-4 hover:shadow-2xl aspect-[5/7] bg-slate-950 border ${
-          isThisCommander ? 'border-fuchsia-500/80 shadow-fuchsia-500/20' : 'border-slate-800 hover:border-violet-400'
-        }`}
-      >
-        {/* Main Card Image with Dual-Click & Inspection Click */}
+    const chordProps = getCardChordProps({
+      name: card.name,
+      imageUrl: getCardLargeImageUrl(card),
+      backImageUrl: card.backImageUrl,
+      scryfallId: card.scryfallId,
+      manaCost: card.manaCost || card.mana_cost,
+      typeLine: card.type_line || card.typeLine,
+      price: unitPrice,
+      isFoil: card.isFoil,
+    });
+
+    const handleMouseEnterWithPreview = (e: React.MouseEvent) => {
+      onImageMouseEnter(e, {
+        name: card.name,
+        imageUrl: getCardLargeImageUrl(card),
+        backImageUrl: card.backImageUrl,
+        scryfallId: card.scryfallId,
+      });
+    };
+
+    if (isBottomCard) {
+      // Bottom card of the pile shows the ENTIRE card
+      return (
         <div
+          key={card.id}
           onClick={() => {
             if (wasChordTriggeredRecently()) return;
             onImageClearPreview();
             onSelectCard(toScryfallCard(card));
           }}
-          {...getCardChordProps({
-            name: card.name,
-            imageUrl: getCardLargeImageUrl(card),
-            backImageUrl: card.backImageUrl,
-            scryfallId: card.scryfallId,
-            manaCost: card.manaCost,
-            typeLine: card.type_line,
-            price: unitPrice,
-            isFoil: card.isFoil,
-          })}
-          className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden w-full h-full"
-          title="Click to inspect, or Right+Left click together to pop up larger image"
+          {...chordProps}
+          onMouseEnter={handleMouseEnterWithPreview}
+          onMouseMove={onImageMouseMove}
+          onMouseLeave={onImageMouseLeave}
+          className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-200 select-none cursor-pointer border ${
+            isThisCommander
+              ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
+              : 'border-slate-800 hover:border-violet-400 hover:shadow-xl hover:z-30 hover:-translate-y-1'
+          }`}
+          title="Click to inspect, hover to preview, or Right+Left click together to pop up large card"
         >
+          {/* Full Card Image */}
           <img
             src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}
             alt={card.name}
             loading="lazy"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover pointer-events-none select-none"
             referrerPolicy="no-referrer"
             onError={(e) => {
               if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
@@ -2421,7 +2439,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           />
 
           {/* Badges on Top */}
-          <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10">
+          <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
             {card.quantity > 1 && (
               <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[11px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
                 {card.quantity}x
@@ -2435,22 +2453,120 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
 
           {card.isFoil && (
-            <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm">
+            <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
               <Sparkles className="w-2.5 h-2.5 text-amber-400" />
             </div>
           )}
 
-          {/* Dual-click hint pill on hover */}
-          <div className="absolute inset-x-2 top-8 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex justify-center z-20">
-            <span className="px-2 py-0.5 rounded-full bg-slate-950/90 text-[10px] text-slate-300 border border-slate-700 shadow-md font-medium">
-              Dual-click to peek
-            </span>
+          {/* Hover Action Bar at Bottom of Full Card */}
+          <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-20">
+            <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUpdateCardQuantity(card.id, -1);
+                }}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Decrease quantity"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
+                {card.quantity}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUpdateCardQuantity(card.id, 1);
+                }}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Increase quantity"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
+            {unitPrice && (
+              <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
+                ${unitPrice}
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemoveCard(card.id);
+              }}
+              className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
+              title="Remove from deck"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
           </div>
         </div>
+      );
+    }
 
-        {/* Hover Action Bar at Bottom of Card */}
-        <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-30">
-          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
+    // Stacked card above the bottom: Compact strip showing title bar + very little art
+    return (
+      <div
+        key={card.id}
+        onClick={() => {
+          if (wasChordTriggeredRecently()) return;
+          onImageClearPreview();
+          onSelectCard(toScryfallCard(card));
+        }}
+        {...chordProps}
+        onMouseEnter={handleMouseEnterWithPreview}
+        onMouseMove={onImageMouseMove}
+        onMouseLeave={onImageMouseLeave}
+        className={`group relative h-11 sm:h-12 w-full rounded-lg overflow-hidden shadow-sm transition-all duration-150 select-none cursor-pointer border ${
+          isThisCommander
+            ? 'border-fuchsia-500/80 shadow-fuchsia-500/10'
+            : 'border-slate-800 hover:border-violet-400 hover:shadow-md hover:z-30 hover:-translate-y-0.5'
+        }`}
+        title="Click to inspect, hover to preview, or Right+Left click together to pop up large card"
+      >
+        {/* Card Artwork & Title Bar Banner */}
+        <img
+          src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}
+          alt={card.name}
+          loading="lazy"
+          className="absolute inset-x-0 top-0 w-full min-h-[220px] object-cover object-top pointer-events-none select-none"
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
+              e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal`;
+            }
+          }}
+        />
+
+        {/* Badges on Top */}
+        <div className="absolute top-1 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
+          {card.quantity > 1 && (
+            <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[10px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
+              {card.quantity}x
+            </span>
+          )}
+          {isThisCommander && (
+            <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[9px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
+              <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
+            </span>
+          )}
+        </div>
+
+        {card.isFoil && (
+          <div className="absolute top-1 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none group-hover:opacity-0 transition-opacity">
+            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+          </div>
+        )}
+
+        {/* Hover Action Bar on the right side */}
+        <div className="absolute inset-y-0 right-0 px-2 bg-gradient-to-l from-slate-950 via-slate-950/90 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1.5 z-20">
+          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
             <button
               type="button"
               onClick={(e) => {

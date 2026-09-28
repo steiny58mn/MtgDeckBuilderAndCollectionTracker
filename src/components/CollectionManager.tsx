@@ -1154,6 +1154,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
         confirmText="Delete"
       />
       <ImageHoverPopup preview={hoverPreview} />
+      <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
     </div>
   );
 };
