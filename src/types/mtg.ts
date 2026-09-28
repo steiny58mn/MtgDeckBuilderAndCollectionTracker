@@ -85,17 +85,22 @@ export interface DeckCard {
   name: string;
   set: string;
   set_name?: string;
+  setName?: string;
   collector_number?: string;
+  collectorNumber?: string;
   category: DeckCategory;
   quantity: number;
   isFoil?: boolean;
   mana_cost?: string;
+  manaCost?: string;
   cmc: number;
   type_line: string;
+  typeLine?: string;
   oracle_text?: string;
   keywords?: string[];
   colors?: string[];
   color_identity?: string[];
+  colorIdentity?: string[];
   rarity?: CardRarity;
   imageUrl?: string;
   backImageUrl?: string;
@@ -128,15 +133,22 @@ export interface CollectionCard {
   name: string;
   set: string;
   setName: string;
+  set_name?: string;
   collectorNumber: string;
+  collector_number?: string;
   quantity: number;
   isFoil: boolean;
   condition: CardCondition;
   cmc: number;
   mana_cost?: string;
+  manaCost?: string;
   type_line: string;
+  typeLine?: string;
+  oracle_text?: string;
+  oracleText?: string;
   colors?: string[];
   color_identity?: string[];
+  colorIdentity?: string[];
   rarity: CardRarity;
   imageUrl?: string;
   acquiredPrice?: number;
@@ -185,6 +197,7 @@ export interface DeckStats {
 
 export interface DeckHistoryItem {
   id: string; // history snapshot ID
+  historyId?: string;
   deckId: string;
   name: string;
   format: MTGFormat;
@@ -216,4 +229,15 @@ export interface DeckDiff {
   changed: DeckDiffItem[];
   totalAddedCount: number;
   totalRemovedCount: number;
+}
+
+export interface DeckComparisonSummaryResult {
+  rawApiOutput: string;
+  diffText?: string;
+  summaryTextBlock: string;
+  cutsCount: number;
+  addsCount: number;
+  netChange: number;
+  cutCards: { quantity: number; name: string }[];
+  addedCards: { quantity: number; name: string }[];
 }

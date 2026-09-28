@@ -391,21 +391,28 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     setSearchTerm('');
   };
 
-  // Helper to get count of copies of card currently in active deck
+  // Helper to get count of copies of card currently in active deck (excluding maybeboard)
   const getDeckCopies = (card: ScryfallCard): number => {
     if (!activeDeck) return 0;
     const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
     return activeDeck.cards
-      .filter((c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
+      .filter((c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
+      .reduce((sum, c) => sum + c.quantity, 0);
+  };
+
+  // Helper to get count of copies of card in a specific category
+  const getDeckCopiesByCategory = (card: ScryfallCard, category: DeckCategory): number => {
+    if (!activeDeck) return 0;
+    const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
+    return activeDeck.cards
+      .filter((c) => c.category === category && c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
       .reduce((sum, c) => sum + c.quantity, 0);
   };
 
   // Helper to determine format limit (1 for singleton/commander, 4 for other formats, 999 for basic lands/unlimited)
   const getDeckLimit = (card: ScryfallCard): number => {
-    const isBasicLand = /Basic Land/i.test(card.type_line) || /Basic Snow Land/i.test(card.type_line);
-    const hasUnlimitedRule = card.oracle_text 
-      ? /A deck can have any number of cards named/i.test(card.oracle_text)
-      : false;
+    const isBasicLand = /Basic Land/i.test(card.type_line || (card as any).typeLine || '') || /Basic Snow Land/i.test(card.type_line || (card as any).typeLine || '');
+    const hasUnlimitedRule = Boolean((card.oracle_text || card.card_faces?.[0]?.oracle_text) && /A deck can have any number of/i.test(card.oracle_text || card.card_faces?.[0]?.oracle_text || ''));
     if (isBasicLand || hasUnlimitedRule) {
       return 999;
     }
@@ -1926,39 +1933,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           {isDeckContext && activeDeck && (
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-slate-400">
-                · Adding to: <strong className="text-fuchsia-300">{activeDeck.name}</strong> ({activeDeck.format})
+                · Adding cards to: <strong className="text-fuchsia-300">{activeDeck.name}</strong> ({activeDeck.format})
               </span>
-              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-0.5 rounded-lg text-xs">
-                <span className="text-[10px] text-slate-400 pl-1.5 pr-0.5 uppercase font-bold tracking-wider">Target:</span>
-                <button
-                  type="button"
-                  onClick={() => setTargetDeckCategory('main')}
-                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
-                    targetDeckCategory === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Mainboard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTargetDeckCategory('sideboard')}
-                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
-                    targetDeckCategory === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Sideboard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTargetDeckCategory('maybeboard')}
-                  className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
-                    targetDeckCategory === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Maybeboard
-                </button>
-              </div>
-
             </div>
           )}
           {isBinderContext && (
@@ -2165,77 +2141,79 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                             );
                           }
 
-                          if (isAtLimit) {
-                            return (
-                              <button
-                                disabled
-                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-900/90 border border-fuchsia-800/40 text-fuchsia-500/60 text-xs font-semibold cursor-not-allowed"
-                                title={`Format limit reached (${deckLimit} copies allowed)`}
-                              >
-                                <Check className="w-3.5 h-3.5 text-fuchsia-500/70" />
-                                <span>At Limit ({deckCopies}/{deckLimit})</span>
-                              </button>
-                            );
-                          }
+                          const mainCopies = getDeckCopiesByCategory(card, 'main');
+                          const sideCopies = getDeckCopiesByCategory(card, 'sideboard');
+                          const maybeCopies = getDeckCopiesByCategory(card, 'maybeboard');
 
                           return (
                             <div className="flex items-center gap-1 w-full">
                               <button
-                                onClick={() => onQuickAddToDeck(card, targetDeckCategory)}
-                                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 text-xs font-bold transition-all cursor-pointer shadow-sm min-w-0"
-                                title={`Add 1 copy to ${targetDeckCategory === 'main' ? 'Mainboard' : targetDeckCategory === 'sideboard' ? 'Sideboard' : 'Maybeboard'}`}
+                                type="button"
+                                onClick={() => onQuickAddToDeck(card, 'main')}
+                                disabled={isAtLimit}
+                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                  isAtLimit
+                                    ? 'bg-slate-900 border border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                                    : initialTargetCategory === 'main'
+                                      ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
+                                      : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                }`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Mainboard${mainCopies > 0 ? ` (Currently: ${mainCopies})` : ''}`}
                               >
-                                <Plus className="w-3.5 h-3.5 shrink-0" />
-                                <span className="truncate">
-                                  {targetDeckCategory === 'main' ? 'Deck' : targetDeckCategory === 'sideboard' ? '+ Side' : '+ Maybe'}
-                                </span>
-                                {deckCopies > 0 && (
-                                  <span className="text-[10px] font-mono font-semibold opacity-80 shrink-0">({deckCopies})</span>
+                                <Plus className="w-3 h-3 shrink-0" />
+                                <span>Main</span>
+                                {mainCopies > 0 && (
+                                  <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({mainCopies})</span>
                                 )}
                               </button>
 
-                              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shrink-0 text-[10px] font-bold">
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickAddToDeck(card, 'main')}
-                                  className={`px-1.5 py-1.5 transition-colors hover:bg-slate-800 cursor-pointer ${
-                                    targetDeckCategory === 'main' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
-                                  }`}
-                                  title="Add 1 copy to Mainboard"
-                                >
-                                  Main
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickAddToDeck(card, 'sideboard')}
-                                  className={`px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 cursor-pointer ${
-                                    targetDeckCategory === 'sideboard' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
-                                  }`}
-                                  title="Add 1 copy to Sideboard"
-                                >
-                                  Side
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickAddToDeck(card, 'maybeboard')}
-                                  className={`px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 cursor-pointer ${
-                                    targetDeckCategory === 'maybeboard' ? 'text-fuchsia-400 font-black' : 'text-slate-400 hover:text-slate-200'
-                                  }`}
-                                  title="Add 1 copy to Maybeboard"
-                                >
-                                  Maybe
-                                </button>
-                                {isCandidatePartner && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onQuickAddToDeck(card, 'commander')}
-                                    className="px-1.5 py-1.5 border-l border-slate-800 transition-colors hover:bg-slate-800 text-amber-400 hover:text-amber-300 font-black cursor-pointer"
-                                    title="Add as Partner Commander"
-                                  >
-                                    +P
-                                  </button>
+                              <button
+                                type="button"
+                                onClick={() => onQuickAddToDeck(card, 'sideboard')}
+                                disabled={isAtLimit}
+                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                  isAtLimit
+                                    ? 'bg-slate-900 border border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                                    : initialTargetCategory === 'sideboard'
+                                      ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
+                                      : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                }`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Sideboard${sideCopies > 0 ? ` (Currently: ${sideCopies})` : ''}`}
+                              >
+                                <Plus className="w-3 h-3 shrink-0" />
+                                <span>Side</span>
+                                {sideCopies > 0 && (
+                                  <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({sideCopies})</span>
                                 )}
-                              </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onQuickAddToDeck(card, 'maybeboard')}
+                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                  initialTargetCategory === 'maybeboard'
+                                    ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
+                                    : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                }`}
+                                title={`Add 1 copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
+                              >
+                                <Plus className="w-3 h-3 shrink-0" />
+                                <span>Maybe</span>
+                                {maybeCopies > 0 && (
+                                  <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({maybeCopies})</span>
+                                )}
+                              </button>
+
+                              {isCandidatePartner && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectPartner(card)}
+                                  className="flex-none px-2 py-1.5 rounded-lg text-xs font-bold transition-all bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white cursor-pointer shadow-sm active:scale-95"
+                                  title={`Designate ${card.name} as Partner Commander`}
+                                >
+                                  +P
+                                </button>
+                              )}
                             </div>
                           );
                         })()

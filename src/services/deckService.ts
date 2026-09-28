@@ -4,8 +4,8 @@
  * and manages reactive in-memory state for decks and binders.
  */
 
-import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem } from '../types/mtg';
-import { fetchBatchCardPrices } from './scryfall';
+import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
+import { fetchBatchCardPrices, fetchBatchCardsCollection } from './scryfall';
 import {
   createDeckListApi,
   createDeckPickListApi,
@@ -53,7 +53,7 @@ const STORAGE_API_BASE_KEY = 'mtg_custom_api_base_url';
 const STORAGE_VAULT_KEY = 'mtg_cloud_vault_id';
 
 export const DEFAULT_API_BASE_URL = 
-  ((import.meta as any).env?.VITE_API_BASE_URL as string) || 'https://api.frostpointlabs.com';
+  ((import.meta as any).env?.VITE_API_BASE_URL as string) || 'http://localhost:5205';
 
 export const DEFAULT_BINDER: Binder = {
   id: 'binder-main',
@@ -209,6 +209,175 @@ export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
 }
 
 /**
+ * Normalizes a raw card object into a standardized DeckCard.
+ * Ensures both camelCase (C# API) and snake_case properties are populated.
+ */
+export function normalizeCard(card: any): DeckCard {
+  if (!card || typeof card !== 'object') return card;
+  const typeLine = card.type_line || card.typeLine || card.TypeLine || '';
+  const manaCost = card.mana_cost || card.manaCost || card.ManaCost || '';
+  const setName = card.set_name || card.setName || card.SetName || '';
+  const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || '';
+  const colorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || [];
+  const colors = card.colors || card.Colors || [];
+  const quantity = typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1);
+  const category = (card.category || card.Category || 'main').toLowerCase();
+
+  return {
+    ...card,
+    id: card.id || card.Id || card.cardId || card.CardId || `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    scryfallId: card.scryfallId || card.ScryfallId || '',
+    name: card.name || card.Name || '',
+    set: card.set || card.Set || '',
+    set_name: setName,
+    setName,
+    collector_number: collectorNumber,
+    collectorNumber,
+    category: category as any,
+    quantity,
+    isFoil: card.isFoil ?? card.IsFoil,
+    mana_cost: manaCost,
+    manaCost,
+    cmc: card.cmc ?? card.Cmc ?? 0,
+    type_line: typeLine,
+    typeLine,
+    oracle_text: card.oracle_text ?? card.OracleText ?? card.oracleText,
+    keywords: card.keywords ?? card.Keywords,
+    colors,
+    color_identity: colorIdentity,
+    colorIdentity,
+    rarity: card.rarity || card.Rarity || 'common',
+    imageUrl: card.imageUrl || card.ImageUrl,
+    backImageUrl: card.backImageUrl || card.BackImageUrl,
+    priceUsd: card.priceUsd ?? card.PriceUsd,
+    priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
+  };
+}
+
+/**
+ * Normalizes a raw Deck object from remote C# API or local state.
+ */
+export function normalizeDeck(deck: any): Deck {
+  if (!deck || typeof deck !== 'object') return deck;
+  const rawCards = deck.cards || deck.Cards || [];
+  const cards = Array.isArray(rawCards) ? rawCards.map(normalizeCard) : [];
+
+  return {
+    ...deck,
+    id: deck.id || deck.Id || deck.deckId || deck.DeckId || '',
+    name: deck.name || deck.Name || 'Untitled Deck',
+    description: deck.description ?? deck.Description,
+    format: (deck.format || deck.Format || 'commander').toLowerCase() as any,
+    commanderId: deck.commanderId ?? deck.CommanderId,
+    commanderName: deck.commanderName ?? deck.CommanderName,
+    commanderArtUrl: deck.commanderArtUrl ?? deck.CommanderArtUrl,
+    commanderColorIdentity: deck.commanderColorIdentity ?? deck.CommanderColorIdentity ?? [],
+    coverCardUrl: deck.coverCardUrl ?? deck.CoverCardUrl,
+    tags: deck.tags ?? deck.Tags ?? [],
+    createdAt: parseTimestamp(deck.createdAt ?? deck.CreatedAt),
+    updatedAt: parseTimestamp(deck.updatedAt ?? deck.UpdatedAt),
+    cards,
+  };
+}
+
+/**
+ * Normalizes a collection / binder card from remote C# API or local state.
+ */
+export function normalizeBinderCard(card: any): CollectionCard {
+  if (!card || typeof card !== 'object') return card;
+  const typeLine = card.type_line || card.typeLine || card.TypeLine || '';
+  const manaCost = card.mana_cost || card.manaCost || card.ManaCost || '';
+  const setName = card.setName || card.set_name || card.SetName || '';
+  const collectorNumber = card.collectorNumber || card.collector_number || card.CollectorNumber || '';
+  const colorIdentity = card.colorIdentity || card.color_identity || card.ColorIdentity || [];
+  const colors = card.colors || card.Colors || [];
+
+  return {
+    ...card,
+    id: card.id || card.Id || card.cardId || card.CardId || `bc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    scryfallId: card.scryfallId || card.ScryfallId || '',
+    name: card.name || card.Name || '',
+    set: card.set || card.Set || '',
+    setName,
+    set_name: setName,
+    collectorNumber,
+    collector_number: collectorNumber,
+    quantity: typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1),
+    isFoil: Boolean(card.isFoil ?? card.IsFoil),
+    condition: card.condition || card.Condition || 'NM',
+    cmc: card.cmc ?? card.Cmc ?? 0,
+    mana_cost: manaCost,
+    manaCost,
+    type_line: typeLine,
+    typeLine,
+    colors,
+    color_identity: colorIdentity,
+    colorIdentity,
+    rarity: card.rarity || card.Rarity || 'common',
+    imageUrl: card.imageUrl || card.ImageUrl,
+    acquiredPrice: card.acquiredPrice ?? card.AcquiredPrice,
+    currentPriceUsd: card.currentPriceUsd ?? card.CurrentPriceUsd ?? card.priceUsd,
+    addedAt: parseTimestamp(card.addedAt ?? card.AddedAt),
+    notes: card.notes ?? card.Notes,
+  };
+}
+
+/**
+ * Automatically enriches deck cards that are missing type_line / typeLine using Scryfall.
+ * Repositions cards from 'Other' to their proper type categories.
+ */
+export async function enrichDeckCards(deck: Deck): Promise<Deck> {
+  if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
+  const missing = deck.cards.filter((c) => (!c.type_line && !(c as any).typeLine) && Boolean(c.name));
+  if (missing.length === 0) return deck;
+
+  try {
+    const cardsToFetch = missing.map((c) => ({ name: c.name, set: c.set }));
+    const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
+
+    let changed = false;
+    const updatedCards = deck.cards.map((c) => {
+      if (c.type_line || (c as any).typeLine) return c;
+      const exact = (c.name || '').toLowerCase().trim();
+      const front = exact.split(' // ')[0].trim();
+      const matched = scryfallMap.get(exact) || scryfallMap.get(front);
+      if (matched) {
+        changed = true;
+        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || '';
+        const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
+        const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
+        return {
+          ...c,
+          type_line: typeLine,
+          typeLine,
+          mana_cost: manaCost,
+          manaCost,
+          cmc: matched.cmc ?? c.cmc,
+          imageUrl: img,
+          colors: matched.colors || c.colors,
+          color_identity: matched.color_identity || c.color_identity,
+          rarity: matched.rarity || c.rarity,
+          set_name: matched.set_name || c.set_name,
+        };
+      }
+      return c;
+    });
+
+    if (changed) {
+      const enrichedDeck: Deck = {
+        ...deck,
+        cards: updatedCards,
+      };
+      DeckService.updateDeckInMemory(enrichedDeck);
+      return enrichedDeck;
+    }
+  } catch (err) {
+    console.warn('[DeckService] Failed to auto-enrich cards with Scryfall:', err);
+  }
+  return deck;
+}
+
+/**
  * Fetch decks from remote C# API (/deckbuilder/decks)
  */
 export async function getRemoteDecks(): Promise<Deck[]> {
@@ -253,21 +422,23 @@ export async function getRemoteDecks(): Promise<Deck[]> {
       return [];
     }
 
-    console.log(`[DeckService] ✅ Loaded ${data.length} deck(s) from server (${durationMs}ms):`, data.map((d: any) => ({
+    const normalizedDecks: Deck[] = data.map(normalizeDeck);
+
+    console.log(`[DeckService] ✅ Loaded ${normalizedDecks.length} deck(s) from server (${durationMs}ms):`, normalizedDecks.map((d: any) => ({
       id: d.id,
       name: d.name,
       format: d.format,
-      cardCount: d.cards?.length || 0,
-      vaultId: d.vaultId ?? '(none/null)',
-      userId: d.userId ?? '(none/null)',
+      cardCount: d.cards?.reduce((sum: number, c: any) => sum + (c.quantity || 1), 0) || 0,
+      vaultId: (d as any).vaultId ?? '(none/null)',
+      userId: (d as any).userId ?? '(none/null)',
     })));
 
-    if (data.length === 0) {
+    if (normalizedDecks.length === 0) {
       console.warn(`[DeckService] ℹ️ 0 decks returned for Vault ID "${vaultId}". Note: If decks in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
     }
 
     console.groupEnd();
-    return data;
+    return normalizedDecks;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
     console.error(`[DeckService] ❌ Network/Fetch error in getRemoteDecks (${durationMs}ms):`, err);
@@ -285,11 +456,36 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
+  const preparedDeck = {
+    ...deck,
+    totalCards: (deck.cards || []).reduce((sum, c) => sum + (c.quantity || 1), 0),
+    cards: (deck.cards || []).map((c) => {
+      const typeLine = c.type_line || (c as any).typeLine || (c as any).TypeLine || '';
+      const manaCost = c.mana_cost || (c as any).manaCost || (c as any).ManaCost || '';
+      const setName = c.set_name || (c as any).setName || (c as any).SetName || '';
+      const collectorNumber = c.collector_number || (c as any).collectorNumber || (c as any).CollectorNumber || '';
+      const colorIdentity = c.color_identity || (c as any).colorIdentity || (c as any).ColorIdentity || [];
+      return {
+        ...c,
+        type_line: typeLine,
+        typeLine,
+        mana_cost: manaCost,
+        manaCost,
+        set_name: setName,
+        setName,
+        collector_number: collectorNumber,
+        collectorNumber,
+        color_identity: colorIdentity,
+        colorIdentity,
+      };
+    }),
+  };
+
   console.log(`[DeckService] 💾 Saving deck "${deck.name}" (${deck.id}) to ${targetUrl}...`, {
     deckId: deck.id,
     name: deck.name,
     format: deck.format,
-    cardCount: deck.cards?.length || 0,
+    cardCount: preparedDeck.totalCards,
     vaultId: headers['X-Vault-Id'],
   });
 
@@ -297,7 +493,7 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify(deck),
+      body: JSON.stringify(preparedDeck),
     });
     const durationMs = Math.round(performance.now() - start);
 
@@ -355,28 +551,71 @@ export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
  * Fetch binders from remote C# API (/deckbuilder/binders)
  */
 /**
+ * Safely parses any date/timestamp format (string digits ms, numeric epoch ms, unix seconds, ISO-8601 strings) into numeric milliseconds.
+ */
+export function parseTimestamp(val: any): number {
+  if (val === null || val === undefined || val === '') return Date.now();
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === 'number') {
+    if (isNaN(val) || val <= 0) return Date.now();
+    return val < 10000000000 ? val * 1000 : val;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return Date.now();
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      if (!isNaN(num) && num > 0) {
+        return num < 10000000000 ? num * 1000 : num;
+      }
+    }
+    const withT = trimmed.replace(' ', 'T');
+    const parsedWithT = Date.parse(withT);
+    if (!isNaN(parsedWithT) && parsedWithT > 0) {
+      return parsedWithT;
+    }
+    const directParsed = Date.parse(trimmed);
+    if (!isNaN(directParsed) && directParsed > 0) {
+      return directParsed;
+    }
+  }
+  return Date.now();
+}
+
+/**
  * Normalizes raw deck history JSON payloads from C# API (handles camelCase and PascalCase)
  */
 export function normalizeHistoryItem(item: any): DeckHistoryItem {
   if (!item || typeof item !== 'object') {
     return item;
   }
+  const historyId = item.historyId || item.HistoryId || item.id || item.Id || '';
+  const deckId = item.deckId || item.DeckId || (item.historyId ? (item.id || item.Id) : '') || '';
+  const archivedAtNum = parseTimestamp(item.archivedAt ?? item.ArchivedAt);
+  const createdAtNum = (item.createdAt ?? item.CreatedAt) != null ? parseTimestamp(item.createdAt ?? item.CreatedAt) : undefined;
+  const updatedAtNum = (item.updatedAt ?? item.UpdatedAt) != null ? parseTimestamp(item.updatedAt ?? item.UpdatedAt) : undefined;
+
   return {
     ...item,
-    id: item.id || item.Id || '',
-    deckId: item.deckId || item.DeckId || '',
+    id: historyId,
+    historyId: historyId,
+    deckId: deckId,
     name: item.name || item.Name || '',
     format: (item.format || item.Format || 'commander').toLowerCase(),
-    archivedAt: item.archivedAt ?? item.ArchivedAt ?? Date.now(),
-    createdAt: item.createdAt ?? item.CreatedAt,
-    updatedAt: item.updatedAt ?? item.UpdatedAt,
+    archivedAt: archivedAtNum,
+    createdAt: createdAtNum,
+    updatedAt: updatedAtNum,
     description: item.description ?? item.Description,
     commanderName: item.commanderName ?? item.CommanderName,
     commanderArtUrl: item.commanderArtUrl ?? item.CommanderArtUrl,
     commanderColorIdentity: item.commanderColorIdentity ?? item.CommanderColorIdentity ?? [],
-    cardCount: item.cardCount ?? item.CardCount ?? (Array.isArray(item.cards || item.Cards) ? (item.cards || item.Cards).length : undefined),
+    cardCount: (() => {
+      const rawCards = item.cards ?? item.Cards;
+      const sum = Array.isArray(rawCards) ? rawCards.reduce((s: number, c: any) => s + (c.quantity || c.Quantity || 1), 0) : undefined;
+      return item.cardCount ?? item.CardCount ?? item.totalCards ?? item.TotalCards ?? sum;
+    })(),
     changeSummary: item.changeSummary ?? item.ChangeSummary,
-    cards: item.cards ?? item.Cards ?? [],
+    cards: (Array.isArray(item.cards ?? item.Cards) ? (item.cards ?? item.Cards).map(normalizeCard) : []),
   };
 }
 
@@ -476,6 +715,628 @@ export async function getRemoteDeckHistorySnapshot(
   }
 }
 
+/**
+ * Known canonical MTG split and aftermath cards (printed on a single card face with 2 castable halves).
+ * For these cards, MTG APIs and parsers expect the full combined name (e.g. "Life // Death").
+ * For all other multi-faced cards (MDFCs, Transform DFCs, Adventures, Flip cards),
+ * APIs expect only the front face name (e.g. "Emeritus of Abundance" or "Bala Ged Recovery").
+ */
+export const KNOWN_SPLIT_CARDS = new Set<string>([
+  "alive // well",
+  "appeal // authority",
+  "armed // dangerous",
+  "assault // battery",
+  "assure // assemble",
+  "beck // call",
+  "bedeck // bedazzle",
+  "bind // liberate",
+  "boom // bust",
+  "bottomless pool // locker room",
+  "bound // determined",
+  "breaking // entering",
+  "carnival // carnage",
+  "catch // release",
+  "cease // desist",
+  "central elevator // promising stairs",
+  "charred foyer // warped space",
+  "chic // ago",
+  "claim // fame",
+  "collision // colossus",
+  "commit // memory",
+  "connive // concoct",
+  "consecrate // consume",
+  "consign // oblivion",
+  "coward // killer",
+  "cramped vents // access maze",
+  "crime // punishment",
+  "crude abattoir // unsavory kitchen",
+  "cut // ribbons",
+  "dazzling theater // prop room",
+  "dead // gone",
+  "defiled crypt // cadaver lab",
+  "depose // deploy",
+  "derelict attic // widow's walk",
+  "destined // lead",
+  "discovery // dispersal",
+  "dollmaker's shop // porcelain gallery",
+  "double jump // flying kick",
+  "down // dirty",
+  "driven // despair",
+  "dusk // dawn",
+  "expansion // explosion",
+  "experimental lab // staff room",
+  "failure // comply",
+  "far // away",
+  "farm // market",
+  "fast // furious",
+  "fear (split card) // loathing",
+  "find // finality",
+  "fire // ice",
+  "flesh // blood",
+  "flotsam // jetsam",
+  "flower // flourish",
+  "funeral room // awakening hall",
+  "fuss // bother",
+  "gallifrey falls // no more",
+  "give // take",
+  "glassworks // shattered yard",
+  "grand entryway // elegant rotunda",
+  "greenhouse // rickety gazebo",
+  "grind // dust",
+  "heaven // earth",
+  "hide // seek",
+  "hit // run",
+  "hustle // bustle",
+  "illusion // reality",
+  "incubation // incongruity",
+  "indulge // excess",
+  "insult // injury",
+  "integrity // intervention",
+  "invert // invent",
+  "knowing // half the battle",
+  "leave // chance",
+  "life // death",
+  "meat locker // drowned diner",
+  "mirror room // fractured realm",
+  "moldering gym // weight room",
+  "mouth // feed",
+  "naughty // nice",
+  "never // return",
+  "night // day",
+  "odds // ends",
+  "onward // victory",
+  "order // chaos",
+  "pain // suffering",
+  "painter's studio // defaced gallery",
+  "polluted cistern // dim oubliette",
+  "prepare // fight",
+  "profit // loss",
+  "protect // serve",
+  "pure // simple",
+  "push // pull",
+  "rags // riches",
+  "ready // willing",
+  "reason // believe",
+  "reduce // rubble",
+  "refuse // cooperate",
+  "repudiate // replicate",
+  "research // development",
+  "response // resurgence",
+  "restricted office // lecture hall",
+  "revival // revenge",
+  "rise // fall",
+  "road // ruin",
+  "roaring furnace // steaming sauna",
+  "rough // tumble",
+  "said // done",
+  "secret arcade // dusty parlor",
+  "smelt // herd // saw",
+  "smoky lounge // misty salon",
+  "solitary study // endless corridor",
+  "spiked corridor // torture pit",
+  "spite // malice",
+  "spring // mind",
+  "stand // deliver",
+  "start // finish",
+  "start // fire",
+  "status // statue",
+  "struggle // survive",
+  "supply // demand",
+  "surgical suite // hospital room",
+  "takesies // backsies",
+  "there // they're // their",
+  "thrash // threat",
+  "ticket booth // tunnel of hate",
+  "toil // trouble",
+  "trial // error",
+  "turn // burn",
+  "underwater tunnel // slimy aquarium",
+  "unholy annex // ritual chamber",
+  "walk-in closet // forgotten cellar",
+  "warrant // warden",
+  "wax // wane",
+  "wear // tear",
+  "who // what // when // where // why",
+  "yeah nah // nah yeah"
+]);
+
+/**
+ * Checks if a card is a true MTG split or aftermath card (e.g. "Life // Death").
+ */
+export function isSplitCard(
+  cardOrName: DeckCard | { name?: string; layout?: string; backImageUrl?: string; type_line?: string } | string
+): boolean {
+  if (!cardOrName) return false;
+
+  let name = '';
+  let layout = '';
+  let hasBackImage = false;
+  let typeLine = '';
+
+  if (typeof cardOrName === 'string') {
+    name = cardOrName;
+  } else {
+    name = cardOrName.name || '';
+    layout = (cardOrName as any).layout || '';
+    hasBackImage = !!(cardOrName as any).backImageUrl;
+    typeLine = (cardOrName as any).type_line || '';
+  }
+
+  // Cards with separate physical back faces (DFCs, MDFCs) are never split cards
+  if (hasBackImage) {
+    return false;
+  }
+
+  // Adventure cards have type_line with "Adventure" and are not split cards
+  if (typeLine.includes('Adventure')) {
+    return false;
+  }
+
+  // Explicit Scryfall layout tag
+  if (layout === 'split' || layout === 'aftermath') {
+    return true;
+  }
+
+  // If name doesn't contain a double-slash delimiter, it's not a multi-face name at all
+  if (!name.includes('//')) {
+    return false;
+  }
+
+  // Check against normalized canonical split card names
+  const normalized = name
+    .toLowerCase()
+    .replace(/\s*\/\/\s*/g, ' // ')
+    .trim();
+
+  return KNOWN_SPLIT_CARDS.has(normalized);
+}
+
+/**
+ * Resolves the appropriate card name to send when formatting card lists for remote MTG APIs
+ * (such as /mtgtools/createdecklist, /mtgtools/createdeckpicklist, and /mtgtools/comparefiles).
+ * 
+ * - If the card is a split card (like "Life // Death"), returns the full name ("Life // Death").
+ * - If the card is NOT a split card (such as MDFCs, e.g. "Emeritus of Abundance // Regrowth" or
+ *   "Bala Ged Recovery // Bala Ged Sanctuary"), returns strictly the front face name.
+ */
+export function getCardApiName(
+  cardOrName: DeckCard | { name?: string; layout?: string; backImageUrl?: string; type_line?: string } | string
+): string {
+  if (!cardOrName) return '';
+
+  const rawName = typeof cardOrName === 'string' ? cardOrName : (cardOrName.name || '');
+  const trimmed = rawName.trim();
+
+  if (!trimmed.includes('//')) {
+    return trimmed;
+  }
+
+  if (isSplitCard(cardOrName)) {
+    return trimmed;
+  }
+
+  // Not a split card: extract front face name
+  const frontFace = trimmed.split(/\s*\/\/\s*/)[0].trim();
+  return frontFace || trimmed;
+}
+
+/**
+ * Formats a deck, snapshot, or card list into plain text card lines (qty name)
+ * suitable for the C# API POST /mtgtools/comparefiles endpoint.
+ * Ensures non-split multi-faced cards only send the front face name.
+ */
+export function formatCardsForApiComparison(
+  deckOrCards: Deck | DeckHistoryItem | DeckCard[] | string
+): string {
+  if (typeof deckOrCards === 'string') {
+    return deckOrCards
+      .split(/\r?\n/)
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        const match = trimmed.match(/^(\d+\s+)(.+)$/);
+        if (match) {
+          const qtyPrefix = match[1];
+          const rawName = match[2];
+          return `${qtyPrefix}${getCardApiName(rawName)}`;
+        }
+        return getCardApiName(trimmed);
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  let cards: DeckCard[] = [];
+  if (Array.isArray(deckOrCards)) {
+    cards = deckOrCards;
+  } else if (deckOrCards && Array.isArray((deckOrCards as any).cards)) {
+    cards = (deckOrCards as any).cards;
+  }
+
+  // Aggregate quantities by API-safe card name to handle multiple printings / entries accurately
+  const cardMap = new Map<string, number>();
+  for (const c of cards) {
+    if (!c || !c.name || c.category === 'maybeboard') continue;
+    const name = getCardApiName(c);
+    if (!name) continue;
+    const qty = c.quantity || 1;
+    cardMap.set(name, (cardMap.get(name) || 0) + qty);
+  }
+
+  return Array.from(cardMap.entries())
+    .map(([name, qty]) => `${qty} ${name}`)
+    .join('\n');
+}
+
+/**
+ * Unwraps and cleans raw diff output from /mtgtools/comparefiles, handling
+ * potential JSON wrapping, escaped newlines, and surrounding quotes.
+ */
+export function cleanRawDiff(raw: string): string {
+  if (!raw) return '';
+  let str = String(raw).trim();
+
+  // Strip UTF-8 BOM if present
+  if (str.charCodeAt(0) === 0xFEFF) {
+    str = str.slice(1).trim();
+  }
+
+  if (
+    (str.startsWith('{') && str.endsWith('}')) ||
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith('[') && str.endsWith(']'))
+  ) {
+    try {
+      const parsed = JSON.parse(str);
+      if (typeof parsed === 'string') {
+        str = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        // Detect backend failure payload
+        if (parsed.success === false) {
+          throw new Error(parsed.fileInfo || parsed.message || 'Compare Decks Failed on backend');
+        }
+        str =
+          parsed.deckDifferences ||
+          parsed.result ||
+          parsed.diff ||
+          parsed.data ||
+          parsed.output ||
+          parsed.text ||
+          parsed.fileInfo ||
+          str;
+      }
+    } catch (e: any) {
+      if (e.message && e.message.includes('Compare Decks Failed')) {
+        throw e;
+      }
+      // not JSON or other parse error, keep as is
+    }
+  }
+
+  // Handle literal escaped newlines (e.g. \r\n or \n from JSON responses)
+  if (str.includes('\\n')) {
+    str = str.split('\\r\\n').join('\n').split('\\n').join('\n').split('\\r').join('\n');
+  }
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    str = str.slice(1, -1);
+  }
+
+  return str.trim();
+}
+
+/**
+ * Calls remote C# API POST /mtgtools/comparefiles to compare two deck iterations.
+ * The endpoint expects multipart/form-data with key "files" containing 2 .txt files:
+ * - files[0]: Base / older deck iteration
+ * - files[1]: Target / newer deck iteration
+ * 
+ * Returns the raw diff output from the C# backend (e.g. [deck] ... CUTS ... ADDS ... [/deck]).
+ * Throws if the API request fails (strictly no local fallback).
+ */
+export async function compareDeckFilesApi(
+  firstFileContent: string,
+  secondFileContent: string,
+  firstFileName: string = 'iteration_a.txt',
+  secondFileName: string = 'iteration_b.txt',
+  commander?: string
+): Promise<string> {
+  const baseUrl = getApiBaseUrl();
+  const query = commander && commander.trim() ? `?commander=${encodeURIComponent(commander.trim())}` : '';
+
+  // Determine candidate endpoints:
+  // 1. If in browser on localhost (e.g. Vite dev server on port 5173), prefer the relative Vite proxy '/mtgtools/comparefiles'
+  //    because Vite's proxy avoids CORS, handles HTTPS self-signed certs automatically, and forwards to port 5205/7091.
+  // 2. Direct baseUrl endpoint (e.g. http://localhost:5205/mtgtools/comparefiles or remote production).
+  // 3. Fallback to relative '/mtgtools/comparefiles'.
+  const candidates: string[] = [];
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    window.location &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  if (isLocalDev) {
+    candidates.push(`/mtgtools/comparefiles${query}`);
+  }
+  if (baseUrl) {
+    candidates.push(`${baseUrl.replace(/\/+$/, '')}/mtgtools/comparefiles${query}`);
+  }
+  if (!candidates.some((c) => c.startsWith('/mtgtools/comparefiles'))) {
+    candidates.push(`/mtgtools/comparefiles${query}`);
+  }
+
+  const formData = new FormData();
+  formData.append(
+    'files',
+    new Blob([firstFileContent], { type: 'text/plain' }),
+    firstFileName.endsWith('.txt') ? firstFileName : `${firstFileName}.txt`
+  );
+  formData.append(
+    'files',
+    new Blob([secondFileContent], { type: 'text/plain' }),
+    secondFileName.endsWith('.txt') ? secondFileName : `${secondFileName}.txt`
+  );
+  if (commander && commander.trim()) {
+    formData.append('commander', commander.trim());
+  }
+
+  const start = performance.now();
+  console.groupCollapsed('[DeckService] ⚖️ Calling /mtgtools/comparefiles');
+  console.log('[DeckService] File 1:', firstFileName, 'Length:', firstFileContent.length);
+  console.log('[DeckService] File 2:', secondFileName, 'Length:', secondFileContent.length);
+  if (commander) console.log('[DeckService] Commander parameter:', commander);
+
+  let lastError: any = null;
+
+  for (const targetUrl of candidates) {
+    try {
+      console.log(`[DeckService] Attempting comparison request via: ${targetUrl}`);
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        console.warn(`[DeckService] ❌ ${targetUrl} returned HTTP ${res.status}:`, errorText);
+        throw new Error(`API error (${res.status}): ${errorText || res.statusText || 'Compare Decks Failed'}`);
+      }
+
+      // Read response body robustly (supports Results.File, application/txt, octet-stream, and plain text)
+      let rawOutput = '';
+      try {
+        const buffer = await res.arrayBuffer();
+        rawOutput = new TextDecoder('utf-8').decode(buffer);
+      } catch {
+        rawOutput = await res.text();
+      }
+
+      if (rawOutput.charCodeAt(0) === 0xfeff) {
+        rawOutput = rawOutput.slice(1);
+      }
+
+      const diffOutput = cleanRawDiff(rawOutput);
+      const durationMs = Math.round(performance.now() - start);
+      console.log(`[DeckService] ✅ Comparison received (${durationMs}ms), length: ${diffOutput.length}`);
+      console.log('[DeckService] Diff preview:\n', diffOutput.slice(0, 500));
+      console.groupEnd();
+      return diffOutput;
+    } catch (err: any) {
+      console.warn(`[DeckService] ⚠️ Failed comparison attempt at ${targetUrl}:`, err);
+      lastError = err;
+    }
+  }
+
+  const durationMs = Math.round(performance.now() - start);
+  console.error(`[DeckService] ❌ All candidate URLs failed (${durationMs}ms):`, lastError);
+  console.groupEnd();
+
+  const isNetworkFailure =
+    lastError?.name === 'TypeError' ||
+    lastError?.message?.includes('Failed to fetch') ||
+    lastError?.message?.includes('NetworkError');
+
+  if (isNetworkFailure) {
+    throw new Error(
+      `Unable to reach MTG API server (${candidates.join(', ')}). ` +
+      `Please verify that FrostpointApi is running (e.g. on port 5205 with the 'http' profile) or check your network connection.`
+    );
+  }
+
+  throw lastError || new Error('Failed to compare deck iterations via /mtgtools/comparefiles');
+}
+
+/**
+ * Formats the raw diff output from /mtgtools/comparefiles into a structured
+ * Deck Summary text block and parsed data model.
+ */
+export function formatDeckSummaryTextBlock(
+  rawDiff: string,
+  options?: {
+    deckName?: string;
+    versionAName?: string;
+    versionBName?: string;
+    commander?: string;
+  }
+): DeckComparisonSummaryResult {
+  const cleanedDiff = cleanRawDiff(rawDiff);
+  const lines = cleanedDiff.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let currentSection: 'CUTS' | 'ADDS' | '' = '';
+  const cutCards: { quantity: number; name: string }[] = [];
+  const addedCards: { quantity: number; name: string }[] = [];
+
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (/^(?:CUTS?|CARDS?\s+CUT|REMOVED?|CARDS?\s+REMOVED?|DELETIONS?)(?:\s*[:(]|\b)/i.test(upper)) {
+      currentSection = 'CUTS';
+      continue;
+    }
+    if (/^(?:ADDS?|CARDS?\s+ADDED?|ADDED?|INSERTIONS?)(?:\s*[:(]|\b)/i.test(upper)) {
+      currentSection = 'ADDS';
+      continue;
+    }
+
+    if (line.startsWith('[/') || line.startsWith('[deck')) {
+      continue;
+    }
+
+    let effectiveSection = currentSection;
+    if (line.startsWith('-') || line.startsWith('–') || line.startsWith('—')) {
+      effectiveSection = 'CUTS';
+    } else if (line.startsWith('+')) {
+      effectiveSection = 'ADDS';
+    }
+
+    const match = line.match(/^[-+*•]?\s*(\d+)\s*x?\s+(.+)$/i);
+    if (match) {
+      const qty = parseInt(match[1], 10);
+      let name = match[2].trim();
+      name = name.replace(/^\[card\]/i, '').replace(/\[\/card\]$/i, '').trim();
+      name = name.replace(/^["']/, '').replace(/["']$/, '').trim();
+
+      if (effectiveSection === 'CUTS') {
+        cutCards.push({ quantity: qty, name });
+      } else if (effectiveSection === 'ADDS') {
+        addedCards.push({ quantity: qty, name });
+      }
+    } else if (effectiveSection && !line.startsWith('[') && !line.startsWith('=')) {
+      let name = line.replace(/^[-+*•]\s*/, '').trim();
+      name = name.replace(/^\[card\]/i, '').replace(/\[\/card\]$/i, '').trim();
+      if (name) {
+        if (effectiveSection === 'CUTS') {
+          cutCards.push({ quantity: 1, name });
+        } else if (effectiveSection === 'ADDS') {
+          addedCards.push({ quantity: 1, name });
+        }
+      }
+    }
+  }
+
+  const cutsCount = cutCards.reduce((acc, c) => acc + c.quantity, 0);
+  const addsCount = addedCards.reduce((acc, c) => acc + c.quantity, 0);
+  const netChange = addsCount - cutsCount;
+
+  const deckTitle = options?.deckName || 'MTG Deck';
+  const verA = options?.versionAName || 'Base Version';
+  const verB = options?.versionBName || 'Target Version';
+  const nowStr = new Date().toLocaleString();
+
+  const cutsFormatted =
+    cutCards.length > 0
+      ? cutCards.map((c) => `- ${c.quantity} ${c.name}`).join('\n')
+      : '(No cards cut)';
+
+  const addsFormatted =
+    addedCards.length > 0
+      ? addedCards.map((c) => `+ ${c.quantity} ${c.name}`).join('\n')
+      : '(No cards added)';
+
+  const netStr =
+    netChange > 0
+      ? `+${netChange} cards`
+      : netChange < 0
+      ? `${netChange} cards`
+      : '0 cards (even)';
+
+  const summaryTextBlock = [
+    '==================================================',
+    `DECK COMPARISON: ${deckTitle}`,
+    `Baseline:   ${verA}`,
+    `Comparison: ${verB}`,
+    `Generated:  ${nowStr}`,
+    '==================================================',
+    '',
+    'CHANGE OVERVIEW:',
+    `• Cards Added: +${addsCount}`,
+    `• Cards Cut:   -${cutsCount}`,
+    `• Net Change:  ${netStr}`,
+    '',
+    '--------------------------------------------------',
+    `CUTS (${cutsCount} total):`,
+    cutsFormatted,
+    '',
+    '--------------------------------------------------',
+    `ADDS (${addsCount} total):`,
+    addsFormatted,
+    '==================================================',
+  ].join('\n');
+
+  return {
+    rawApiOutput: cleanedDiff,
+    diffText: cleanedDiff,
+    summaryTextBlock,
+    cutsCount,
+    addsCount,
+    netChange,
+    cutCards,
+    addedCards,
+  };
+}
+
+/**
+ * Compare two deck iterations via C# API POST /mtgtools/comparefiles
+ * and return the structured Deck Summary result including text block.
+ */
+export async function compareDeckIterationsWithApi(
+  iterationA: Deck | DeckHistoryItem | DeckCard[] | string,
+  iterationB: Deck | DeckHistoryItem | DeckCard[] | string,
+  options?: {
+    deckName?: string;
+    versionAName?: string;
+    versionBName?: string;
+    commander?: string;
+  }
+): Promise<DeckComparisonSummaryResult> {
+  const contentA = formatCardsForApiComparison(iterationA);
+  const contentB = formatCardsForApiComparison(iterationB);
+
+  const safeNameA = (options?.versionAName || 'iteration_a').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const safeNameB = (options?.versionBName || 'iteration_b').replace(/[^a-zA-Z0-9_-]+/g, '_');
+
+  // Auto-detect or use explicit commander parameter
+  const resolvedCommander =
+    options?.commander ||
+    (typeof iterationB === 'object' && iterationB !== null ? (iterationB as any).commanderName : undefined) ||
+    (typeof iterationA === 'object' && iterationA !== null ? (iterationA as any).commanderName : undefined) ||
+    (() => {
+      const cardsB = Array.isArray(iterationB) ? iterationB : (iterationB as any)?.cards;
+      if (Array.isArray(cardsB)) {
+        const cmdrCard = cardsB.find((c: any) => c.category === 'commander');
+        if (cmdrCard?.name) return cmdrCard.name;
+      }
+      const cardsA = Array.isArray(iterationA) ? iterationA : (iterationA as any)?.cards;
+      if (Array.isArray(cardsA)) {
+        const cmdrCard = cardsA.find((c: any) => c.category === 'commander');
+        if (cmdrCard?.name) return cmdrCard.name;
+      }
+      return undefined;
+    })();
+
+  const rawDiff = await compareDeckFilesApi(contentA, contentB, `${safeNameA}.txt`, `${safeNameB}.txt`, resolvedCommander);
+  return formatDeckSummaryTextBlock(rawDiff, options);
+}
+
+export const compareDecks = compareDeckIterationsWithApi;
+export const CompareDecks = compareDeckIterationsWithApi;
+
 export async function getRemoteBinders(): Promise<Binder[]> {
   const baseUrl = getApiBaseUrl();
   const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
@@ -518,20 +1379,31 @@ export async function getRemoteBinders(): Promise<Binder[]> {
       return [];
     }
 
-    console.log(`[DeckService] ✅ Loaded ${data.length} binder(s) from server (${durationMs}ms):`, data.map((b: any) => ({
+    const normalizedBinders: Binder[] = data.map((b: any) => ({
+      ...b,
+      id: b.id || b.Id || b.binderId || b.BinderId || '',
+      name: b.name || b.Name || 'Main Binder',
+      description: b.description ?? b.Description,
+      coverCardUrl: b.coverCardUrl ?? b.CoverCardUrl,
+      createdAt: parseTimestamp(b.createdAt ?? b.CreatedAt),
+      updatedAt: parseTimestamp(b.updatedAt ?? b.UpdatedAt),
+      cards: (b.cards || b.Cards || []).map(normalizeBinderCard),
+    }));
+
+    console.log(`[DeckService] ✅ Loaded ${normalizedBinders.length} binder(s) from server (${durationMs}ms):`, normalizedBinders.map((b: any) => ({
       id: b.id,
       name: b.name,
-      cardCount: b.cards?.length || 0,
-      vaultId: b.vaultId ?? '(none/null)',
-      userId: b.userId ?? '(none/null)',
+      cardCount: b.cards?.reduce((sum: number, c: any) => sum + (c.quantity || 1), 0) || 0,
+      vaultId: (b as any).vaultId ?? '(none/null)',
+      userId: (b as any).userId ?? '(none/null)',
     })));
 
-    if (data.length === 0) {
+    if (normalizedBinders.length === 0) {
       console.warn(`[DeckService] ℹ️ 0 binders returned for Vault ID "${vaultId}". Note: If binders in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
     }
 
     console.groupEnd();
-    return data;
+    return normalizedBinders;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
     console.error(`[DeckService] ❌ Network/Fetch error in getRemoteBinders (${durationMs}ms):`, err);
@@ -549,10 +1421,36 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
+  const preparedCards = (binder.cards || []).map((c) => {
+    const typeLine = c.type_line || (c as any).typeLine || (c as any).TypeLine || '';
+    const manaCost = c.mana_cost || (c as any).manaCost || (c as any).ManaCost || '';
+    const setName = c.setName || c.set_name || (c as any).SetName || '';
+    const collectorNumber = c.collectorNumber || c.collector_number || (c as any).CollectorNumber || '';
+    const colorIdentity = c.color_identity || (c as any).colorIdentity || (c as any).ColorIdentity || [];
+    return {
+      ...c,
+      type_line: typeLine,
+      typeLine,
+      mana_cost: manaCost,
+      manaCost,
+      set_name: setName,
+      setName,
+      collector_number: collectorNumber,
+      collectorNumber,
+      color_identity: colorIdentity,
+      colorIdentity,
+    };
+  });
+
+  const preparedBinder = {
+    ...binder,
+    cards: preparedCards,
+  };
+
   console.log(`[DeckService] 💾 Saving binder "${binder.name}" (${binder.id}) to ${targetUrl}...`, {
     binderId: binder.id,
     name: binder.name,
-    cardCount: binder.cards?.length || 0,
+    cardCount: preparedCards.reduce((sum, c) => sum + (c.quantity || 1), 0),
     vaultId: headers['X-Vault-Id'],
   });
 
@@ -560,7 +1458,7 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify(binder),
+      body: JSON.stringify(preparedBinder),
     });
     const durationMs = Math.round(performance.now() - start);
 
@@ -633,6 +1531,10 @@ export class DeckService {
   private static inMemoryBinders: Binder[] = [];
   private static hasInitialized = false;
 
+  private static unsavedDeckIds: Set<string> = new Set();
+  private static unsavedListeners: Set<(unsavedIds: Set<string>) => void> = new Set();
+  private static lastSavedDecks: Map<string, Deck> = new Map();
+
   static onSyncStatusChange(callback: (status: SyncStatus, error?: string) => void): () => void {
     this.statusListeners.add(callback);
     callback(this.currentStatus);
@@ -670,6 +1572,83 @@ export class DeckService {
     this.colListeners.forEach((cb) => cb(col));
   }
 
+  private static notifyUnsavedChanges() {
+    const copy = new Set(this.unsavedDeckIds);
+    this.unsavedListeners.forEach((cb) => {
+      try {
+        cb(copy);
+      } catch (err) {
+        console.error('[DeckService] Error in unsaved listener:', err);
+      }
+    });
+  }
+
+  /**
+   * Check if a deck has pending unsaved changes in memory.
+   */
+  static hasUnsavedChanges(deckId: string): boolean {
+    return this.unsavedDeckIds.has(deckId);
+  }
+
+  /**
+   * Explicitly set or clear the unsaved status of a deck.
+   */
+  static setDeckHasUnsavedChanges(deckId: string, hasUnsaved: boolean): void {
+    if (hasUnsaved) {
+      this.unsavedDeckIds.add(deckId);
+    } else {
+      this.unsavedDeckIds.delete(deckId);
+    }
+    this.notifyUnsavedChanges();
+  }
+
+  /**
+   * Clear all unsaved statuses (or for a specific deck).
+   */
+  static clearUnsavedChanges(deckId?: string): void {
+    if (deckId) {
+      this.unsavedDeckIds.delete(deckId);
+    } else {
+      this.unsavedDeckIds.clear();
+    }
+    this.notifyUnsavedChanges();
+  }
+
+  /**
+   * Revert an in-memory deck back to its last saved remote state.
+   */
+  static revertDeck(deckId: string): Deck | null {
+    const original = this.lastSavedDecks.get(deckId);
+    if (original) {
+      const cloned = JSON.parse(JSON.stringify(original));
+      const idx = this.inMemoryDecks.findIndex((d) => d.id === deckId);
+      if (idx >= 0) {
+        this.inMemoryDecks[idx] = cloned;
+      }
+      this.unsavedDeckIds.delete(deckId);
+      this.notifyDecks();
+      this.notifyUnsavedChanges();
+      return cloned;
+    }
+    // If it was never saved to remote (brand new draft deck discarded by user), remove from in-memory decks
+    this.inMemoryDecks = this.inMemoryDecks.filter((d) => d.id !== deckId);
+    this.unsavedDeckIds.delete(deckId);
+    this.notifyDecks();
+    this.notifyUnsavedChanges();
+    return null;
+  }
+
+  /**
+   * Subscribe to changes in the unsaved deck IDs set.
+   */
+  static subscribeUnsavedChanges(onUpdate: (unsavedIds: Set<string>) => void): Unsubscribe {
+    this.unsavedListeners.add(onUpdate);
+    onUpdate(new Set(this.unsavedDeckIds));
+    return () => {
+      this.unsavedListeners.delete(onUpdate);
+    };
+  }
+
   /**
    * Fetch all decks and binders from the remote API
    */
@@ -686,6 +1665,12 @@ export class DeckService {
       console.log(`[DeckService] 🔄 syncWithRemote resolved with ${remoteDecks.length} deck(s) and ${remoteBinders.length} binder(s).`);
 
       this.inMemoryDecks = remoteDecks;
+      this.lastSavedDecks.clear();
+      for (const d of remoteDecks) {
+        this.lastSavedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
+      }
+      this.unsavedDeckIds.clear();
+      this.notifyUnsavedChanges();
       this.inMemoryBinders = remoteBinders.length > 0 ? remoteBinders : [DEFAULT_BINDER];
 
       this.notifyDecks();
@@ -751,13 +1736,32 @@ export class DeckService {
   }
 
   /**
-   * Save or update a Deck on the remote server
+   * Update in-memory deck state without persisting/archiving to the remote API.
+   * Use this for working draft changes (card additions, removals, quantity changes)
+   * until the user explicitly commits a save.
    */
-  static async saveDeck(deck: Deck): Promise<void> {
-    const updated: Deck = {
+  static updateDeckInMemory(deck: Deck): void {
+    const normalized = normalizeDeck(deck);
+    const idx = this.inMemoryDecks.findIndex((d) => d.id === normalized.id);
+    if (idx >= 0) {
+      this.inMemoryDecks[idx] = { ...normalized };
+    } else {
+      this.inMemoryDecks.unshift({ ...normalized });
+    }
+    this.unsavedDeckIds.add(normalized.id);
+    this.notifyDecks();
+    this.notifyUnsavedChanges();
+  }
+
+  /**
+   * Save or update a Deck on the remote server.
+   * Commits the current iteration and triggers an archived history snapshot on the backend.
+   */
+  static async saveDeck(deck: Deck): Promise<boolean> {
+    const updated: Deck = normalizeDeck({
       ...deck,
       updatedAt: Date.now(),
-    };
+    });
 
     const idx = this.inMemoryDecks.findIndex((d) => d.id === updated.id);
     if (idx >= 0) {
@@ -770,16 +1774,25 @@ export class DeckService {
     this.setStatus('syncing');
     const ok = await saveRemoteDeck(updated);
     if (ok) {
+      this.lastSavedDecks.set(updated.id, JSON.parse(JSON.stringify(updated)));
+      this.unsavedDeckIds.delete(updated.id);
+      this.notifyUnsavedChanges();
+      this.clearDeckFormatCache(updated.id);
       this.setStatus('synced');
     } else {
       this.setStatus('offline');
     }
+    return ok;
   }
 
   /**
    * Delete a deck from the remote server
    */
   static async deleteDeck(deckId: string): Promise<void> {
+    this.clearDeckFormatCache(deckId);
+    this.unsavedDeckIds.delete(deckId);
+    this.lastSavedDecks.delete(deckId);
+    this.notifyUnsavedChanges();
     this.inMemoryDecks = this.inMemoryDecks.filter((d) => d.id !== deckId);
     this.notifyDecks();
 
@@ -971,18 +1984,77 @@ export class DeckService {
     return this.getLocalCollection();
   }
 
+  private static deckListCache = new Map<string, string>();
+  private static pickListCache = new Map<string, string>();
+
+  private static getDeckCacheKey(deck: Deck): string {
+    const cardSummary = (deck.cards || [])
+      .filter((c) => c.category !== 'maybeboard')
+      .map((c) => `${getCardApiName(c)}:${c.quantity}:${c.category}`)
+      .sort()
+      .join('|');
+    return `${deck.id || 'deck'}::${deck.name}::${cardSummary}`;
+  }
+
+  static clearDeckFormatCache(deckId?: string): void {
+    if (deckId) {
+      for (const key of this.deckListCache.keys()) {
+        if (key.startsWith(`${deckId}::`)) this.deckListCache.delete(key);
+      }
+      for (const key of this.pickListCache.keys()) {
+        if (key.startsWith(`${deckId}::`)) this.pickListCache.delete(key);
+      }
+    } else {
+      this.deckListCache.clear();
+      this.pickListCache.clear();
+    }
+  }
+
   /**
    * Request remote BBCode layout from /mtgtools/createdecklist
    */
-  static async createDeckList(deck: Deck): Promise<string> {
-    return createDeckListApi(deck);
+  static async createDeckList(deck: Deck, forceRefresh = false): Promise<string> {
+    const key = this.getDeckCacheKey(deck);
+    if (!forceRefresh && this.deckListCache.has(key)) {
+      return this.deckListCache.get(key)!;
+    }
+    const result = await createDeckListApi(deck);
+    this.deckListCache.set(key, result);
+    return result;
   }
 
   /**
    * Request remote physical picklist layout from /mtgtools/createdeckpicklist
    */
-  static async createDeckPickList(deck: Deck): Promise<string> {
-    return createDeckPickListApi(deck);
+  static async createDeckPickList(deck: Deck, forceRefresh = false): Promise<string> {
+    const key = this.getDeckCacheKey(deck);
+    if (!forceRefresh && this.pickListCache.has(key)) {
+      return this.pickListCache.get(key)!;
+    }
+    const result = await createDeckPickListApi(deck);
+    this.pickListCache.set(key, result);
+    return result;
+  }
+
+  /**
+   * Preload both decklist (BBCode) and picklist via API for current deck.
+   * Strictly only loads for current decks, never for historical iterations.
+   */
+  static async preloadDeckFormats(
+    deck: Deck,
+    isHistorical: boolean = false
+  ): Promise<{ deckList?: string; pickList?: string }> {
+    if (isHistorical || !deck || !deck.cards || deck.cards.length === 0) {
+      return {};
+    }
+    const [deckListRes, pickListRes] = await Promise.allSettled([
+      this.createDeckList(deck),
+      this.createDeckPickList(deck),
+    ]);
+    return {
+      deckList: deckListRes.status === "fulfilled" ? deckListRes.value : undefined,
+      pickList: pickListRes.status === "fulfilled" ? pickListRes.value : undefined,
+    };
   }
 
   /**
@@ -999,6 +2071,119 @@ export class DeckService {
    */
   static async getDeckHistorySnapshot(deckId: string, historyId: string): Promise<DeckHistoryItem | null> {
     return getRemoteDeckHistorySnapshot(deckId, historyId);
+  }
+
+  /**
+   * Revert a deck to a previous historical iteration snapshot.
+   * Restores the snapshot cards, metadata, and commits it as the active deck.
+   */
+  static async revertToIteration(deckId: string, historyId: string): Promise<Deck | null> {
+    const snapshot = await this.getDeckHistorySnapshot(deckId, historyId);
+    if (!snapshot) {
+      throw new Error(`Historical snapshot ${historyId} not found`);
+    }
+
+    const currentDeck = this.inMemoryDecks.find((d) => d.id === deckId);
+    if (!currentDeck) {
+      throw new Error(`Deck ${deckId} not found in memory`);
+    }
+
+    const restoredDeck: Deck = normalizeDeck({
+      ...currentDeck,
+      cards: snapshot.cards || [],
+      commanderName: snapshot.commanderName !== undefined ? snapshot.commanderName : currentDeck.commanderName,
+      commanderArtUrl: snapshot.commanderArtUrl !== undefined ? snapshot.commanderArtUrl : currentDeck.commanderArtUrl,
+      commanderId: snapshot.commanderId !== undefined ? snapshot.commanderId : currentDeck.commanderId,
+      commanderColorIdentity: snapshot.commanderColorIdentity !== undefined ? snapshot.commanderColorIdentity : currentDeck.commanderColorIdentity,
+      format: (snapshot.format as MTGFormat) || currentDeck.format,
+      updatedAt: Date.now(),
+    });
+
+    this.updateDeckInMemory(restoredDeck);
+    await this.saveDeck(restoredDeck);
+    return restoredDeck;
+  }
+
+  /**
+   * Compare two deck iterations using remote API /mtgtools/comparefiles
+   * and returns the generated Deck Summary text block and parsed diff.
+   */
+  static async compareDeckIterations(
+    iterationA: Deck | DeckHistoryItem | DeckCard[] | string,
+    iterationB: Deck | DeckHistoryItem | DeckCard[] | string,
+    options?: {
+      deckName?: string;
+      versionAName?: string;
+      versionBName?: string;
+      commander?: string;
+    }
+  ): Promise<DeckComparisonSummaryResult> {
+    return compareDeckIterationsWithApi(iterationA, iterationB, options);
+  }
+
+  /**
+   * Compare two deck iterations (CompareDecks) using remote API /mtgtools/comparefiles
+   * with optional Commander parameter passed in.
+   */
+  static async compareDecks(
+    iterationA: Deck | DeckHistoryItem | DeckCard[] | string,
+    iterationB: Deck | DeckHistoryItem | DeckCard[] | string,
+    options?: {
+      deckName?: string;
+      versionAName?: string;
+      versionBName?: string;
+      commander?: string;
+    }
+  ): Promise<DeckComparisonSummaryResult> {
+    return compareDeckIterationsWithApi(iterationA, iterationB, options);
+  }
+
+  static async CompareDecks(
+    iterationA: Deck | DeckHistoryItem | DeckCard[] | string,
+    iterationB: Deck | DeckHistoryItem | DeckCard[] | string,
+    options?: {
+      deckName?: string;
+      versionAName?: string;
+      versionBName?: string;
+      commander?: string;
+    }
+  ): Promise<DeckComparisonSummaryResult> {
+    return compareDeckIterationsWithApi(iterationA, iterationB, options);
+  }
+
+  /**
+   * Resolves card name for API requests: preserves full name for split cards (Life // Death),
+   * but sends only front face for non-split cards (Emeritus of Abundance).
+   */
+  static getCardApiName(
+    cardOrName: DeckCard | { name?: string; layout?: string; backImageUrl?: string; type_line?: string } | string
+  ): string {
+    return getCardApiName(cardOrName);
+  }
+
+  /**
+   * Checks if a card is an MTG split card (Life // Death).
+   */
+  static isSplitCard(
+    cardOrName: DeckCard | { name?: string; layout?: string; backImageUrl?: string; type_line?: string } | string
+  ): boolean {
+    return isSplitCard(cardOrName);
+  }
+
+  static normalizeCard(card: any): DeckCard {
+    return normalizeCard(card);
+  }
+
+  static normalizeDeck(deck: any): Deck {
+    return normalizeDeck(deck);
+  }
+
+  static normalizeBinderCard(card: any): CollectionCard {
+    return normalizeBinderCard(card);
+  }
+
+  static async enrichDeckCards(deck: Deck): Promise<Deck> {
+    return enrichDeckCards(deck);
   }
 
   

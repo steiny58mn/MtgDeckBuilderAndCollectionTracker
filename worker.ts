@@ -11,7 +11,7 @@ export interface Env {
   [key: string]: any;
 }
 
-export const DEFAULT_API_BASE = 'https://api.frostpointlabs.com';
+export const DEFAULT_API_BASE = 'http://localhost:5205';
 
 /**
  * Resolve target backend base URL from environment variables or optional header override
@@ -82,7 +82,7 @@ export default {
 
       try {
         const headers: Record<string, string> = {
-          'Accept': 'application/json',
+          'Accept': request.headers.get('accept') || '*/*',
         };
         const contentType = request.headers.get('content-type');
         if (contentType) headers['Content-Type'] = contentType;
@@ -91,18 +91,27 @@ export default {
         const auth = request.headers.get('authorization');
         if (auth) headers['Authorization'] = auth;
 
+        // Use arrayBuffer for multipart/form-data to prevent delimiter corruption, text for json/text
+        const isBodyMethod = request.method !== 'GET' && request.method !== 'HEAD';
+        let body: any = undefined;
+        if (isBodyMethod) {
+          body = contentType && contentType.includes('multipart/form-data')
+            ? await request.arrayBuffer()
+            : await request.text();
+        }
+
         const remoteRes = await fetch(targetUrl, {
           method: request.method,
           headers,
-          body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined,
+          body,
         });
 
-        const data = await remoteRes.text();
-        console.log(`[Worker Proxy] 🔀 Upstream responded: HTTP ${remoteRes.status} (length: ${data.length})`);
+        const data = await remoteRes.arrayBuffer();
+        console.log(`[Worker Proxy] 🔀 Upstream responded: HTTP ${remoteRes.status} (bytes: ${data.byteLength})`);
         return new Response(data, {
           status: remoteRes.status,
           headers: {
-            'Content-Type': remoteRes.headers.get('content-type') || 'application/json',
+            'Content-Type': remoteRes.headers.get('content-type') || 'text/plain; charset=utf-8',
             ...corsHeaders,
           },
         });

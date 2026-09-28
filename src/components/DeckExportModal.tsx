@@ -56,6 +56,7 @@ export interface UploadedBatchDeckItem {
 
 interface DeckExportModalProps {
   deck?: Deck | null;
+  isHistorical?: boolean;
   existingDecks?: Deck[];
   isOpen: boolean;
   onClose: () => void;
@@ -68,6 +69,7 @@ interface DeckExportModalProps {
 
 export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   deck,
+  isHistorical = false,
   existingDecks = [],
   isOpen,
   onClose,
@@ -112,8 +114,11 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       setActiveTab(deck ? initialTab : 'import');
       setImportError(null);
       setShowSaveConfirmModal(false);
+      if (isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist')) {
+        setSelectedExportFormat('text');
+      }
     }
-  }, [isOpen, initialTab, deck]);
+  }, [isOpen, initialTab, deck, isHistorical]);
 
   // Real-time live parse of manual text input
   const parsedPreview = useMemo<ParsedDeckImport | null>(() => {
@@ -155,12 +160,32 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   }, [parsedPreview]);
 
+  // Preload both decklist and picklist via API when clicking into current deck
+  useEffect(() => {
+    if (!deck || isHistorical) return;
+    DeckService.preloadDeckFormats(deck, false).catch((err) => {
+      console.warn('[DeckExportModal] Preload error:', err);
+    });
+  }, [deck?.id, isHistorical, retryApiTrigger]);
+
   // Fetch or generate export layout whenever deck or selected export format changes
   useEffect(() => {
     if (!deck) {
       setExportedContent('');
       setIsApiLoading(false);
       setApiExportError(null);
+      return;
+    }
+
+    // Do NOT load API-generated BBCode / Picklist for historical decks
+    if (isHistorical) {
+      setIsApiLoading(false);
+      setApiExportError(null);
+      if (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist') {
+        setExportedContent('');
+      } else {
+        setExportedContent(generateExportContent(selectedExportFormat, deck));
+      }
       return;
     }
 
@@ -172,8 +197,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
       const endpointPromise =
         selectedExportFormat === 'bbcode'
-          ? createDeckListApi(deck)
-          : createDeckPickListApi(deck);
+          ? DeckService.createDeckList(deck, retryApiTrigger > 0)
+          : DeckService.createDeckPickList(deck, retryApiTrigger > 0);
 
       endpointPromise
         .then((apiLayout) => {
@@ -202,7 +227,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       setApiExportError(null);
       setExportedContent(generateExportContent(selectedExportFormat, deck));
     }
-  }, [deck, selectedExportFormat, retryApiTrigger]);
+  }, [deck, selectedExportFormat, isHistorical, retryApiTrigger]);
 
   useBodyScrollLock(isOpen);
 
@@ -916,7 +941,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
                   <button
                     onClick={() => handleCopyExport()}
-                    disabled={isApiLoading || !!apiExportError || !exportedContent}
+                    disabled={isApiLoading || !!apiExportError || !exportedContent || (isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist'))}
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {copied ? (
@@ -934,7 +959,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
                   <button
                     onClick={handleDownloadExport}
-                    disabled={isApiLoading || !!apiExportError || !exportedContent}
+                    disabled={isApiLoading || !!apiExportError || !exportedContent || (isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist'))}
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -1007,6 +1032,27 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 </div>
               )}
 
+              {isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist') && (
+                <div className="my-2.5 p-3 rounded-xl bg-amber-950/50 border border-amber-500/50 flex items-center justify-between gap-3 text-xs text-amber-200 shadow-md">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-bold text-amber-300">Historical Iteration</div>
+                      <div className="text-[11px] text-amber-400/90">
+                        BBCode &amp; Picklist generation via API is only available for current decks. Please select another format (e.g. Moxfield, MTGO, Text, CSV, Excel) to export this iteration.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedExportFormat('text')}
+                    className="px-3 py-1 bg-amber-900 hover:bg-amber-800 text-amber-100 rounded-lg text-xs font-semibold cursor-pointer shrink-0 transition-colors border border-amber-700/60"
+                  >
+                    Switch to Text
+                  </button>
+                </div>
+              )}
+
               <div className="mt-3 flex-1 min-h-[220px] flex flex-col relative">
                 <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
                   <span>Output Preview</span>
@@ -1023,7 +1069,9 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                     readOnly
                     value={selectedExportFormat === 'excel' ? generateExcelTSV(deck) : exportedContent}
                     placeholder={
-                      isApiLoading
+                      isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist')
+                        ? 'API generation for MTGNexus BBCode and Physical Picklist is only available for the current deck iteration. Switch to another format above to export this historical iteration.'
+                        : isApiLoading
                         ? 'Loading output from API...'
                         : apiExportError
                         ? 'Unable to connect to API endpoint. See error above.'

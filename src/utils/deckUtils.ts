@@ -1,4 +1,14 @@
-import { getApiBaseUrl, getRemoteDeckHistory, getRemoteDeckHistorySnapshot } from '../services/deckService';
+import { 
+  getApiBaseUrl, 
+  getRemoteDeckHistory, 
+  getRemoteDeckHistorySnapshot, 
+  compareDeckIterationsWithApi,
+  formatDeckSummaryTextBlock,
+  compareDeckFilesApi,
+  formatCardsForApiComparison,
+  compareDecks,
+  CompareDecks
+} from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem } from '../types/mtg';
 
 export function calculateDeckStats(deck: Deck): DeckStats {
@@ -32,7 +42,7 @@ export function calculateDeckStats(deck: Deck): DeckStats {
     if (card.category === 'main' || card.category === 'commander') {
       mainboardCount += qty;
 
-      const isLand = card.type_line?.toLowerCase().includes('land');
+      const isLand = (card.type_line || (card as any).typeLine || '').toLowerCase().includes('land');
       if (!isLand) {
         const roundedCmc = Math.min(7, Math.max(0, Math.floor(card.cmc || 0)));
         curveMap[roundedCmc] = (curveMap[roundedCmc] || 0) + qty;
@@ -54,7 +64,7 @@ export function calculateDeckStats(deck: Deck): DeckStats {
       }
 
       // Parse broad card types
-      const t = card.type_line || '';
+      const t = card.type_line || (card as any).typeLine || '';
       if (t.includes('Creature')) typeBreakdown.Creature += qty;
       else if (t.includes('Instant')) typeBreakdown.Instant += qty;
       else if (t.includes('Sorcery')) typeBreakdown.Sorcery += qty;
@@ -90,7 +100,7 @@ export function calculateDeckStats(deck: Deck): DeckStats {
 
   cards.forEach((c) => {
     if (c.category === 'main' || c.category === 'commander') {
-      const isBasicLand = /Basic Land/i.test(c.type_line);
+      const isBasicLand = /Basic Land/i.test(c.type_line || (c as any).typeLine || '');
       const cleanName = c.name.split(' // ')[0].trim();
       cardNameCounts[cleanName] = (cardNameCounts[cleanName] || 0) + c.quantity;
 
@@ -387,7 +397,7 @@ export function canBePrimaryCommander(card: {
   type_line?: string;
   oracle_text?: string;
 }): boolean {
-  const typeLine = (card.type_line || '').toLowerCase();
+  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
   const oracle = (card.oracle_text || '').toLowerCase();
 
   if (oracle.includes('can be your commander')) {
@@ -635,7 +645,7 @@ export function canCardsPartnerTogether(
  * Lands are always assigned the lowest priority (highest number) so they appear at the bottom.
  */
 export function getCardCategorySortOrder(card: { type_line?: string }): number {
-  const t = (card.type_line || '').toLowerCase();
+  const t = (card.type_line || (card as any).typeLine || '').toLowerCase();
   // Lands must be at the bottom of the sort
   if (t.includes('land')) return 99;
   if (t.includes('creature') || t.includes('summon')) return 1;
@@ -834,7 +844,7 @@ export function generateDeckPickListLocal(deck: Deck): string {
   const getColorGroup = (c) => {
     const colors = c.colors || [];
     if (colors.length === 0) {
-      const type = (c.type_line || '').toLowerCase();
+      const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
       if (type.includes('land')) return 'Colorless (Lands)';
       return 'Colorless (Non-Lands)';
     }
@@ -881,7 +891,7 @@ export function generateDeckPickListLocal(deck: Deck): string {
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .forEach((c) => {
-          lines.push(`${c.quantity}x ${c.name} [${c.type_line || 'Card'}]`);
+          lines.push(`${c.quantity}x ${c.name} [${c.type_line || (c as any).typeLine || 'Card'}]`);
         });
       lines.push('');
     }
@@ -1019,6 +1029,18 @@ export async function fetchDeckHistorySnapshot(
 ): Promise<DeckHistoryItem | null> {
   return getRemoteDeckHistorySnapshot(deckId, historyId);
 }
+
+/**
+ * Compare two deck iterations via remote API /mtgtools/comparefiles
+ */
+export { 
+  compareDeckIterationsWithApi, 
+  formatDeckSummaryTextBlock, 
+  compareDeckFilesApi, 
+  formatCardsForApiComparison,
+  compareDecks,
+  CompareDecks
+};
 
 /**
  * Compares two deck iterations / snapshots and computes detailed card diffs

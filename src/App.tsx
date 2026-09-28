@@ -116,10 +116,11 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
-    await DeckService.saveDeck(newDeck);
+    // Store in-memory only as a working draft with unsaved status until user clicks Save
+    DeckService.updateDeckInMemory(newDeck);
     setActiveDeck(newDeck);
     setActiveTab('decks');
-    showToast(`Created deck "${newDeck.name}"`);
+    showToast(`Created draft "${newDeck.name}" - click Save when ready!`, 'info');
   };
 
   const handleUpdateDeck = (updatedDeck: Deck) => {
@@ -241,15 +242,24 @@ export default function App() {
       }
 
       // Check singleton rule for commander decks (max 1 copy of non-basic lands)
-      const isBasic = /Basic Land/i.test(card.type_line);
-      if (!isBasic) {
-        const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
-        const alreadyInDeck = latestActiveDeck.cards.some(
-          (c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName
-        );
-        if (alreadyInDeck) {
-          showToast(`"${card.name}" is already in your Commander deck (1 copy limit).`, 'info');
-          return;
+      if (category !== 'maybeboard') {
+        const isBasic = /Basic Land/i.test(card.type_line || (card as any).typeLine || '');
+        const hasUnlimitedRule = (card.oracle_text || card.card_faces?.[0]?.oracle_text)
+          ? /A deck can have any number of/i.test(card.oracle_text || card.card_faces?.[0]?.oracle_text || '')
+          : false;
+        if (!isBasic && !hasUnlimitedRule) {
+          const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
+          const alreadyInDeck = latestActiveDeck.cards.some(
+            (c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName
+          );
+          if (alreadyInDeck) {
+            showToast(`"${card.name}" is already in your Commander deck (1 copy limit).`, 'info');
+            return;
+          }
+          if (quantity > 1) {
+            showToast(`In Commander format, "${card.name}" is limited to 1 copy. Adding 1 copy instead.`, 'info');
+            quantity = 1;
+          }
         }
       }
     }
@@ -342,8 +352,9 @@ export default function App() {
 
     DeckService.updateDeckInMemory(updatedDeck);
     setActiveDeck(updatedDeck);
+    const categoryLabel = category === 'main' ? 'Mainboard' : category === 'sideboard' ? 'Sideboard' : category === 'maybeboard' ? 'Maybeboard' : 'Commander';
     showToast(
-      `Added ${quantity}x "${card.name}" to ${latestActiveDeck.name}`,
+      `Added ${quantity}x "${card.name}" to ${categoryLabel} (${latestActiveDeck.name})`,
       'success',
       'Return to Deck →',
       () => setActiveTab('decks')
@@ -383,11 +394,14 @@ export default function App() {
         }
       }
 
-      const isBasic = /Basic Land/i.test(item.type_line);
-      if (!isBasic) {
+      const isBasic = /Basic Land/i.test(item.type_line || (item as any).typeLine || '');
+      const hasUnlimitedRule = (item.oracle_text || (item as any).oracleText)
+        ? /A deck can have any number of/i.test(item.oracle_text || (item as any).oracleText || '')
+        : false;
+      if (!isBasic && !hasUnlimitedRule) {
         const cleanName = item.name.split(' // ')[0].trim().toLowerCase();
         const alreadyInDeck = latestActiveDeck.cards.some(
-          (c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName
+          (c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName
         );
         if (alreadyInDeck) {
           showToast(`"${item.name}" is already in your Commander deck (1 copy limit).`, 'info');

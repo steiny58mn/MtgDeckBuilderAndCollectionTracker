@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { 
   ArrowLeft,
+  GitCompare,
   Save,
   Loader2, 
   Sparkles, 
@@ -26,17 +27,17 @@ import {
   Shield,
   Mountain,
   Bookmark,
-  HelpCircle,
-  Upload
+  HelpCircle
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
-import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard } from '../types/mtg';
+import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem } from '../types/mtg';
 import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander, getCardCategorySortOrder } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
+import { DeckCompareModal } from './DeckCompareModal';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -83,7 +84,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>('main');
   const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
   const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>('name');
-  const [isSavingNewDeck, setIsSavingNewDeck] = useState(false);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [historyList, setHistoryList] = useState<DeckHistoryItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [confirmState, setConfirmState] = useState<{
@@ -103,8 +105,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setTitle(deck.name);
     setDescription(deck.description || '');
     setFormat(deck.format);
-    setHasUnsavedChanges(false);
+    setHasUnsavedChanges(DeckService.hasUnsavedChanges(deck.id));
   }, [deck.id]);
+
+  // Subscribe to unsaved status changes
+  React.useEffect(() => {
+    if (!deck?.id) return;
+    const unsub = DeckService.subscribeUnsavedChanges((unsavedIds) => {
+      setHasUnsavedChanges(unsavedIds.has(deck.id));
+    });
+    return unsub;
+  }, [deck?.id]);
 
   const handleSave = async (deckOverride?: Deck) => {
     if (isSaving) return;
@@ -124,6 +135,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         await DeckService.saveDeck(currentDeckToSave);
       }
       setHasUnsavedChanges(false);
+      DeckService.setDeckHasUnsavedChanges(deck.id, false);
       setPriceRefreshMessage('Deck saved & iteration snapshot created!');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
     } catch (e: any) {
@@ -145,24 +157,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [deck, title, description, format, onSaveDeck, isSaving]);
 
-  const handleSaveAndCreateNewDeck = async () => {
-    if (isSavingNewDeck) return;
-    setIsSavingNewDeck(true);
-    try {
-      const currentDeckToSave: Deck = {
-        ...deck,
-        name: title.trim() || deck.name,
-        description: description.trim(),
-        format: format,
-        updatedAt: Date.now(),
-      };
-      if (onCreateNewDeck) {
-        await onCreateNewDeck(currentDeckToSave);
-      }
-    } finally {
-      setIsSavingNewDeck(false);
+  React.useEffect(() => {
+    if (deck?.id) {
+      DeckService.getDeckHistory(deck.id)
+        .then((items) => setHistoryList(items || []))
+        .catch((err) => console.warn('Failed to load history list for compare modal', err));
     }
-  };
+  }, [deck?.id]);
 
   const stats = calculateDeckStats(deck);
 
@@ -181,6 +182,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       name: commanderName,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
     setPriceRefreshMessage(`Deck name updated to "${commanderName}"`);
     setTimeout(() => setPriceRefreshMessage(null), 3000);
   };
@@ -194,6 +197,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     };
     onUpdateDeck(updated);
     setIsEditingTitle(false);
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
   };
 
   const handleUpdateCardQuantity = (cardId: string, delta: number) => {
@@ -238,6 +243,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       coverCardUrl: newCover,
       updatedAt: Date.now(),
     });
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
   };
 
   const handleToggleCardFoil = (cardId: string) => {
@@ -743,7 +750,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </div>
           ) : (
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-              {/* Left: Navigation, Title, Badges, Value */}
+              {/* Left: Navigation & Title */}
               <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap min-w-0">
                 <button
                   type="button"
@@ -764,63 +771,154 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </h1>
                   <Pencil className="w-3 h-3 text-slate-500 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                 </div>
-                
-                <select
-                  value={deck.format}
-                  onChange={(e) => {
-                    const newFormat = e.target.value as MTGFormat;
-                    setFormat(newFormat);
-                    onUpdateDeck({ ...deck, format: newFormat, updatedAt: Date.now() });
-                    setHasUnsavedChanges(true);
-                  }}
-                  className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-300 capitalize font-bold outline-none cursor-pointer focus:border-violet-500/50 hover:bg-slate-800"
-                >
-                  <option value="commander">Commander / EDH</option>
-                  <option value="standard">Standard</option>
-                  <option value="modern">Modern</option>
-                  <option value="pioneer">Pioneer</option>
-                  <option value="legacy">Legacy</option>
-                  <option value="vintage">Vintage</option>
-                  <option value="pauper">Pauper</option>
-                  <option value="casual">Casual</option>
-                </select>
 
-                {/* Update Deck Name to Commander Button */}
-                {deck.format === 'commander' && commanderName && (
+
+              </div>
+
+              {/* Middle: Commander Strip (Top Row between Deck Title and Save button) */}
+              {deck.format === 'commander' && (
+                <div className="flex items-center gap-2 flex-wrap text-xs min-w-0">
+                  <span className="text-[11px] uppercase font-bold text-fuchsia-400 tracking-wider flex items-center gap-1.5 shrink-0">
+                    <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
+                    <span>{commanderCards.length === 2 ? 'Commanders:' : 'Commander:'}</span>
+                  </span>
+
+                  {commanderCards.length > 0 ? (
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      {commanderCards.map((cmdr, cIdx) => (
+                        <div
+                          key={cmdr.id}
+                          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-fuchsia-500/30 text-xs shadow-xs"
+                        >
+                          <span className="text-[10px] font-semibold text-fuchsia-400">
+                            {cIdx === 0 ? '👑 Commander' : '👑 Partner'}
+                          </span>
+                          <span
+                            onClick={() => onSelectCard(toScryfallCard(cmdr))}
+                            className="font-bold text-white hover:text-fuchsia-300 cursor-pointer truncate max-w-[180px] sm:max-w-[220px]"
+                            title={cmdr.name}
+                          >
+                            {cmdr.name}
+                          </span>
+                          {cmdr.mana_cost && (
+                            <div className="shrink-0 scale-90">
+                              <ManaCostBadge manaCost={cmdr.mana_cost} size="sm" />
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleChangeCardCategory(cmdr.id, 'main')}
+                            className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                            title="Demote to regular deck card"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+
+
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-slate-500 italic">
+                      No commander assigned yet. Click &quot;Set Commander&quot; on any legendary creature in your deck.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Top Right: Save Deck Button (Slightly bigger) */}
+              <div className="flex items-center gap-2 shrink-0 sm:ml-auto lg:ml-0">
+                <button
+                  type="button"
+                  onClick={() => handleSave()}
+                  disabled={isSaving}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-98 ${
+                    hasUnsavedChanges
+                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600'
+                  }`}
+                  title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
+                >
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <Save className={`w-4 h-4 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
+                  )}
+                  <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Row: Actions (Prices, Hand, Compare, Export), Badges (Card count, Price), and Format Dropdown on Far Right below Save */}
+          {!isEditingTitle && (
+            <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80 flex-wrap">
+              {/* Left Side: Buttons + Badges */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                {/* Left: Prices, Hand, Compare, Export */}
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <button
                     type="button"
-                    onClick={handleUpdateDeckNameToCommander}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0 ${
-                      deck.name.trim().toLowerCase() === commanderName.trim().toLowerCase()
-                        ? 'bg-violet-500/10 text-fuchsia-300/80 border border-fuchsia-500/25'
-                        : 'bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/45 hover:scale-102'
-                    }`}
-                    title={`Update deck name to Commander: "${commanderName}"`}
+                    onClick={handleLivePriceRefresh}
+                    disabled={isRefreshingPrices}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                    title="Update live card market prices via Scryfall"
                   >
-                    <Crown className="w-3.5 h-3.5 text-violet-400" />
-                    <span>
-                      {deck.name.trim().toLowerCase() === commanderName.trim().toLowerCase()
-                        ? 'Named after Commander'
-                        : 'Name to Commander'}
-                    </span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-violet-400' : ''}`} />
+                    <span>Prices</span>
                   </button>
-                )}
 
-                <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] font-semibold text-violet-400 capitalize shrink-0">
-                  {deck.format}
-                </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowHandSimulator(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Simulate opening 7-card hand and mulligans"
+                  >
+                    <Play className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Hand</span>
+                  </button>
 
-                {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
-                <span className="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono text-slate-300 shrink-0">
-                  {stats.mainboardCount}
-                  {deck.format === 'commander' ? '/100' : ''}
-                </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCompareModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Compare deck iterations via /mtgtools/comparefiles"
+                  >
+                    <GitCompare className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Compare</span>
+                  </button>
 
-                <span className="px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] font-bold text-emerald-400 shrink-0" title="Total deck market value">
-                  ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
-                </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportModalInitialTab('export');
+                      setShowExportModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Export deck to BBCode, TappedOut, Moxfield, MTGO, Excel, etc."
+                  >
+                    <Share2 className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Export</span>
+                  </button>
+                </div>
 
-                {/* Top Row Format Notice */}
+                {/* Badges to the right of the buttons */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono text-slate-300 shrink-0">
+                    {stats.mainboardCount}
+                    {deck.format === 'commander' ? '/100' : ''}
+                  </span>
+
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] font-bold text-emerald-400 shrink-0" title="Total deck market value">
+                    ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Far Right below the Save button: Notice & Format dropdown */}
+              <div className="flex items-center gap-2 shrink-0 ml-auto">
+                {/* Format Notice Dropdown */}
                 {stats.illegalCards.length > 0 && (
                   <div className="relative shrink-0 z-50">
                     <button
@@ -841,7 +939,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                           className="fixed inset-0 z-[60] bg-transparent cursor-default"
                           onClick={() => setShowFormatNoticeDetails(false)}
                         />
-                        <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
+                        <div className="absolute right-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
                           <div className="font-semibold text-fuchsia-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                             <span className="flex items-center gap-1.5 font-bold">
                               <AlertTriangle className="w-4 h-4 text-violet-400 shrink-0" />
@@ -866,151 +964,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     )}
                   </div>
                 )}
-              </div>
-
-              {/* Right: Condensed Action Buttons */}
-              <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-                {/* Save Deck Button */}
-                <button
-                  type="button"
-                  onClick={() => handleSave()}
-                  disabled={isSaving}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-sm active:scale-98 ${
-                    hasUnsavedChanges
-                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-1 ring-violet-400 shadow-indigo-500/25 animate-pulse-subtle'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700'
-                  }`}
-                  title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
-                >
-                  {isSaving ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  ) : (
-                    <Save className={`w-3.5 h-3.5 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
-                  )}
-                  <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
-                </button>
-
-                <button
-                  onClick={handleLivePriceRefresh}
-                  disabled={isRefreshingPrices}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-                  title="Update live card market prices via Scryfall"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isRefreshingPrices ? 'animate-spin text-violet-400' : ''}`} />
-                  <span className="hidden sm:inline">Prices</span>
-                </button>
-
-                <button
-                  onClick={() => setShowHandSimulator(true)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
-                  title="Simulate opening 7-card hand and mulligans"
-                >
-                  <Play className="w-3 h-3 text-emerald-400" />
-                  <span>Hand</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setExportModalInitialTab('export');
-                    setShowExportModal(true);
+                <select
+                  value={deck.format}
+                  onChange={(e) => {
+                    const newFormat = e.target.value as MTGFormat;
+                    setFormat(newFormat);
+                    onUpdateDeck({ ...deck, format: newFormat, updatedAt: Date.now() });
+                    setHasUnsavedChanges(true);
                   }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
-                  title="Export deck to BBCode, TappedOut, Moxfield, MTGO, Excel, etc."
+                  className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 capitalize font-bold outline-none cursor-pointer focus:border-violet-500/50 hover:bg-slate-800 shadow-xs"
                 >
-                  <Share2 className="w-3 h-3 text-violet-400" />
-                  <span>Export</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setExportModalInitialTab('import');
-                    setShowExportModal(true);
-                  }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
-                  title="Import deck from BBCode, TappedOut, Moxfield, MTGO (.dek/text), CSV, Excel, or Text"
-                >
-                  <Upload className="w-3 h-3 text-sky-400" />
-                  <span>Import</span>
-                </button>
-
-                {/* New Deck Button: Saves current deck & creates a new one */}
-                <button
-                  type="button"
-                  onClick={handleSaveAndCreateNewDeck}
-                  disabled={isSavingNewDeck}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-violet-400 border border-slate-700 hover:border-violet-500/50 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-xs active:scale-98"
-                  title="Save existing deck and create a new deck"
-                >
-                  <Plus className={`w-3.5 h-3.5 text-violet-400 ${isSavingNewDeck ? 'animate-spin' : ''}`} />
-                  <span>{isSavingNewDeck ? 'Saving...' : 'New Deck'}</span>
-                </button>
-
-
+                  <option value="commander">Commander / EDH</option>
+                  <option value="standard">Standard</option>
+                  <option value="modern">Modern</option>
+                  <option value="pioneer">Pioneer</option>
+                  <option value="legacy">Legacy</option>
+                  <option value="vintage">Vintage</option>
+                  <option value="pauper">Pauper</option>
+                  <option value="casual">Casual</option>
+                </select>
               </div>
-            </div>
-          )}
-
-          {/* Description line if exists and not editing */}
-          {!isEditingTitle && deck.description && (
-            <p className="text-[11px] text-slate-400 truncate max-w-3xl pl-1">
-              {deck.description}
-            </p>
-          )}
-
-          {/* Commander Strip in Deck Header */}
-          {deck.format === 'commander' && (
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80 flex-wrap text-xs">
-              <span className="text-[11px] uppercase font-bold text-fuchsia-400 tracking-wider flex items-center gap-1.5 shrink-0">
-                <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
-                <span>{commanderCards.length === 2 ? 'Commanders (Partner):' : 'Commander:'}</span>
-              </span>
-
-              {commanderCards.length > 0 ? (
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  {commanderCards.map((cmdr, cIdx) => (
-                    <div
-                      key={cmdr.id}
-                      className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-fuchsia-500/30 text-xs shadow-xs"
-                    >
-                      <span className="text-[10px] font-semibold text-fuchsia-400">
-                        {cIdx === 0 ? '👑 Commander' : '👑 Partner'}
-                      </span>
-                      <span
-                        onClick={() => onSelectCard(toScryfallCard(cmdr))}
-                        className="font-bold text-white hover:text-fuchsia-300 cursor-pointer truncate max-w-[200px]"
-                        title={cmdr.name}
-                      >
-                        {cmdr.name}
-                      </span>
-                      {cmdr.mana_cost && (
-                        <div className="shrink-0 scale-90">
-                          <ManaCostBadge manaCost={cmdr.mana_cost} size="sm" />
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleChangeCardCategory(cmdr.id, 'main')}
-                        className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
-                        title="Demote to regular deck card"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-
-                  {commanderCards.length === 1 && (
-                    <span className="text-[11px] text-slate-400 italic">
-                      {firstCmdrPartnerInfo?.canHavePartner
-                        ? `(${firstCmdrPartnerInfo.description})`
-                        : '(Single Commander)'}
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <span className="text-[11px] text-slate-500 italic">
-                  No commander assigned yet. Click &quot;Set Commander&quot; on any legendary creature in your deck.
-                </span>
-              )}
             </div>
           )}
 
@@ -1337,6 +1310,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         onCancel={() => {
           setConfirmState((prev) => ({ ...prev, isOpen: false }));
           setHasUnsavedChanges(false);
+          DeckService.revertDeck(deck.id);
           onBack();
         }}
       />
@@ -1361,6 +1335,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           }
         }}
         initialTab={exportModalInitialTab}
+      />
+
+      {/* Deck Comparison Modal */}
+      <DeckCompareModal
+        isOpen={showCompareModal}
+        onClose={() => setShowCompareModal(false)}
+        deck={deck}
+        historyList={historyList}
       />
     </div>
   );

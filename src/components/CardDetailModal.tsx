@@ -9,7 +9,8 @@ import {
   Check, 
   Sparkles, 
   Layers, 
-  Loader2
+  Loader2,
+  Crown
 } from 'lucide-react';
 import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
 import { getCardImageUrl, getCardBackImageUrl, getCardById } from '../services/scryfall';
@@ -48,6 +49,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [deckQuantity, setDeckQuantity] = useState(1);
   const [deckIsFoil, setDeckIsFoil] = useState(false);
   const [deckAddedToast, setDeckAddedToast] = useState(false);
+  const [deckAddedCategory, setDeckAddedCategory] = useState<DeckCategory>('main');
 
   // Collection add state
   const [colQuantity, setColQuantity] = useState(1);
@@ -103,12 +105,14 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     ? isCardLegalInCommander(displayCard, commanderInfo!.colorIdentity)
     : { isLegal: true };
 
-  const handleDeckAdd = () => {
-    if (!commanderLegality.isLegal) {
-      return;
+  const handleDeckAdd = (targetCategory: DeckCategory) => {
+    if (isCommanderFormat && hasCommander && targetCategory !== 'commander' && displayCard) {
+      const legality = isCardLegalInCommander(displayCard, commanderInfo!.colorIdentity);
+      if (!legality.isLegal) return;
     }
     if (onAddCardToDeck && displayCard) {
-      onAddCardToDeck(displayCard, deckCategory, deckQuantity, deckIsFoil);
+      onAddCardToDeck(displayCard, targetCategory, deckQuantity, deckIsFoil);
+      setDeckAddedCategory(targetCategory);
       setDeckAddedToast(true);
       setTimeout(() => setDeckAddedToast(false), 2000);
     }
@@ -291,8 +295,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 );
 
                 const isBasicOrUnlimited = displayCard
-                  ? /Basic Land/i.test(displayCard.type_line || '') ||
-                    (displayCard.oracle_text && /A deck can have any number of cards named/i.test(displayCard.oracle_text))
+                  ? /Basic Land/i.test(displayCard.type_line || (displayCard as any).typeLine || '') ||
+                    Boolean((displayCard.oracle_text || displayCard.card_faces?.[0]?.oracle_text) && /A deck can have any number of/i.test(displayCard.oracle_text || displayCard.card_faces?.[0]?.oracle_text || ''))
                   : false;
 
                 const deckLimit = isBasicOrUnlimited ? 999 : (isSingleton ? 1 : 4);
@@ -320,19 +324,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                         <span>Foil</span>
                       </label>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={deckCategory}
-                        onChange={(e) => setDeckCategory(e.target.value as DeckCategory)}
-                        className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-fuchsia-500"
-                      >
-                        <option value="main">Mainboard</option>
-                        <option value="commander">Commander Slot</option>
-                        <option value="sideboard">Sideboard</option>
-                        <option value="maybeboard">Maybeboard</option>
-                      </select>
-
-                      <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 shrink-0">
                         <span className="text-xs text-slate-400 mr-1.5">Qty:</span>
                         <input
                           type="number"
@@ -344,36 +337,72 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                         />
                       </div>
 
-                      <button
-                        onClick={handleDeckAdd}
-                        disabled={!commanderLegality.isLegal || isAtDeckLimit}
-                        className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                          !commanderLegality.isLegal
-                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-red-900/50'
-                            : isAtDeckLimit
-                              ? 'bg-slate-800 text-fuchsia-500/70 border border-fuchsia-800/40 cursor-not-allowed'
-                              : 'bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 cursor-pointer'
-                        }`}
-                      >
-                        {deckAddedToast ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : isAtDeckLimit ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
+                      <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+                        <button
+                          type="button"
+                          onClick={() => handleDeckAdd('main')}
+                          disabled={!commanderLegality.isLegal || isAtDeckLimit}
+                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            !commanderLegality.isLegal || isAtDeckLimit
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                              : 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white cursor-pointer shadow-sm active:scale-95'
+                          }`}
+                          title={isAtDeckLimit ? `At limit (${deckCopies}/${deckLimit})` : 'Add to Mainboard'}
+                        >
                           <Plus className="w-3.5 h-3.5" />
+                          <span>Main</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeckAdd('sideboard')}
+                          disabled={!commanderLegality.isLegal || isAtDeckLimit}
+                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            !commanderLegality.isLegal || isAtDeckLimit
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                              : 'bg-slate-800 hover:bg-fuchsia-600 hover:text-white text-slate-200 border border-slate-700 cursor-pointer shadow-sm active:scale-95'
+                          }`}
+                          title={isAtDeckLimit ? `At limit (${deckCopies}/${deckLimit})` : 'Add to Sideboard'}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Side</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeckAdd('maybeboard')}
+                          disabled={!commanderLegality.isLegal}
+                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            !commanderLegality.isLegal
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                              : 'bg-slate-800 hover:bg-fuchsia-600 hover:text-white text-slate-200 border border-slate-700 cursor-pointer shadow-sm active:scale-95'
+                          }`}
+                          title="Add to Maybeboard"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Maybe</span>
+                        </button>
+
+                        {isCommanderFormat && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeckAdd('commander')}
+                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/40 cursor-pointer shadow-sm active:scale-95"
+                            title="Add as Commander / Partner"
+                          >
+                            <Crown className="w-3.5 h-3.5" />
+                            <span>Cmdr</span>
+                          </button>
                         )}
-                        <span>
-                          {deckAddedToast
-                            ? 'Added!'
-                            : (!commanderLegality.isLegal
-                              ? 'Illegal Identity'
-                              : isAtDeckLimit
-                                ? `At Limit (${deckCopies}/${deckLimit})`
-                                : 'Add to Deck')}
-                        </span>
-                      </button>
+                      </div>
                     </div>
 
+                    {deckAddedToast && (
+                      <div className="mt-2 text-xs text-emerald-400 flex items-center gap-1 font-semibold animate-fadeIn">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Added {deckQuantity}x to {deckAddedCategory === 'main' ? 'Mainboard' : deckAddedCategory === 'sideboard' ? 'Sideboard' : deckAddedCategory === 'maybeboard' ? 'Maybeboard' : 'Commander Slot'}!</span>
+                      </div>
+                    )}
                     {!commanderLegality.isLegal && (
                       <div className="mt-2.5 px-2.5 py-1.5 rounded-lg bg-red-950/40 border border-red-800/60 text-[11px] text-red-300 flex items-start gap-1.5">
                         <span className="font-bold">⚠️ Illegal for Commander:</span>
