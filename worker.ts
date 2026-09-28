@@ -42,7 +42,7 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Api-Target, X-Api-Base-Url',
+          'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Username, X-Email, X-Api-Target, X-Api-Base-Url',
           'Access-Control-Max-Age': '86400',
         },
       });
@@ -51,7 +51,7 @@ export default {
     const corsHeaders: Record<string, string> = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Api-Target, X-Api-Base-Url',
+      'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Vault-Id, X-User-Id, X-Username, X-Email, X-Api-Target, X-Api-Base-Url',
     };
 
     // 2. Health & Diagnostics Check
@@ -73,12 +73,14 @@ export default {
       );
     }
 
-    // 3. Remote MtgTools & DeckBuilder API Proxy
-    if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder')) {
+    // 3. Remote MtgTools, DeckBuilder, & Security API Proxy
+    if (url.pathname.startsWith('/mtgtools') || url.pathname.startsWith('/deckbuilder') || url.pathname.startsWith('/security')) {
       const targetUrl = `${apiTarget}${url.pathname}${url.search}`;
       const vaultId = request.headers.get('x-vault-id');
       const userId = request.headers.get('x-user-id');
-      console.log(`[Worker Proxy] 🔀 ${request.method} ${url.pathname} -> ${targetUrl} [Vault: ${vaultId || 'none'}]`);
+      const username = request.headers.get('x-username');
+      const email = request.headers.get('x-email');
+      console.log(`[Worker Proxy] 🔀 ${request.method} ${url.pathname} -> ${targetUrl} [User: ${username || userId || vaultId || 'none'}]`);
 
       try {
         const headers: Record<string, string> = {
@@ -88,6 +90,8 @@ export default {
         if (contentType) headers['Content-Type'] = contentType;
         if (vaultId) headers['X-Vault-Id'] = vaultId;
         if (userId) headers['X-User-Id'] = userId;
+        if (username) headers['X-Username'] = username;
+        if (email) headers['X-Email'] = email;
         const auth = request.headers.get('authorization');
         if (auth) headers['Authorization'] = auth;
 
@@ -178,11 +182,11 @@ export default {
         if (!edhrecRes.ok) {
           return new Response(
             JSON.stringify({
-              container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
+              error: `EDHREC request failed with status ${edhrecRes.status}`,
               status: edhrecRes.status,
             }),
             {
-              status: 200,
+              status: edhrecRes.status,
               headers: { 'Content-Type': 'application/json', ...corsHeaders },
             }
           );
@@ -193,29 +197,23 @@ export default {
           status: 200,
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=7200',
+            'Cache-Control': 'public, max-age=1800, s-maxage=7200',
             ...corsHeaders,
           },
         });
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({
-            container: { json_dict: { card: { num_decks: 0 }, cardlists: [] } },
-            error: err.message,
-          }),
-          {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          }
-        );
+        return new Response(JSON.stringify({ error: err.message || 'EDHREC proxy error' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
       }
     }
 
-    // 6. Static Assets (SPA fallback)
+    // 6. Static Asset Serving (Frontend SPA)
     if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
+      return await env.ASSETS.fetch(request);
     }
 
-    return new Response('Not Found', { status: 404 });
+    return new Response('Not found', { status: 404 });
   },
 };

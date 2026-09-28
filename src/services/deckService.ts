@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Consolidated MTG Deck, Collection & Remote API Service
  * Handles direct communication with remote C# Web API (api.frostpointlabs.com)
  * and manages reactive in-memory state for decks and binders.
@@ -6,6 +6,7 @@
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
 import { fetchBatchCardPrices, fetchBatchCardsCollection } from './scryfall';
+import { AuthService } from './authService';
 import {
   createDeckListApi,
   createDeckPickListApi,
@@ -1594,6 +1595,11 @@ export class DeckService {
    * Fetch all decks and binders from the remote API
    */
   public static async syncWithRemote(): Promise<void> {
+    if (!AuthService.isLoggedIn()) {
+      console.log('[DeckService] User is not logged in. Operating in local guest mode.');
+      this.setStatus('synced');
+      return;
+    }
     console.log('[DeckService] 🔄 Starting syncWithRemote()...');
     this.setStatus('syncing');
 
@@ -2151,8 +2157,32 @@ export class DeckService {
     return getRemoteBBCode(color, 3);
   }
 
-  
+  /**
+   * Reset in-memory library state on user logout
+   */
+  public static clearUserData(): void {
+    console.log('[DeckService] 🧹 Clearing user data on logout.');
+    this.inMemoryDecks = [];
+    this.lastSavedDecks.clear();
+    this.unsavedDeckIds.clear();
+    this.inMemoryBinders = [DEFAULT_BINDER];
+    this.notifyDecks();
+    this.notifyBinders();
+    this.notifyUnsavedChanges();
+    this.setStatus('synced');
+  }
 }
+
+// Wire auth state changes to DeckService sync & cleanup
+AuthService.onAuthStateChanged((user) => {
+  if (user) {
+    console.log(`[DeckService] 🔑 User authenticated as "${user.username}". Triggering syncWithRemote...`);
+    DeckService.syncWithRemote();
+  } else {
+    console.log('[DeckService] 🔒 User logged out. Clearing local library data.');
+    DeckService.clearUserData();
+  }
+});
 
 /**
  * Re-export remote API layout and picklist helpers

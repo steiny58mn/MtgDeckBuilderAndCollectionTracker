@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,9 +11,11 @@ import {
   DeckCategory, 
   CardCondition, 
   DeckCard,
-  Binder
+  Binder,
+  MTGFormat
 } from './types/mtg';
 import { DeckService, SyncStatus } from './services/deckService';
+import { AuthService, UserDto } from './services/authService';
 import { Navbar } from './components/Navbar';
 import { DeckList } from './components/DeckList';
 import { DeckBuilder } from './components/DeckBuilder';
@@ -21,11 +23,13 @@ import { CollectionManager } from './components/CollectionManager';
 import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
 import { BinderList } from './components/BinderList';
+import { AuthModal, AuthMode } from './components/AuthModal';
+import { LoginPage } from './components/LoginPage';
 import { getCardImageUrl } from './services/scryfall';
 import { getDeckCommander, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search'>('decks');
+  const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search' | 'login'>('decks');
   const [searchContext, setSearchContext] = useState<'deck' | 'binder'>('deck');
   const [searchTargetCategory, setSearchTargetCategory] = useState<DeckCategory>('main');
   const [searchPartnerMode, setSearchPartnerMode] = useState<boolean>(false);
@@ -35,8 +39,15 @@ export default function App() {
   const [activeBinder, setActiveBinder] = useState<Binder | null>(null);
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+
+  // Authentication State
+  const [user, setUser] = useState<UserDto | null>(() => AuthService.getCurrentUser());
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<AuthMode>('login');
+  const [authModalReason, setAuthModalReason] = useState<string | undefined>(undefined);
+  const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
   
-  // Modals
+  // Modals & Notifications
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
   const [globalToast, setGlobalToast] = useState<{
     message: string;
@@ -57,7 +68,16 @@ export default function App() {
     }, 4500);
   };
 
-  // Subscribe to Turso Database & local cache
+  // Wire auth changes and validate session in background
+  useEffect(() => {
+    const unsubAuth = AuthService.onAuthStateChanged((u) => {
+      setUser(u);
+    });
+    AuthService.validateSession();
+    return unsubAuth;
+  }, []);
+
+  // Subscribe to reactive database & local library state
   useEffect(() => {
     const unsubDecks = DeckService.subscribeDecks((updatedDecks) => {
       console.log(`[App] 📥 Received updated decks (${updatedDecks.length} deck(s)):`, updatedDecks.map(d => ({
@@ -104,6 +124,48 @@ export default function App() {
     };
   }, [activeDeck?.id, activeBinder?.id]);
 
+  /**
+   * Helper to gate actions that require saving to user account
+   */
+  const requireAuth = (reason: string, action: () => Promise<void> | void): boolean => {
+    if (AuthService.isLoggedIn()) return true;
+    setAuthModalReason(reason);
+    setAuthModalMode('login');
+    setPendingAction(() => async () => {
+      await action();
+    });
+    setAuthModalOpen(true);
+    return false;
+  };
+
+  /**
+   * Post-login / register handler: completes any pending action and syncs library
+   */
+  const handleAuthSuccess = async (loggedInUser: UserDto) => {
+    setUser(loggedInUser);
+    showToast(`Welcome back, ${loggedInUser.username}!`, 'success');
+    if (activeTab === 'login') {
+      setActiveTab('decks');
+    }
+    if (pendingAction) {
+      const action = pendingAction;
+      setPendingAction(null);
+      try {
+        await action();
+      } catch (err: any) {
+        console.error('[App] Failed to execute pending action after login:', err);
+        showToast(err?.message || 'Could not save pending changes.', 'info');
+      }
+    }
+  };
+
+  const handleLogout = () => {
+    AuthService.logout();
+    setActiveDeck(null);
+    setActiveBinder(null);
+    showToast('Signed out of your account.', 'info');
+  };
+
   // Deck operations
   const handleCreateDeck = async (newDeckData: Partial<Deck>) => {
     const newDeck: Deck = {
@@ -129,12 +191,39 @@ export default function App() {
   };
 
   const handleSaveDeck = async (deckToSave: Deck) => {
+    if (!requireAuth(`Please sign in or create an account to save "${deckToSave.name}"!`, () => handleSaveDeck(deckToSave))) {
+      return;
+    }
+
     await DeckService.saveDeck(deckToSave);
     setActiveDeck(deckToSave);
     showToast(`Saved "${deckToSave.name}"!`, 'success');
   };
 
   const handleImportAsNewDeck = async (newDeck: Deck, shouldSaveCurrentDeck: boolean) => {
+    if (!AuthService.isLoggedIn()) {
+      // Allow importing and viewing in-memory without login
+      DeckService.updateDeckInMemory(newDeck);
+      setActiveDeck(newDeck);
+      setActiveTab('decks');
+      showToast(
+        `Imported draft "${newDeck.name}" (${newDeck.cards.reduce((s, c) => s + c.quantity, 0)} cards) - sign in to save to cloud!`,
+        'info',
+        'Sign In to Save',
+        () => {
+          setAuthModalReason(`Sign in or create an account to save "${newDeck.name}"!`);
+          setAuthModalMode('login');
+          setPendingAction(() => async () => {
+            await DeckService.saveDeck(newDeck);
+            setActiveDeck(newDeck);
+            showToast(`Saved "${newDeck.name}"!`, 'success');
+          });
+          setAuthModalOpen(true);
+        }
+      );
+      return;
+    }
+
     if (shouldSaveCurrentDeck && activeDeck) {
       await DeckService.saveDeck({ ...activeDeck, updatedAt: Date.now() });
     }
@@ -151,6 +240,10 @@ export default function App() {
   };
 
   const handleCreateNewDeckFromExisting = async (currentDeckToSave: Deck) => {
+    if (!requireAuth(`Please sign in or create an account to save your decks!`, () => handleCreateNewDeckFromExisting(currentDeckToSave))) {
+      return;
+    }
+
     // 1. Save the existing deck with its latest modifications
     await DeckService.saveDeck({ ...currentDeckToSave, updatedAt: Date.now() });
 
@@ -204,6 +297,14 @@ export default function App() {
         id: `card-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       })),
     };
+
+    if (!AuthService.isLoggedIn()) {
+      DeckService.updateDeckInMemory(duplicated);
+      setActiveDeck(duplicated);
+      setActiveTab('decks');
+      showToast(`Duplicated "${sourceDeck.name}" as draft - sign in to save!`, 'info');
+      return;
+    }
 
     await DeckService.saveDeck(duplicated);
     showToast(`Duplicated "${sourceDeck.name}"`);
@@ -265,138 +366,93 @@ export default function App() {
     }
 
     const currentCards = [...latestActiveDeck.cards];
-    const existingIdx = currentCards.findIndex(
-      (c) => c.scryfallId === card.id && c.category === category && Boolean(c.isFoil) === isFoil
+    const existingCardIndex = currentCards.findIndex(
+      (c) => c.scryfallId === card.id && c.category === category && c.isFoil === isFoil
     );
 
-    let updatedCover = latestActiveDeck.coverCardUrl;
-    let updatedCommanderName = latestActiveDeck.commanderName;
-    let updatedCommanderArt = latestActiveDeck.commanderArtUrl;
-    let updatedCommanderId = latestActiveDeck.commanderId;
-    let updatedCommanderColorIdentity = latestActiveDeck.commanderColorIdentity;
+    const priceUsd = isFoil && card.prices?.usd_foil 
+      ? parseFloat(card.prices.usd_foil) 
+      : (card.prices?.usd ? parseFloat(card.prices.usd) : 0);
 
-    const imgUrl = getCardImageUrl(card, 'normal');
-
-    if (category === 'commander') {
-      const existingCmdrs = currentCards.filter((c) => c.category === 'commander');
-      // If we already have 2 commanders, replace the secondary commander
-      if (existingCmdrs.length >= 2) {
-        const secondaryCmdr = existingCmdrs[1];
-        const removeIdx = currentCards.findIndex((c) => c.id === secondaryCmdr.id);
-        if (removeIdx >= 0) {
-          currentCards.splice(removeIdx, 1);
-        }
-      }
-
-      const otherCommanders = currentCards.filter((c) => c.category === 'commander' && c.scryfallId !== card.id);
-      const allCmdrs = [...otherCommanders, { name: card.name, color_identity: card.color_identity || [] }];
-      updatedCommanderName = allCmdrs.map((c) => c.name).join(' // ');
-      updatedCommanderArt = latestActiveDeck.commanderArtUrl || getCardImageUrl(card, 'art_crop');
-      updatedCover = updatedCommanderArt;
-      updatedCommanderId = otherCommanders[0]?.scryfallId || card.id;
-      const combined = Array.from(
-        new Set(
-          allCmdrs.flatMap((c) => {
-            if (c.color_identity && c.color_identity.length > 0) return c.color_identity;
-            const matches = (c as any).mana_cost?.match(/[WUBRG]/gi) || [];
-            return matches.map((m: string) => m.toUpperCase());
-          })
-        )
-      );
-      updatedCommanderColorIdentity = sortWUBRG(combined);
-    } else if (!updatedCover) {
-      updatedCover = getCardImageUrl(card, 'art_crop');
-    }
-
-    if (existingIdx >= 0) {
-      currentCards[existingIdx] = {
-        ...currentCards[existingIdx],
-        quantity: currentCards[existingIdx].quantity + quantity
+    if (existingCardIndex >= 0) {
+      currentCards[existingCardIndex] = {
+        ...currentCards[existingCardIndex],
+        quantity: currentCards[existingCardIndex].quantity + quantity
       };
     } else {
-      const newDeckCard: DeckCard = {
-        id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      const newCard: DeckCard = {
+        id: `card-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         scryfallId: card.id,
         name: card.name,
         set: card.set,
         set_name: card.set_name,
         collector_number: card.collector_number,
-        category,
-        quantity,
-        isFoil,
+        category: category,
+        quantity: quantity,
+        isFoil: isFoil,
         mana_cost: card.mana_cost,
         cmc: card.cmc,
         type_line: card.type_line,
-        oracle_text: card.oracle_text || card.card_faces?.[0]?.oracle_text,
-        keywords: card.keywords,
         colors: card.colors,
         color_identity: card.color_identity,
         rarity: card.rarity,
-        imageUrl: imgUrl,
-        priceUsd: card.prices?.usd ? parseFloat(card.prices.usd) : undefined,
-        priceUsdFoil: card.prices?.usd_foil ? parseFloat(card.prices.usd_foil) : undefined,
+        imageUrl: getCardImageUrl(card, 'normal'),
+        priceUsd: priceUsd,
       };
-      currentCards.push(newDeckCard);
+      currentCards.push(newCard);
+    }
+
+    // Auto-update commander metadata if designating a commander
+    let updatedCommanderName = latestActiveDeck.commanderName;
+    let updatedCommanderArt = latestActiveDeck.commanderArtUrl;
+    let updatedCommanderId = latestActiveDeck.commanderId;
+    let updatedCommanderColors = latestActiveDeck.commanderColorIdentity;
+
+    if (category === 'commander') {
+      const commanders = currentCards.filter((c) => c.category === 'commander');
+      updatedCommanderName = commanders.map((c) => c.name).join(' // ');
+      updatedCommanderArt = commanders[0]?.imageUrl;
+      updatedCommanderId = commanders[0]?.scryfallId;
+      updatedCommanderColors = sortWUBRG(
+        Array.from(new Set(commanders.flatMap((c) => c.color_identity || [])))
+      );
     }
 
     const updatedDeck: Deck = {
       ...latestActiveDeck,
       cards: currentCards,
-      coverCardUrl: updatedCover,
       commanderName: updatedCommanderName,
       commanderArtUrl: updatedCommanderArt,
       commanderId: updatedCommanderId,
-      commanderColorIdentity: updatedCommanderColorIdentity,
+      commanderColorIdentity: updatedCommanderColors,
       updatedAt: Date.now(),
     };
 
     DeckService.updateDeckInMemory(updatedDeck);
     setActiveDeck(updatedDeck);
-    const categoryLabel = category === 'main' ? 'Mainboard' : category === 'sideboard' ? 'Sideboard' : category === 'maybeboard' ? 'Maybeboard' : 'Commander';
     showToast(
-      `Added ${quantity}x "${card.name}" to ${categoryLabel} (${latestActiveDeck.name})`,
+      `Added ${quantity}x "${card.name}" to ${latestActiveDeck.name}`,
       'success',
       'Return to Deck →',
       () => setActiveTab('decks')
     );
   };
 
-  // Add collection card to active deck
+  // Add card from collection to active deck
   const handleAddCollectionItemToDeck = async (item: CollectionCard) => {
     if (!activeDeck) {
-      showToast('Select a deck first to add cards from your binder.', 'info');
+      showToast('Please select a deck first from the Decks tab!', 'info');
       setActiveTab('decks');
       return;
     }
 
-    // Get latest state
     const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
-    // Check Commander rules for collection additions
+    // Commander singleton check
     if (latestActiveDeck.format === 'commander') {
-      const commanderInfo = getDeckCommander(latestActiveDeck);
-      if (commanderInfo.hasCommander) {
-        const legality = isCardLegalInCommander(
-          {
-            name: item.name,
-            color_identity: item.color_identity,
-            colors: item.colors,
-            type_line: item.type_line,
-          },
-          commanderInfo.colorIdentity
-        );
-        if (!legality.isLegal) {
-          showToast(
-            `Illegal Card: "${item.name}" color identity does not fit Commander (${commanderInfo.colorIdentity.join('') || 'C'})`,
-            'info'
-          );
-          return;
-        }
-      }
-
-      const isBasic = /Basic Land/i.test(item.type_line || (item as any).typeLine || '');
-      const hasUnlimitedRule = (item.oracle_text || (item as any).oracleText)
-        ? /A deck can have any number of/i.test(item.oracle_text || (item as any).oracleText || '')
+      const isBasic = /Basic Land/i.test(item.type_line || '');
+      const hasUnlimitedRule = item.oracle_text
+        ? /A deck can have any number of/i.test(item.oracle_text)
         : false;
       if (!isBasic && !hasUnlimitedRule) {
         const cleanName = item.name.split(' // ')[0].trim().toLowerCase();
@@ -467,6 +523,10 @@ export default function App() {
     condition: CardCondition = 'NM',
     acquiredPrice?: number
   ) => {
+    if (!requireAuth('Please sign in or create an account to save cards to your collection binder!', () => handleAddCardToCollection(card, quantity, isFoil, condition, acquiredPrice))) {
+      return;
+    }
+
     let targetBinder = activeBinder;
 
     // Auto-create a binder with a generic name if none exists
@@ -539,6 +599,10 @@ export default function App() {
   };
 
   const handleCreateBinder = async (name: string, description?: string) => {
+    if (!requireAuth(`Please sign in or create an account to save binder "${name}"!`, () => handleCreateBinder(name, description))) {
+      return;
+    }
+
     const newBinder = await DeckService.createBinder(name, description);
     setActiveBinder(newBinder);
     showToast(`Created binder "${name}"`);
@@ -553,6 +617,9 @@ export default function App() {
   };
 
   const handleUpdateCollectionCard = async (card: CollectionCard) => {
+    if (!requireAuth('Please sign in or create an account to update cards in your collection!', () => handleUpdateCollectionCard(card))) {
+      return;
+    }
     await DeckService.saveCollectionCard(card);
   };
 
@@ -562,11 +629,11 @@ export default function App() {
   };
 
   // Top-level tab change handler:
-  const handleTabChange = async (tab: 'decks' | 'collection' | 'search') => {
+  const handleTabChange = async (tab: 'decks' | 'collection' | 'search' | 'login') => {
     if (tab === 'decks') {
       setActiveTab('decks');
     } else if (tab === 'collection') {
-      if (activeBinder) {
+      if (activeBinder && AuthService.isLoggedIn()) {
         await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
         setActiveBinder(null);
       }
@@ -590,10 +657,26 @@ export default function App() {
           setActiveDeck(deck);
           setActiveTab('decks');
         }}
+        user={user}
+        onOpenAuth={(mode) => {
+          setAuthModalMode(mode || 'login');
+          setAuthModalReason(undefined);
+          setAuthModalOpen(true);
+        }}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {/* Dedicated Login Tab */}
+        {activeTab === 'login' && (
+          <LoginPage
+            onLoginSuccess={handleAuthSuccess}
+            onNavigateHome={() => setActiveTab('decks')}
+            reason={authModalReason}
+          />
+        )}
+
         {/* Decks Tab */}
         {activeTab === 'decks' && (
           activeDeck ? (
@@ -654,7 +737,7 @@ export default function App() {
               }}
               onSelectCard={(c) => setInspectedCard(c)}
               onBackToDashboard={async () => {
-                if (activeBinder) {
+                if (activeBinder && AuthService.isLoggedIn()) {
                   await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
                 }
                 setActiveBinder(null);
@@ -712,8 +795,18 @@ export default function App() {
         }}
       />
 
-
-
+      {/* Auth Modal (Sign In / Register / Change Password) */}
+      <AuthModal
+        isOpen={authModalOpen}
+        initialMode={authModalMode}
+        reason={authModalReason}
+        onClose={() => {
+          setAuthModalOpen(false);
+          setPendingAction(null);
+          setAuthModalReason(undefined);
+        }}
+        onSuccess={handleAuthSuccess}
+      />
 
       {/* Global Interactive Notification Toast */}
       {globalToast && (
