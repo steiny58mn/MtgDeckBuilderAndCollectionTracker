@@ -1,8 +1,9 @@
-﻿import { useEffect } from 'react';
+import { useEffect } from 'react';
 
 let lockCount = 0;
 let prevBodyOverflow = '';
 let prevHtmlOverflow = '';
+let prevBodyOverscroll = '';
 
 /**
  * Locks background body and document scrolling when a modal or overlay is open.
@@ -15,8 +16,11 @@ export function useBodyScrollLock(isLocked: boolean) {
     if (lockCount === 0) {
       prevBodyOverflow = document.body.style.overflow;
       prevHtmlOverflow = document.documentElement.style.overflow;
+      prevBodyOverscroll = document.body.style.overscrollBehavior;
+
       document.body.style.overflow = 'hidden';
       document.documentElement.style.overflow = 'hidden';
+      document.body.style.overscrollBehavior = 'contain';
     }
     lockCount++;
 
@@ -26,6 +30,7 @@ export function useBodyScrollLock(isLocked: boolean) {
         lockCount = 0;
         document.body.style.overflow = prevBodyOverflow;
         document.documentElement.style.overflow = prevHtmlOverflow;
+        document.body.style.overscrollBehavior = prevBodyOverscroll;
       }
     };
   }, [isLocked]);

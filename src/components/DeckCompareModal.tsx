@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { 
   X,
@@ -290,6 +291,8 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 

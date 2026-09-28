@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -88,6 +89,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
   const [showPendingChangesModal, setShowPendingChangesModal] = useState(false);
+  useBodyScrollLock(showPendingChangesModal);
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>(() => {
     try {

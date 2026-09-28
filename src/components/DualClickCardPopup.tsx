@@ -1,3 +1,4 @@
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { X, RotateCw, Sparkles } from 'lucide-react';
 
