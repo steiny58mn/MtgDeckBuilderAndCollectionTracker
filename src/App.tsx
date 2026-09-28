@@ -685,7 +685,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 max-w-[1920px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 sm:py-8">
         {/* Dedicated Login Tab */}
         {activeTab === 'login' && (
           <LoginPage
@@ -696,8 +696,8 @@ export default function App() {
         )}
 
         {/* Decks Tab */}
-        {activeTab === 'decks' && (
-          activeDeck ? (
+        <div className={activeTab === 'decks' ? 'block' : 'hidden'}>
+          {activeDeck ? (
             <DeckBuilder
               deck={activeDeck}
               onBack={() => {
@@ -734,8 +734,8 @@ export default function App() {
               onImportOverwriteDeck={handleImportOverwriteDeck}
               onBatchImportCompleted={handleBatchImportCompleted}
             />
-          )
-        )}
+          )}
+        </div>
 
         {/* Collection Tab */}
         {activeTab === 'collection' && (

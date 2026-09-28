@@ -1994,7 +1994,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
       {/* Cards Grid */}
       {displayedCards.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-5 gap-4 sm:gap-5">
           {displayedCards.map((card) => {
             const price = card.prices?.usd ? `$${parseFloat(card.prices.usd).toFixed(2)}` : '—';
             const foilPrice = card.prices?.usd_foil ? `$${parseFloat(card.prices.usd_foil).toFixed(2)}` : null;

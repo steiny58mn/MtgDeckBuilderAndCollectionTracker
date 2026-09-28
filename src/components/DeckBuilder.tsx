@@ -1,5 +1,5 @@
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft,
   GitCompare,
@@ -87,9 +87,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
-  const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>('main');
-  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>('tabbed');
-  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>('name');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>(() => {
+    try {
+      const saved = localStorage.getItem('deck_builder_category_tab');
+      if (saved === 'main' || saved === 'sideboard' || saved === 'maybeboard') return saved;
+    } catch {}
+    return 'main';
+  });
+  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>(() => {
+    try {
+      const saved = localStorage.getItem('deck_builder_view_mode');
+      if (saved === 'grid' || saved === 'tabbed' || saved === 'category-grid') return saved;
+    } catch {}
+    return 'grid'; // Default the display to a grid
+  });
+  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>(() => {
+    try {
+      const saved = localStorage.getItem('deck_builder_sort_by');
+      if (saved === 'name' || saved === 'cmc' || saved === 'color' || saved === 'category') return saved;
+    } catch {}
+    return 'name';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('deck_builder_view_mode', viewMode);
+    } catch {}
+  }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('deck_builder_sort_by', sortCardsBy);
+    } catch {}
+  }, [sortCardsBy]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('deck_builder_category_tab', activeCategoryTab);
+    } catch {}
+  }, [activeCategoryTab]);
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [historyList, setHistoryList] = useState<DeckHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
@@ -914,7 +950,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         {commanderCards.length > 0 ? (
           viewMode === 'grid' ? (
-            <div className="p-3.5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="p-4 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {commanderCards.map((card) => renderCardGridItem(card))}
             </div>
           ) : (
@@ -1760,7 +1796,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   function renderCardListOrGrid(cards: DeckCard[]) {
     if (viewMode === 'grid') {
       return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pt-2">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-5 gap-4 sm:gap-5 pt-2">
           {cards.map((c) => renderCardGridItem(c))}
         </div>
       );
@@ -1776,7 +1812,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   function renderCardRow(card: DeckCard) {
     const unitPrice = getCardUnitPrice(card);
     const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
-    const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
+    const thumbUrl = (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
 
     const isThisCommander = card.category === 'commander';
     const canAddAsCommander =
@@ -1824,7 +1860,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                    e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small`;
+                    e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal`;
                   }
                 }}
               />

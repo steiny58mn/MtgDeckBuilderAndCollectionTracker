@@ -895,7 +895,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
         ) : displayedCards.length > 0 ? (
           viewMode === 'grid' ? (
             /* Grid View */
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-5 gap-4 sm:gap-5">
               {displayedCards.map((card) => {
                 const unitPrice = card.currentPriceUsd || 0;
                 const lineTotal = unitPrice * card.quantity;
