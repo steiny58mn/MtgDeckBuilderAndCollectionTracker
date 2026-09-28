@@ -31,7 +31,8 @@ import {
   generateCSV,
   triggerFileDownload,
   createDeckListApi,
-  createDeckPickListApi
+  createDeckPickListApi,
+  getExportFilenameBase,
 } from '../utils/deckExport';
 import { 
   IMPORT_FORMATS, 
@@ -252,17 +253,17 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
   const handleDownloadExport = () => {
     if (!deck) return;
-    const safeTitle = (deck.name || 'deck').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const filenameBase = getExportFilenameBase(deck);
     if (selectedExportFormat === 'excel') {
       triggerFileDownload(
         exportedContent,
-        `${safeTitle}_collection.xls`,
+        `${filenameBase}.xls`,
         currentExportOption.mimeType
       );
     } else {
       triggerFileDownload(
         exportedContent,
-        `${safeTitle}_${selectedExportFormat}.${currentExportOption.fileExtension}`,
+        `${filenameBase}.${currentExportOption.fileExtension}`,
         currentExportOption.mimeType
       );
     }
@@ -270,16 +271,16 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
   const handleDownloadMTGODek = () => {
     if (!deck) return;
-    const safeTitle = (deck.name || 'deck').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const filenameBase = getExportFilenameBase(deck);
     const dekXml = generateMTGODekXml(deck);
-    triggerFileDownload(dekXml, `${safeTitle}.dek`, 'application/xml;charset=utf-8');
+    triggerFileDownload(dekXml, `${filenameBase}.dek`, 'application/xml;charset=utf-8');
   };
 
   const handleDownloadExcelCSV = () => {
     if (!deck) return;
-    const safeTitle = (deck.name || 'deck').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const filenameBase = getExportFilenameBase(deck);
     const csvData = generateCSV(deck);
-    triggerFileDownload(csvData, `${safeTitle}_excel.csv`, 'text/csv;charset=utf-8');
+    triggerFileDownload(csvData, `${filenameBase}.csv`, 'text/csv;charset=utf-8');
   };
 
   // Helper to parse multiple files into the uploadedBatch queue

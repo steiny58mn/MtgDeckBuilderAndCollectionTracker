@@ -230,9 +230,20 @@ export function generateMTGOText(deck: Deck): string {
  * Magic Online .dek XML format
  */
 export function generateMTGODekXml(deck: Deck): string {
-  const commanderCards = deck.cards.filter((c) => c.category === 'commander');
-  const mainCards = deck.cards.filter((c) => c.category === 'main');
+  let commanderCards = deck.cards.filter((c) => c.category === 'commander');
+  let mainCards = deck.cards.filter((c) => c.category === 'main');
   const sideCards = deck.cards.filter((c) => c.category === 'sideboard');
+
+  // If no cards are categorized as commander, but commanderName is defined, check mainCards
+  if (commanderCards.length === 0 && deck.commanderName) {
+    const matchingCmdr = mainCards.find(
+      (c) => c.name.toLowerCase() === deck.commanderName?.toLowerCase()
+    );
+    if (matchingCmdr) {
+      commanderCards = [matchingCmdr];
+      mainCards = mainCards.filter((c) => c.id !== matchingCmdr.id);
+    }
+  }
 
   const escapeXml = (str: string) =>
     str
@@ -249,8 +260,9 @@ export function generateMTGODekXml(deck: Deck): string {
     '  <Pre modern="false"/>',
   ];
 
+  // In MTGO .dek files, Commanders must be designated in the Sideboard (Sideboard="true")
   commanderCards.forEach((c) => {
-    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="false" Name="${escapeXml(c.name)}" Annotation="0"/>`);
+    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="true" Name="${escapeXml(c.name)}" Annotation="0"/>`);
   });
 
   mainCards.forEach((c) => {
@@ -550,6 +562,43 @@ export function generateExportContent(format: ExportFormatKey, deck: Deck): stri
     default:
       return generatePlainText(deck);
   }
+}
+
+/**
+ * Resolves a clean, capitalized filename base for deck exports.
+ * Uses the Commander's name (or cards categorized as commander),
+ * stripped of punctuation and underscores, with each word capitalized.
+ * Falls back to the deck name if no commander is assigned.
+ */
+export function getExportFilenameBase(deck: Deck): string {
+  let rawName = deck.commanderName;
+
+  if (!rawName && deck.cards && deck.cards.length > 0) {
+    const commanderCards = deck.cards.filter((c) => c.category === 'commander');
+    if (commanderCards.length > 0) {
+      rawName = commanderCards.map((c) => c.name).join(' ');
+    }
+  }
+
+  if (!rawName || !rawName.trim()) {
+    rawName = deck.name || 'Deck';
+  }
+
+  // Remove apostrophes directly so "Praetors'" -> "Praetors", "Urza's" -> "Urzas"
+  const withoutApostrophes = rawName.replace(/['’]/g, '');
+
+  // Strip all punctuation and underscores, replacing with spaces
+  const cleaned = withoutApostrophes.replace(/[^a-zA-Z0-9]+/g, ' ').trim();
+
+  if (!cleaned) {
+    return 'Deck';
+  }
+
+  // Capitalize each word
+  return cleaned
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 /**

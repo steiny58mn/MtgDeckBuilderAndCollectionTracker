@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Deck } from '../types/mtg';
+import { getExportFilenameBase } from '../utils/deckExport';
 import { DeckService } from '../services/deckService';
 import { MTG_COLOR_NAMES, getDeckColorName } from '../utils/deckUtils';
 
@@ -75,9 +76,8 @@ export const GameSummaryModal: React.FC<GameSummaryModalProps> = ({
     const blob = new Blob([bbCode], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
-    link.href = url;
-    link.download = `${safeName}_game_summary.txt`;
+    const filenameBase = getExportFilenameBase(deck);
+    link.download = `${filenameBase} Game Summary.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
