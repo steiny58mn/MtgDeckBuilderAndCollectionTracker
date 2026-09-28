@@ -913,16 +913,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                         onImageClearPreview();
                         onSelectCard(cardToScryfallCard(card));
                       }}
-                      onMouseEnter={(e) =>
-                        onImageMouseEnter(e, {
-                          imageUrl: getCardLargeImageUrl(card),
-                          fallbackUrl: card.imageUrl,
-                          name: card.name,
-                          scryfallId: card.scryfallId,
-                        })
-                      }
-                      onMouseMove={onImageMouseMove}
-                      onMouseLeave={onImageMouseLeave}
                       className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
                     >
                       <img

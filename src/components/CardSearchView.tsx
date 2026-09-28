@@ -2016,9 +2016,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                     handleCardMouseLeave();
                     onSelectCard(card);
                   }}
-                  onMouseEnter={(e) => handleCardMouseEnter(e, card)}
-                  onMouseMove={handleCardMouseMove}
-                  onMouseLeave={handleCardMouseLeave}
                   className="cursor-pointer relative overflow-hidden aspect-[5/7] bg-slate-950"
                 >
                                     {/* Edhrec Stats */}

@@ -1103,7 +1103,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               {commanderCards.map((card) => renderCardGridItem(card))}
             </div>
           ) : (
-            <div className="divide-y divide-slate-800/60">
+            <div className="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {commanderCards.map((card) => renderCardRow(card))}
             </div>
           )
@@ -2157,7 +2157,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       );
     }
     return (
-      <div className="divide-y divide-slate-800/60 bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {cards.map((c) => renderCardRow(c))}
       </div>
     );
@@ -2182,8 +2182,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return (
       <div
         key={card.id}
-        className={`group px-3 py-3 flex flex-col gap-2.5 transition-colors border-b border-slate-800/40 hover:border-slate-700 ${
-          isThisCommander ? 'bg-fuchsia-950/15 hover:bg-fuchsia-950/25' : 'hover:bg-slate-800/50'
+        className={`group p-3 rounded-xl flex flex-col justify-between gap-2.5 transition-all border shadow-sm ${
+          isThisCommander
+            ? 'bg-fuchsia-950/25 border-fuchsia-500/50 shadow-fuchsia-500/5 hover:border-fuchsia-500'
+            : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
         }`}
       >
         {/* Top Row: Card Details */}
@@ -2402,17 +2404,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onImageClearPreview();
             onSelectCard(toScryfallCard(card));
           }}
-          onMouseEnter={(e) =>
-            onImageMouseEnter(e, {
-              imageUrl: getCardLargeImageUrl(card),
-              fallbackUrl: thumbUrl,
-              name: card.name,
-              backImageUrl: card.backImageUrl,
-              scryfallId: card.scryfallId,
-            })
-          }
-          onMouseMove={onImageMouseMove}
-          onMouseLeave={onImageMouseLeave}
           className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
         >
           <img
