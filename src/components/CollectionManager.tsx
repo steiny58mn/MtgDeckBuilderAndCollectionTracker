@@ -1,4 +1,5 @@
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
+import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import { ConfirmModal } from "./ConfirmModal";
 import React, { useState, useEffect } from 'react';
 import { 
@@ -81,6 +82,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
+  const { peekCard, setPeekCard, wasChordTriggeredRecently, getCardChordProps } = useCardDualClickPeek();
   const {
     activePreview: hoverPreview,
     handleMouseEnter: onImageMouseEnter,
@@ -910,10 +912,19 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                     {/* Card Visual */}
                     <div
                       onClick={() => {
+                        if (wasChordTriggeredRecently()) return;
                         onImageClearPreview();
                         onSelectCard(cardToScryfallCard(card));
                       }}
+                      {...getCardChordProps({
+                        name: card.name,
+                        imageUrl: getCardLargeImageUrl(card),
+                        backImageUrl: card.backImageUrl,
+                        scryfallId: card.scryfallId,
+                        price: card.currentPriceUsd,
+                      })}
                       className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
+                      title="Click to inspect, or Right+Left click together to pop up larger image"
                     >
                       <img
                         src={card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}

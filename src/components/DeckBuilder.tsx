@@ -1,4 +1,5 @@
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
+import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft,
@@ -94,10 +95,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     } catch {}
     return 'main';
   });
-  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid'>(() => {
+  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid' | 'piles'>(() => {
     try {
       const saved = localStorage.getItem('deck_builder_view_mode');
-      if (saved === 'grid' || saved === 'tabbed' || saved === 'category-grid') return saved;
+      if (saved === 'grid' || saved === 'tabbed' || saved === 'category-grid' || saved === 'piles') return saved;
     } catch {}
     return 'grid'; // Default the display to a grid
   });
@@ -139,6 +140,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   );
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const { peekCard, setPeekCard, wasChordTriggeredRecently, getCardChordProps } = useCardDualClickPeek();
 
   // Saved baseline cards tracking (to compute unsaved additions and deletions)
   const [savedCards, setSavedCards] = useState<DeckCard[]>(() => {
@@ -1862,6 +1864,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <List className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">List</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('piles')}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
+                viewMode === 'piles' ? 'bg-slate-800 text-violet-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Visual Piles / Stacks View"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Piles</span>
+            </button>
           </div>
 
           <button
@@ -1964,21 +1977,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {activeCategoryTab === 'main' && (
             <div className="space-y-6">
               {renderCommanderPanel()}
-              {Object.entries(groupedMain).map(([groupTitle, cardsInGroup]) => {
-                if (cardsInGroup.length === 0) return null;
-                const groupTotalQty = cardsInGroup.reduce((a, b) => a + b.quantity, 0);
+              {viewMode === 'piles' ? (
+                renderPilesView(mainCards)
+              ) : (
+                Object.entries(groupedMain).map(([groupTitle, cardsInGroup]) => {
+                  if (cardsInGroup.length === 0) return null;
+                  const groupTotalQty = cardsInGroup.reduce((a, b) => a + b.quantity, 0);
 
-                return (
-                  <div key={groupTitle} className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-slate-800 pb-1">
-                      <span>{groupTitle}</span>
-                      <span className="text-violet-400 font-mono">({groupTotalQty})</span>
+                  return (
+                    <div key={groupTitle} className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-slate-800 pb-1">
+                        <span>{groupTitle}</span>
+                        <span className="text-violet-400 font-mono">({groupTotalQty})</span>
+                      </div>
+
+                      {renderCardListOrGrid(cardsInGroup)}
                     </div>
-
-                    {renderCardListOrGrid(cardsInGroup)}
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
 
               {mainCards.length === 0 && (
                 <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
@@ -2004,7 +2021,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="space-y-3">
               <h3 className="text-xs uppercase font-semibold text-slate-400">Sideboard ({stats.sideboardCount})</h3>
               {sideCards.length > 0 ? (
-                renderCardListOrGrid(sideCards)
+                viewMode === 'piles' ? renderPilesView(sideCards) : renderCardListOrGrid(sideCards)
               ) : (
                 <div className="p-8 text-center bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-500 text-xs">
                   Sideboard is empty. Move cards here to swap between matches.
@@ -2018,7 +2035,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="space-y-3">
               <h3 className="text-xs uppercase font-semibold text-slate-400">Maybeboard / Tech ({stats.maybeboardCount})</h3>
               {maybeCards.length > 0 ? (
-                renderCardListOrGrid(maybeCards)
+                viewMode === 'piles' ? renderPilesView(maybeCards) : renderCardListOrGrid(maybeCards)
               ) : (
                 <div className="p-8 text-center bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-500 text-xs">
                   Maybeboard is empty. Save experimental cards and upgrades here.
@@ -2148,6 +2165,335 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     </div>
   );
 
+
+  interface PileGroup {
+    id: string;
+    title: string;
+    cards: DeckCard[];
+    totalQuantity: number;
+    totalPrice: number;
+  }
+
+  function groupCardsIntoPiles(cards: DeckCard[], sortBy: 'category' | 'cmc' | 'color' | 'name'): PileGroup[] {
+    if (cards.length === 0) return [];
+
+    if (sortBy === 'cmc') {
+      const cmcMap = new Map<string, DeckCard[]>();
+      const cmcKeys = ['0', '1', '2', '3', '4', '5', '6', '7+'];
+      cmcKeys.forEach((k) => cmcMap.set(k, []));
+
+      cards.forEach((c) => {
+        const cmc = Math.floor(c.cmc || 0);
+        const key = cmc >= 7 ? '7+' : String(Math.max(0, cmc));
+        if (!cmcMap.has(key)) cmcMap.set(key, []);
+        cmcMap.get(key)!.push(c);
+      });
+
+      const piles: PileGroup[] = [];
+      cmcKeys.forEach((key) => {
+        const pileCards = cmcMap.get(key) || [];
+        if (pileCards.length > 0) {
+          pileCards.sort((a, b) => a.name.localeCompare(b.name));
+          piles.push({
+            id: `cmc-${key}`,
+            title: `${key} MV`,
+            cards: pileCards,
+            totalQuantity: pileCards.reduce((s, c) => s + (c.quantity || 1), 0),
+            totalPrice: pileCards.reduce((s, c) => s + (Number(getCardUnitPrice(c)) || 0) * (c.quantity || 1), 0),
+          });
+        }
+      });
+      return piles;
+    }
+
+    if (sortBy === 'color') {
+      const colorOrder = [
+        { key: 'W', title: 'White' },
+        { key: 'U', title: 'Blue' },
+        { key: 'B', title: 'Black' },
+        { key: 'R', title: 'Red' },
+        { key: 'G', title: 'Green' },
+        { key: 'multi', title: 'Multicolor' },
+        { key: 'colorless', title: 'Colorless' },
+        { key: 'land', title: 'Lands' },
+      ];
+
+      const colorMap = new Map<string, DeckCard[]>();
+      colorOrder.forEach((o) => colorMap.set(o.key, []));
+
+      cards.forEach((c) => {
+        const type = c.type_line?.toLowerCase() || '';
+        if (type.includes('land')) {
+          colorMap.get('land')!.push(c);
+          return;
+        }
+        const colors = c.colors || [];
+        if (colors.length === 0) {
+          colorMap.get('colorless')!.push(c);
+        } else if (colors.length === 1) {
+          const col = colors[0];
+          if (colorMap.has(col)) {
+            colorMap.get(col)!.push(c);
+          } else {
+            colorMap.get('colorless')!.push(c);
+          }
+        } else {
+          colorMap.get('multi')!.push(c);
+        }
+      });
+
+      const piles: PileGroup[] = [];
+      colorOrder.forEach((o) => {
+        const pileCards = colorMap.get(o.key) || [];
+        if (pileCards.length > 0) {
+          pileCards.sort((a, b) => (a.cmc || 0) - (b.cmc || 0) || a.name.localeCompare(b.name));
+          piles.push({
+            id: `color-${o.key}`,
+            title: o.title,
+            cards: pileCards,
+            totalQuantity: pileCards.reduce((s, c) => s + (c.quantity || 1), 0),
+            totalPrice: pileCards.reduce((s, c) => s + (Number(getCardUnitPrice(c)) || 0) * (c.quantity || 1), 0),
+          });
+        }
+      });
+      return piles;
+    }
+
+    if (sortBy === 'category') {
+      const catOrder = [
+        'Creatures',
+        'Planeswalkers',
+        'Instants',
+        'Sorceries',
+        'Artifacts',
+        'Enchantments',
+        'Battles',
+        'Lands',
+        'Other',
+      ];
+
+      const catMap = new Map<string, DeckCard[]>();
+      catOrder.forEach((k) => catMap.set(k, []));
+
+      cards.forEach((c) => {
+        const t = c.type_line?.toLowerCase() || '';
+        if (t.includes('creature')) catMap.get('Creatures')!.push(c);
+        else if (t.includes('planeswalker')) catMap.get('Planeswalkers')!.push(c);
+        else if (t.includes('instant')) catMap.get('Instants')!.push(c);
+        else if (t.includes('sorcery')) catMap.get('Sorceries')!.push(c);
+        else if (t.includes('artifact')) catMap.get('Artifacts')!.push(c);
+        else if (t.includes('enchantment')) catMap.get('Enchantments')!.push(c);
+        else if (t.includes('battle')) catMap.get('Battles')!.push(c);
+        else if (t.includes('land')) catMap.get('Lands')!.push(c);
+        else catMap.get('Other')!.push(c);
+      });
+
+      const piles: PileGroup[] = [];
+      catOrder.forEach((title) => {
+        const pileCards = catMap.get(title) || [];
+        if (pileCards.length > 0) {
+          pileCards.sort((a, b) => (a.cmc || 0) - (b.cmc || 0) || a.name.localeCompare(b.name));
+          piles.push({
+            id: `cat-${title}`,
+            title,
+            cards: pileCards,
+            totalQuantity: pileCards.reduce((s, c) => s + (c.quantity || 1), 0),
+            totalPrice: pileCards.reduce((s, c) => s + (Number(getCardUnitPrice(c)) || 0) * (c.quantity || 1), 0),
+          });
+        }
+      });
+      return piles;
+    }
+
+    // Name sort: group into alphabetical buckets (A-C, D-F, G-I, J-L, M-O, P-R, S-U, V-Z)
+    const alphaBuckets = [
+      { key: 'A-C', regex: /^[A-C]/i },
+      { key: 'D-F', regex: /^[D-F]/i },
+      { key: 'G-I', regex: /^[G-I]/i },
+      { key: 'J-L', regex: /^[J-L]/i },
+      { key: 'M-O', regex: /^[M-O]/i },
+      { key: 'P-R', regex: /^[P-R]/i },
+      { key: 'S-U', regex: /^[S-U]/i },
+      { key: 'V-Z', regex: /^[V-Z]/i },
+      { key: 'Other', regex: /^[^A-Z]/i },
+    ];
+
+    const alphaMap = new Map<string, DeckCard[]>();
+    alphaBuckets.forEach((b) => alphaMap.set(b.key, []));
+
+    cards.forEach((c) => {
+      const bucket = alphaBuckets.find((b) => b.regex.test(c.name.trim())) || alphaBuckets[alphaBuckets.length - 1];
+      alphaMap.get(bucket.key)!.push(c);
+    });
+
+    const piles: PileGroup[] = [];
+    alphaBuckets.forEach((b) => {
+      const pileCards = alphaMap.get(b.key) || [];
+      if (pileCards.length > 0) {
+        pileCards.sort((a, b) => a.name.localeCompare(b.name));
+        piles.push({
+          id: `alpha-${b.key}`,
+          title: b.key,
+          cards: pileCards,
+          totalQuantity: pileCards.reduce((s, c) => s + (c.quantity || 1), 0),
+          totalPrice: pileCards.reduce((s, c) => s + (Number(getCardUnitPrice(c)) || 0) * (c.quantity || 1), 0),
+        });
+      }
+    });
+    return piles;
+  }
+
+  function renderPilesView(cards: DeckCard[]) {
+    if (cards.length === 0) return null;
+    const piles = groupCardsIntoPiles(cards, sortCardsBy);
+
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-5 items-start pt-2 pb-16">
+        {piles.map((pile) => (
+          <div key={pile.id} className="flex flex-col min-w-0">
+            {/* Pile Header */}
+            <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800 text-xs">
+              <span className="font-bold text-slate-200 truncate">{pile.title}</span>
+              <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-violet-300 font-bold">
+                  {pile.totalQuantity}
+                </span>
+                <span className="text-slate-400">
+                  ${pile.totalPrice.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Cascading Cards Stack */}
+            <div className="flex flex-col relative w-full pt-1">
+              {pile.cards.map((card, idx) => renderCardPileItem(card, idx, pile.cards.length))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderCardPileItem(card: DeckCard, index: number, totalInPile: number) {
+    const unitPrice = getCardUnitPrice(card);
+    const thumbUrl = (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
+    const isThisCommander = card.category === 'commander';
+
+    return (
+      <div
+        key={card.id}
+        style={{ marginTop: index > 0 ? '-68%' : '0' }}
+        className={`group relative rounded-xl overflow-hidden shadow-md transition-all duration-200 hover:z-40 hover:-translate-y-4 hover:shadow-2xl aspect-[5/7] bg-slate-950 border ${
+          isThisCommander ? 'border-fuchsia-500/80 shadow-fuchsia-500/20' : 'border-slate-800 hover:border-violet-400'
+        }`}
+      >
+        {/* Main Card Image with Dual-Click & Inspection Click */}
+        <div
+          onClick={() => {
+            if (wasChordTriggeredRecently()) return;
+            onImageClearPreview();
+            onSelectCard(toScryfallCard(card));
+          }}
+          {...getCardChordProps({
+            name: card.name,
+            imageUrl: getCardLargeImageUrl(card),
+            backImageUrl: card.backImageUrl,
+            scryfallId: card.scryfallId,
+            manaCost: card.manaCost,
+            typeLine: card.type_line,
+            price: unitPrice,
+            isFoil: card.isFoil,
+          })}
+          className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden w-full h-full"
+          title="Click to inspect, or Right+Left click together to pop up larger image"
+        >
+          <img
+            src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}
+            alt={card.name}
+            loading="lazy"
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
+                e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal`;
+              }
+            }}
+          />
+
+          {/* Badges on Top */}
+          <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10">
+            {card.quantity > 1 && (
+              <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[11px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
+                {card.quantity}x
+              </span>
+            )}
+            {isThisCommander && (
+              <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
+                <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
+              </span>
+            )}
+          </div>
+
+          {card.isFoil && (
+            <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm">
+              <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+            </div>
+          )}
+
+          {/* Dual-click hint pill on hover */}
+          <div className="absolute inset-x-2 top-8 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex justify-center z-20">
+            <span className="px-2 py-0.5 rounded-full bg-slate-950/90 text-[10px] text-slate-300 border border-slate-700 shadow-md font-medium">
+              Dual-click to peek
+            </span>
+          </div>
+        </div>
+
+        {/* Hover Action Bar at Bottom of Card */}
+        <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-30">
+          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUpdateCardQuantity(card.id, -1);
+              }}
+              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Decrease quantity"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+            <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
+              {card.quantity}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUpdateCardQuantity(card.id, 1);
+              }}
+              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Increase quantity"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRemoveCard(card.id);
+            }}
+            className="p-1.5 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer shadow-sm"
+            title="Remove from deck"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderCardListOrGrid(cards: DeckCard[]) {
     if (viewMode === 'grid') {
       return (
@@ -2193,9 +2539,20 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Thumbnail */}
           <div
             onClick={() => {
+              if (wasChordTriggeredRecently()) return;
               onImageClearPreview();
               onSelectCard(toScryfallCard(card));
             }}
+            {...getCardChordProps({
+              name: card.name,
+              imageUrl: getCardLargeImageUrl(card),
+              backImageUrl: card.backImageUrl,
+              scryfallId: card.scryfallId,
+              manaCost: card.manaCost,
+              typeLine: card.type_line,
+              price: unitPrice,
+              isFoil: card.isFoil,
+            })}
             onMouseEnter={(e) =>
               onImageMouseEnter(e, {
                 imageUrl: getCardLargeImageUrl(card),
@@ -2401,10 +2758,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       >
         <div
           onClick={() => {
+            if (wasChordTriggeredRecently()) return;
             onImageClearPreview();
             onSelectCard(toScryfallCard(card));
           }}
+          {...getCardChordProps({
+            name: card.name,
+            imageUrl: getCardLargeImageUrl(card),
+            backImageUrl: card.backImageUrl,
+            scryfallId: card.scryfallId,
+            manaCost: card.manaCost,
+            typeLine: card.type_line,
+            price: unitPrice,
+            isFoil: card.isFoil,
+          })}
           className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
+          title="Click to inspect, or Right+Left click together to pop up larger image"
         >
           <img
             src={thumbUrl || 'https://cards.scryfall.io/back.jpg'}

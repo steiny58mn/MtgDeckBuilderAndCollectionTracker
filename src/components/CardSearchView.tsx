@@ -25,9 +25,10 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
-import { searchCards, getAutocomplete, getCardImageUrl, SearchResult } from '../services/scryfall';
+import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult } from '../services/scryfall';
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
+import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import { CommanderDeckCount, CardSynergyPercentage } from './EdhrecStats';
 import { 
   getDeckCommander, 
@@ -122,6 +123,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   onResetPartnerSearchRequest,
   onUpdateDeck,
 }) => {
+  const { peekCard, setPeekCard, wasChordTriggeredRecently, getCardChordProps } = useCardDualClickPeek();
   const isDeckContext = searchContext === 'deck';
   const [targetDeckCategory, setTargetDeckCategory] = useState<DeckCategory>(initialTargetCategory);
   useEffect(() => {
@@ -2013,10 +2015,21 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 {/* Image Container with Click to Inspect */}
                 <div 
                   onClick={() => {
+                    if (wasChordTriggeredRecently()) return;
                     handleCardMouseLeave();
                     onSelectCard(card);
                   }}
+                  {...getCardChordProps({
+                    name: card.name,
+                    imageUrl: getCardImageUrl(card, 'large'),
+                    backImageUrl: getCardBackImageUrl(card),
+                    scryfallId: card.id,
+                    manaCost: card.mana_cost,
+                    typeLine: card.type_line,
+                    price: card.prices?.usd,
+                  })}
                   className="cursor-pointer relative overflow-hidden aspect-[5/7] bg-slate-950"
+                  title="Click to inspect, or Right+Left click together to pop up larger image"
                 >
                                     {/* Edhrec Stats */}
                   {isCommanderDeck && !hasCommander && /Legendary/i.test(card.type_line) && (
