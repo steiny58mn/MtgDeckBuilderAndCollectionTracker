@@ -2386,7 +2386,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       <div
         key={card.id}
         style={{
-          marginTop: index > 0 ? '-84%' : '0',
+          marginTop: index > 0 ? '-88%' : '0',
         }}
         onClick={() => {
           if (wasChordTriggeredRecently()) return;
