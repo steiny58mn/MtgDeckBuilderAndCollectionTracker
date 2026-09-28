@@ -87,6 +87,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
+  const [showPendingChangesModal, setShowPendingChangesModal] = useState(false);
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>(() => {
     try {
@@ -750,6 +751,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       updatedAt: Date.now(),
     });
     setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
   };
 
   const handleLivePriceRefresh = async () => {
@@ -842,6 +844,61 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setHasUnsavedChanges(true);
     setPriceRefreshMessage(`Added ${cardsToAdd.reduce((s, c) => s + c.quantity, 0)} cards to deck`);
     setTimeout(() => setPriceRefreshMessage(null), 3500);
+  };
+
+  const handleAddCardFromCompare = (cardName: string, cardData?: DeckCard) => {
+    // Explicitly guarantee we are operating on the live current deck, not a historical iteration
+    if (selectedHistoryId !== 'current') {
+      setSelectedHistoryId('current');
+      setHistoricalDeck(null);
+    }
+
+    const existing = deck.cards.find(
+      (c) => c.name.toLowerCase() === cardName.toLowerCase()
+    );
+    if (existing) {
+      handleUpdateCardQuantity(existing.id, 1);
+    } else if (cardData) {
+      const newCard: DeckCard = {
+        ...cardData,
+        id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        quantity: 1,
+        category: cardData.category || 'main',
+      };
+      handleAppendCardsToDeck([newCard]);
+    } else {
+      const newCard: DeckCard = {
+        id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        scryfallId: '',
+        name: cardName,
+        set: '',
+        cmc: 0,
+        type_line: 'Card',
+        quantity: 1,
+        category: 'main',
+      };
+      handleAppendCardsToDeck([newCard]);
+    }
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
+  };
+
+  const handleRemoveCardFromCompare = (cardName: string) => {
+    // Explicitly guarantee we are operating on the live current deck, not a historical iteration
+    if (selectedHistoryId !== 'current') {
+      setSelectedHistoryId('current');
+      setHistoricalDeck(null);
+    }
+
+    const existing = deck.cards.find(
+      (c) => c.name.toLowerCase() === cardName.toLowerCase()
+    );
+    if (!existing) return;
+    if (existing.quantity > 1) {
+      handleUpdateCardQuantity(existing.id, -1);
+    } else {
+      handleRemoveCard(existing.id);
+    }
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
   };
 
   // Return back to deck list
@@ -1259,8 +1316,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </div>
               )}
 
-              {/* Top Right: Save Deck Button or Restore Version Button */}
+              {/* Top Right: Save Deck Button, Restore Version Button, & Pending Changes Button */}
               <div className="flex items-center gap-2 shrink-0 sm:ml-auto lg:ml-0">
+                {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPendingChangesModal(true)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-md shadow-amber-950/40 active:scale-98 transition-all cursor-pointer animate-pulse-subtle"
+                    title="View pending unsaved additions and deletions in modal"
+                  >
+                    <span className="flex h-2 w-2 relative shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    </span>
+                    <span>Pending</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-950/80 border border-amber-500/30 text-amber-300 text-[10px] sm:text-xs font-mono font-bold">
+                      {pendingChanges.added.length > 0 && `+${pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
+                      {pendingChanges.added.length > 0 && pendingChanges.deleted.length > 0 && ' '}
+                      {pendingChanges.deleted.length > 0 && `-${pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
+                    </span>
+                  </button>
+                )}
                 {isHistoricalView ? (
                   <button
                     type="button"
@@ -1360,6 +1436,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     <FileText className="w-3.5 h-3.5 text-emerald-400" />
                     <span>Game Summary</span>
                   </button>
+
+                  {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPendingChangesModal(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-300 text-xs font-semibold transition-colors cursor-pointer"
+                      title="View pending changes in modal"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Pending ({pendingChanges.added.reduce((s, i) => s + i.diffQuantity, 0) + pendingChanges.deleted.reduce((s, i) => s + i.diffQuantity, 0)})</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Badges to the right of the buttons */}
@@ -1567,212 +1655,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             >
               <span>Live Version &rarr;</span>
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pending Unsaved Changes Section (Added and Deleted Cards) */}
-      {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
-        <div className="mb-5 rounded-2xl bg-slate-900/95 border border-amber-500/40 shadow-xl overflow-hidden backdrop-blur-md animate-in fade-in duration-200">
-          <div className="p-3 sm:p-3.5 bg-slate-800/80 border-b border-slate-700/60 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="flex h-2.5 w-2.5 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-              </span>
-              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                Pending Changes
-              </h3>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {pendingChanges.added.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold font-mono">
-                    +{pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)} Added
-                  </span>
-                )}
-                {pendingChanges.deleted.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[11px] font-bold font-mono">
-                    -{pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)} Deleted
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] text-slate-400 hidden lg:inline">
-                These cards will be saved when you save your deck.
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleSave()}
-                disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
-                title="Save changes to persist to backend and create snapshot"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving...' : 'Save Deck'}</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* New Cards Added Section */}
-            <div className="rounded-xl bg-slate-950/60 border border-emerald-500/30 p-3 flex flex-col">
-              <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-500/20">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>New Cards Added</span>
-                  <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded">
-                    {pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}
-                  </span>
-                </div>
-              </div>
-
-              {pendingChanges.added.length === 0 ? (
-                <div className="py-4 text-center text-slate-500 text-xs italic">
-                  No cards have been added.
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                  {pendingChanges.added.map((item) => (
-                    <div
-                      key={`added-${item.card.id}-${item.category}`}
-                      className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-900/40 transition-colors text-xs"
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] shrink-0">
-                          +{item.diffQuantity}
-                        </span>
-                        <div
-                          onClick={() => onSelectCard(toScryfallCard(item.card))}
-                          onMouseEnter={(e) =>
-                            onImageMouseEnter(e, {
-                              imageUrl: getCardLargeImageUrl(item.card),
-                              fallbackUrl: item.card.imageUrl,
-                              name: item.card.name,
-                              backImageUrl: item.card.backImageUrl,
-                              scryfallId: item.card.scryfallId,
-                            })
-                          }
-                          onMouseMove={onImageMouseMove}
-                          onMouseLeave={onImageMouseLeave}
-                          className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-emerald-700/50"
-                        >
-                          <img
-                            src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
-                            alt={item.card.name}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div
-                            onClick={() => onSelectCard(toScryfallCard(item.card))}
-                            className="font-medium text-slate-200 truncate hover:text-emerald-300 cursor-pointer"
-                            title={item.card.name}
-                          >
-                            {item.card.name}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                            <span className="capitalize text-slate-500">{item.category}</span>
-                            {item.card.manaCost && (
-                              <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleUndoAddedCard(item)}
-                        className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors shrink-0"
-                        title="Undo addition (remove from deck)"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Cards Deleted Section */}
-            <div className="rounded-xl bg-slate-950/60 border border-rose-500/30 p-3 flex flex-col">
-              <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-500/20">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400 uppercase tracking-wider">
-                  <Minus className="w-3.5 h-3.5" />
-                  <span>Cards Deleted</span>
-                  <span className="text-[11px] font-mono text-rose-300 bg-rose-950/80 px-1.5 py-0.5 rounded">
-                    {pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}
-                  </span>
-                </div>
-              </div>
-
-              {pendingChanges.deleted.length === 0 ? (
-                <div className="py-4 text-center text-slate-500 text-xs italic">
-                  No cards have been deleted.
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                  {pendingChanges.deleted.map((item) => (
-                    <div
-                      key={`deleted-${item.card.id}-${item.category}`}
-                      className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/40 transition-colors text-xs"
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold font-mono text-[11px] shrink-0">
-                          -{item.diffQuantity}
-                        </span>
-                        <div
-                          onClick={() => onSelectCard(toScryfallCard(item.card))}
-                          onMouseEnter={(e) =>
-                            onImageMouseEnter(e, {
-                              imageUrl: getCardLargeImageUrl(item.card),
-                              fallbackUrl: item.card.imageUrl,
-                              name: item.card.name,
-                              backImageUrl: item.card.backImageUrl,
-                              scryfallId: item.card.scryfallId,
-                            })
-                          }
-                          onMouseMove={onImageMouseMove}
-                          onMouseLeave={onImageMouseLeave}
-                          className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-rose-700/50 opacity-80"
-                        >
-                          <img
-                            src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
-                            alt={item.card.name}
-                            className="w-full h-full object-cover grayscale-30"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div
-                            onClick={() => onSelectCard(toScryfallCard(item.card))}
-                            className="font-medium text-slate-300 truncate hover:text-rose-300 cursor-pointer line-through text-slate-400"
-                            title={item.card.name}
-                          >
-                            {item.card.name}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                            <span className="capitalize text-slate-500">{item.category}</span>
-                            {item.card.manaCost && (
-                              <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRestoreDeletedCard(item)}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors text-[11px] shrink-0 cursor-pointer"
-                        title="Restore card back to deck"
-                      >
-                        <RotateCcw className="w-3 h-3 text-rose-300" />
-                        <span>Restore</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         </div>
       )}
@@ -2138,6 +2020,248 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         initialTab={exportModalInitialTab}
       />
 
+      {/* Pending Unsaved Changes Modal */}
+      {showPendingChangesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-200">
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pending-changes-modal-title"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="pending-changes-modal-title" className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <span>Pending Changes</span>
+                    <div className="flex items-center gap-1.5">
+                      {pendingChanges.added.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold font-mono">
+                          +{pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)} Added
+                        </span>
+                      )}
+                      {pendingChanges.deleted.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[11px] font-bold font-mono">
+                          -{pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)} Deleted
+                        </span>
+                      )}
+                    </div>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Changes are in memory. Saving your deck will permanently persist them to the database.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPendingChangesModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Close pending changes modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* New Cards Added Section */}
+              <div className="rounded-xl bg-slate-950/60 border border-emerald-500/30 p-3 flex flex-col">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-500/20">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>New Cards Added</span>
+                    <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded">
+                      {pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}
+                    </span>
+                  </div>
+                </div>
+
+                {pendingChanges.added.length === 0 ? (
+                  <div className="py-4 text-center text-slate-500 text-xs italic">
+                    No cards have been added.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {pendingChanges.added.map((item) => (
+                      <div
+                        key={`modal-added-${item.card.id}-${item.category}`}
+                        className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-900/40 transition-colors text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] shrink-0">
+                            +{item.diffQuantity}
+                          </span>
+                          <div
+                            onClick={() => onSelectCard(toScryfallCard(item.card))}
+                            onMouseEnter={(e) =>
+                              onImageMouseEnter(e, {
+                                imageUrl: getCardLargeImageUrl(item.card),
+                                fallbackUrl: item.card.imageUrl,
+                                name: item.card.name,
+                                backImageUrl: item.card.backImageUrl,
+                                scryfallId: item.card.scryfallId,
+                              })
+                            }
+                            onMouseMove={onImageMouseMove}
+                            onMouseLeave={onImageMouseLeave}
+                            className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-emerald-700/50"
+                          >
+                            <img
+                              src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                              alt={item.card.name}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div
+                              onClick={() => onSelectCard(toScryfallCard(item.card))}
+                              className="font-medium text-slate-200 truncate hover:text-emerald-300 cursor-pointer"
+                              title={item.card.name}
+                            >
+                              {item.card.name}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <span className="capitalize text-slate-500">{item.category}</span>
+                              {item.card.manaCost && (
+                                <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleUndoAddedCard(item)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors shrink-0"
+                          title="Undo addition (remove from deck)"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cards Deleted Section */}
+              <div className="rounded-xl bg-slate-950/60 border border-rose-500/30 p-3 flex flex-col">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-500/20">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400 uppercase tracking-wider">
+                    <Minus className="w-3.5 h-3.5" />
+                    <span>Cards Deleted</span>
+                    <span className="text-[11px] font-mono text-rose-300 bg-rose-950/80 px-1.5 py-0.5 rounded">
+                      {pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}
+                    </span>
+                  </div>
+                </div>
+
+                {pendingChanges.deleted.length === 0 ? (
+                  <div className="py-4 text-center text-slate-500 text-xs italic">
+                    No cards have been deleted.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {pendingChanges.deleted.map((item) => (
+                      <div
+                        key={`modal-deleted-${item.card.id}-${item.category}`}
+                        className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/40 transition-colors text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold font-mono text-[11px] shrink-0">
+                            -{item.diffQuantity}
+                          </span>
+                          <div
+                            onClick={() => onSelectCard(toScryfallCard(item.card))}
+                            onMouseEnter={(e) =>
+                              onImageMouseEnter(e, {
+                                imageUrl: getCardLargeImageUrl(item.card),
+                                fallbackUrl: item.card.imageUrl,
+                                name: item.card.name,
+                                backImageUrl: item.card.backImageUrl,
+                                scryfallId: item.card.scryfallId,
+                              })
+                            }
+                            onMouseMove={onImageMouseMove}
+                            onMouseLeave={onImageMouseLeave}
+                            className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-rose-700/50 opacity-80"
+                          >
+                            <img
+                              src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                              alt={item.card.name}
+                              className="w-full h-full object-cover grayscale-30"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div
+                              onClick={() => onSelectCard(toScryfallCard(item.card))}
+                              className="font-medium text-slate-300 truncate hover:text-rose-300 cursor-pointer line-through text-slate-400"
+                              title={item.card.name}
+                            >
+                              {item.card.name}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <span className="capitalize text-slate-500">{item.category}</span>
+                              {item.card.manaCost && (
+                                <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreDeletedCard(item)}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors text-[11px] shrink-0 cursor-pointer"
+                          title="Restore card back to deck"
+                        >
+                          <RotateCcw className="w-3 h-3 text-rose-300" />
+                          <span>Restore</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                {pendingChanges.added.length === 0 && pendingChanges.deleted.length === 0
+                  ? 'All changes have been undone or saved.'
+                  : 'Undoing or restoring changes updates your draft instantly without shifting the background view.'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPendingChangesModal(false)}
+                  className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleSave();
+                    setShowPendingChangesModal(false);
+                  }}
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSaving ? 'Saving...' : 'Save Deck'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Deck Comparison Modal */}
       <DeckCompareModal
         isOpen={showCompareModal}
@@ -2146,6 +2270,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         historyList={historyList}
         initialBaseId={isHistoricalView ? selectedHistoryId : undefined}
         onDeleteIteration={handleDeleteHistoricalIteration}
+        onAddCard={handleAddCardFromCompare}
+        onRemoveCard={handleRemoveCardFromCompare}
       />
 
       {/* Game Summary Modal */}

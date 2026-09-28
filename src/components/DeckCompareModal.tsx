@@ -13,7 +13,8 @@ import {
   MinusCircle, 
   FileText, 
   Layers,
-  Code
+  Code,
+  Plus
 } from 'lucide-react';
 import { Deck, DeckHistoryItem, DeckComparisonSummaryResult, DeckCard } from '../types/mtg';
 import { DeckService, parseTimestamp } from '../services/deckService';
@@ -26,6 +27,8 @@ interface DeckCompareModalProps {
   initialBaseId?: string;
   initialTargetId?: string;
   onDeleteIteration?: (historyId: string) => Promise<void> | void;
+  onAddCard?: (cardName: string, cardData?: DeckCard) => void;
+  onRemoveCard?: (cardName: string) => void;
 }
 
 export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
@@ -36,6 +39,8 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   initialBaseId,
   initialTargetId = 'current',
   onDeleteIteration,
+  onAddCard,
+  onRemoveCard,
 }) => {
   // If initialBaseId is provided, use it; otherwise default to the first (most recent) historical snapshot if available, or 'current'
   const defaultBaseId = initialBaseId || (historyList.length > 0 ? (historyList[0].id || historyList[0].historyId) : 'current');
@@ -47,6 +52,81 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   const [summaryResult, setSummaryResult] = useState<DeckComparisonSummaryResult | null>(null);
   const [activeTab, setActiveTab] = useState<'diff' | 'visual' | 'summary'>('diff');
   const [copied, setCopied] = useState<boolean>(false);
+  const [cardMap, setCardMap] = useState<Map<string, DeckCard>>(new Map());
+  const [hoveredCard, setHoveredCard] = useState<{ name: string; imageUrl: string } | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [actionFeedback, setActionFeedback] = useState<{ [cardName: string]: string }>({});
+  const [cutsToggled, setCutsToggled] = useState<{ [cardName: string]: boolean }>({});
+  const [addsToggled, setAddsToggled] = useState<{ [cardName: string]: boolean }>({});
+
+  const getCardImage = (name: string): string => {
+    const c = cardMap.get(name.toLowerCase());
+    if (c?.imageUrl) {
+      return c.imageUrl.replace('version=small', 'version=normal');
+    }
+    if (c?.scryfallId) {
+      return `https://api.scryfall.com/cards/${c.scryfallId}?format=image&version=normal`;
+    }
+    return `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}&format=image&version=normal`;
+  };
+
+  const updateHoverPos = (clientX: number, clientY: number) => {
+    const cardWidth = 240;
+    const cardHeight = 336;
+    const margin = 20;
+
+    let x = clientX + margin;
+    if (x + cardWidth > window.innerWidth - margin) {
+      x = clientX - cardWidth - margin;
+    }
+
+    let y = clientY - cardHeight / 2;
+    if (y < margin) y = margin;
+    if (y + cardHeight > window.innerHeight - margin) {
+      y = window.innerHeight - cardHeight - margin;
+    }
+
+    setHoverPos({ x, y });
+  };
+
+  const handleMouseEnterCard = (name: string, e: React.MouseEvent) => {
+    const imageUrl = getCardImage(name);
+    setHoveredCard({ name, imageUrl });
+    updateHoverPos(e.clientX, e.clientY);
+  };
+
+  const handleMouseMoveCard = (e: React.MouseEvent) => {
+    updateHoverPos(e.clientX, e.clientY);
+  };
+
+  const handleMouseLeaveCard = () => {
+    setHoveredCard(null);
+  };
+
+  const handleAddToDeck = (cardName: string) => {
+    const cardData = cardMap.get(cardName.toLowerCase());
+    onAddCard?.(cardName, cardData);
+    setActionFeedback((prev) => ({ ...prev, [cardName]: 'Added' }));
+    setTimeout(() => {
+      setActionFeedback((prev) => {
+        const next = { ...prev };
+        delete next[cardName];
+        return next;
+      });
+    }, 2000);
+  };
+
+  const handleRemoveFromDeck = (cardName: string) => {
+    onRemoveCard?.(cardName);
+    setActionFeedback((prev) => ({ ...prev, [cardName]: 'Removed' }));
+    setTimeout(() => {
+      setActionFeedback((prev) => {
+        const next = { ...prev };
+        delete next[cardName];
+        return next;
+      });
+    }, 2000);
+  };
 
   // Total cards accounting for individual card quantities (e.g. basic lands or playsets)
   const currentTotalCards = (deck.cards || []).reduce((sum, c) => sum + (c.quantity || 1), 0);
@@ -113,6 +193,12 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
         resolveIterationCards(activeTargetId),
       ]);
 
+      const map = new Map<string, DeckCard>();
+      (deck.cards || []).forEach((c) => map.set(c.name.toLowerCase(), c));
+      cardsA.forEach((c) => map.set(c.name.toLowerCase(), c));
+      cardsB.forEach((c) => map.set(c.name.toLowerCase(), c));
+      setCardMap(map);
+
       const labelA = getIterationName(activeBaseId);
       const labelB = getIterationName(activeTargetId);
 
@@ -124,6 +210,8 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
       });
 
       setSummaryResult(result);
+      setCutsToggled({});
+      setAddsToggled({});
     } catch (err: any) {
       console.error('[DeckCompareModal] Comparison failed:', err);
       setError(err.message || 'Failed to compare deck iterations via /mtgtools/comparefiles');
@@ -447,7 +535,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                     }`}
                   >
                     <Code className="w-3.5 h-3.5" />
-                    <span>API Differences ([deck])</span>
+                    <span>BBCode</span>
                   </button>
 
                   <button
@@ -483,7 +571,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                     type="button"
                     onClick={handleCopySummary}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-                    title={activeTab === 'diff' ? 'Copy API differences to clipboard' : 'Copy Deck Summary report to clipboard'}
+                    title={activeTab === 'diff' ? 'Copy BBCode differences to clipboard' : 'Copy Deck Summary report to clipboard'}
                   >
                     {copied ? (
                       <>
@@ -510,12 +598,12 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                 </div>
               </div>
 
-              {/* Tab 1: API Differences Output ([deck] BBCode) */}
+              {/* Tab 1: BBCode Output */}
               {activeTab === 'diff' && (
                 <div className="relative flex-1 flex flex-col gap-2">
                   <div className="flex items-center justify-between px-1">
                     <span className="text-[11px] font-medium text-slate-400">
-                      Differences returned from remote API (<code className="text-violet-300">/mtgtools/comparefiles</code>):
+                      BBCode differences:
                     </span>
                     {(summaryResult.diffText || summaryResult.rawApiOutput).includes('[deck') && (
                       <span className="text-[10px] px-2 py-0.5 rounded bg-violet-950/80 text-violet-300 border border-violet-500/30 font-mono">
@@ -533,7 +621,25 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
 
               {/* Tab 2: Visual Side-by-Side Breakdown */}
               {activeTab === 'visual' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                <div className="flex flex-col gap-3 flex-1">
+                  {/* Live Deck Target Indicator */}
+                  <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-2 w-2 relative shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-slate-300 font-medium">
+                        Target Deck: <span className="text-emerald-300 font-semibold">{deck.name} (Live Current Deck)</span>
+                      </span>
+                      <span className="text-slate-500 hidden sm:inline">• Add & Delete buttons only modify your live current deck</span>
+                    </div>
+                    <span className="font-mono text-[11px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800/80">
+                      {deck.cards?.reduce((s, c) => s + c.quantity, 0) || 0} cards in live deck
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
                   {/* Cuts Column */}
                   <div className="bg-slate-950/70 border border-red-500/20 rounded-xl p-4 flex flex-col gap-2">
                     <div className="flex items-center justify-between border-b border-red-500/20 pb-2">
@@ -550,14 +656,78 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                       {summaryResult.cutCards.length === 0 ? (
                         <p className="text-xs text-slate-500 italic py-4 text-center">No cards cut between these iterations.</p>
                       ) : (
-                        summaryResult.cutCards.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-red-950/15 border border-red-500/10 text-xs">
-                            <span className="text-slate-200 font-medium">{c.name}</span>
-                            <span className="px-1.5 py-0.5 rounded-md bg-red-900/40 text-red-300 font-mono font-bold text-[11px]">
-                              -{c.quantity}
-                            </span>
-                          </div>
-                        ))
+                        summaryResult.cutCards.map((c, i) => {
+                          const isAdded = cutsToggled[c.name] ?? false;
+                          return (
+                            <div
+                              key={i}
+                              onMouseEnter={(e) => handleMouseEnterCard(c.name, e)}
+                              onMouseMove={handleMouseMoveCard}
+                              onMouseLeave={handleMouseLeaveCard}
+                              className="group flex items-center justify-between p-2 rounded-lg bg-red-950/20 hover:bg-red-950/40 border border-red-500/15 hover:border-red-500/30 text-xs transition-colors cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 min-w-0 pr-2">
+                                <span className="text-slate-200 font-medium truncate group-hover:text-red-200">{c.name}</span>
+                                <span className="px-1.5 py-0.5 rounded-md bg-red-900/40 text-red-300 font-mono font-bold text-[10px] shrink-0">
+                                  -{c.quantity}
+                                </span>
+                              </div>
+
+                              <div
+                                onMouseEnter={(e) => {
+                                  e.stopPropagation();
+                                  setHoveredCard(null);
+                                }}
+                                onMouseMove={(e) => {
+                                  e.stopPropagation();
+                                  setHoveredCard(null);
+                                }}
+                                onMouseLeave={(e) => {
+                                  handleMouseEnterCard(c.name, e);
+                                }}
+                                className="flex items-center gap-1.5 shrink-0"
+                              >
+                                {isAdded ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveFromDeck(c.name);
+                                      setCutsToggled((prev) => ({ ...prev, [c.name]: false }));
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.stopPropagation();
+                                      setHoveredCard(null);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-950/80 hover:bg-red-800 border border-red-700/50 text-red-200 hover:text-white text-[11px] font-semibold transition-all shadow-xs cursor-pointer active:scale-95"
+                                    title={`Delete ${c.name} from live current deck`}
+                                  >
+                                    <Trash2 className="w-3 h-3 text-red-400" />
+                                    <span>Delete</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddToDeck(c.name);
+                                      setCutsToggled((prev) => ({ ...prev, [c.name]: true }));
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.stopPropagation();
+                                      setHoveredCard(null);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-950/80 hover:bg-emerald-800 border border-emerald-700/50 text-emerald-200 hover:text-white text-[11px] font-semibold transition-all shadow-xs cursor-pointer active:scale-95"
+                                    title={`Add ${c.name} back to live current deck`}
+                                  >
+                                    <Plus className="w-3 h-3 text-emerald-400" />
+                                    <span>Add</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -578,17 +748,82 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                       {summaryResult.addedCards.length === 0 ? (
                         <p className="text-xs text-slate-500 italic py-4 text-center">No cards added between these iterations.</p>
                       ) : (
-                        summaryResult.addedCards.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/15 border border-emerald-500/10 text-xs">
-                            <span className="text-slate-200 font-medium">{c.name}</span>
-                            <span className="px-1.5 py-0.5 rounded-md bg-emerald-900/40 text-emerald-300 font-mono font-bold text-[11px]">
-                              +{c.quantity}
-                            </span>
-                          </div>
-                        ))
+                        summaryResult.addedCards.map((c, i) => {
+                          const isDeleted = addsToggled[c.name] ?? false;
+                          return (
+                            <div
+                              key={i}
+                              onMouseEnter={(e) => handleMouseEnterCard(c.name, e)}
+                              onMouseMove={handleMouseMoveCard}
+                              onMouseLeave={handleMouseLeaveCard}
+                              className="group flex items-center justify-between p-2 rounded-lg bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-500/15 hover:border-emerald-500/30 text-xs transition-colors cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 min-w-0 pr-2">
+                                <span className="text-slate-200 font-medium truncate group-hover:text-emerald-200">{c.name}</span>
+                                <span className="px-1.5 py-0.5 rounded-md bg-emerald-900/40 text-emerald-300 font-mono font-bold text-[10px] shrink-0">
+                                  +{c.quantity}
+                                </span>
+                              </div>
+
+                              <div
+                                onMouseEnter={(e) => {
+                                  e.stopPropagation();
+                                  setHoveredCard(null);
+                                }}
+                                onMouseMove={(e) => {
+                                  e.stopPropagation();
+                                  setHoveredCard(null);
+                                }}
+                                onMouseLeave={(e) => {
+                                  handleMouseEnterCard(c.name, e);
+                                }}
+                                className="flex items-center gap-1.5 shrink-0"
+                              >
+                                {isDeleted ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddToDeck(c.name);
+                                      setAddsToggled((prev) => ({ ...prev, [c.name]: false }));
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.stopPropagation();
+                                      setHoveredCard(null);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-950/80 hover:bg-emerald-800 border border-emerald-700/50 text-emerald-200 hover:text-white text-[11px] font-semibold transition-all shadow-xs cursor-pointer active:scale-95"
+                                    title={`Add ${c.name} back to live current deck`}
+                                  >
+                                    <Plus className="w-3 h-3 text-emerald-400" />
+                                    <span>Add</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveFromDeck(c.name);
+                                      setAddsToggled((prev) => ({ ...prev, [c.name]: true }));
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.stopPropagation();
+                                      setHoveredCard(null);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-950/80 hover:bg-red-800 border border-red-700/50 text-red-200 hover:text-white text-[11px] font-semibold transition-all shadow-xs cursor-pointer active:scale-95"
+                                    title={`Delete ${c.name} from live current deck`}
+                                  >
+                                    <Trash2 className="w-3 h-3 text-red-400" />
+                                    <span>Delete</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
+                </div>
                 </div>
               )}
 
@@ -605,6 +840,31 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
             </>
           )}
         </div>
+
+        {/* Floating Card Image Preview on Hover */}
+        {hoveredCard && (
+          <div
+            className="fixed pointer-events-none z-[100] transition-transform duration-75 ease-out drop-shadow-2xl"
+            style={{
+              left: `${hoverPos.x}px`,
+              top: `${hoverPos.y}px`,
+            }}
+          >
+            <div className="w-60 aspect-[5/7] rounded-2xl overflow-hidden border-2 border-violet-500/70 shadow-2xl shadow-black/90 bg-slate-950">
+              <img
+                src={hoveredCard.imageUrl}
+                alt={hoveredCard.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  if (!e.currentTarget.src.includes('format=image')) {
+                    e.currentTarget.src = `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(hoveredCard.name)}&format=image&version=normal`;
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
