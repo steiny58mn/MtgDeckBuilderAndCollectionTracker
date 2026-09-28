@@ -196,6 +196,7 @@ export default function App() {
     }
 
     await DeckService.saveDeck(deckToSave);
+    DeckService.setLastSavedDeck(deckToSave);
     setActiveDeck(deckToSave);
     showToast(`Saved "${deckToSave.name}"!`, 'success');
   };

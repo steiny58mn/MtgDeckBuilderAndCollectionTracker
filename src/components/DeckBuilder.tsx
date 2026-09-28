@@ -1,5 +1,5 @@
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft,
   GitCompare,
@@ -139,6 +139,153 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   );
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Saved baseline cards tracking (to compute unsaved additions and deletions)
+  const [savedCards, setSavedCards] = useState<DeckCard[]>(() => {
+    const fromService = DeckService.getLastSavedDeck(deck.id);
+    if (fromService && fromService.cards) {
+      return JSON.parse(JSON.stringify(fromService.cards));
+    }
+    DeckService.setLastSavedDeck(deck);
+    return JSON.parse(JSON.stringify(deck.cards || []));
+  });
+
+  // Keep saved baseline synced when switching to a different deck
+  useEffect(() => {
+    const fromService = DeckService.getLastSavedDeck(deck.id);
+    if (fromService && fromService.cards) {
+      setSavedCards(JSON.parse(JSON.stringify(fromService.cards)));
+    } else {
+      DeckService.setLastSavedDeck(deck);
+      setSavedCards(JSON.parse(JSON.stringify(deck.cards || [])));
+    }
+  }, [deck.id]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      const fromService = DeckService.getLastSavedDeck(deck.id);
+      if (fromService && fromService.cards) {
+        setSavedCards(JSON.parse(JSON.stringify(fromService.cards)));
+      } else {
+        setSavedCards(JSON.parse(JSON.stringify(deck.cards || [])));
+      }
+    }
+  }, [hasUnsavedChanges, deck.id]);
+
+  // Compute pending additions and deletions compared to saved baseline
+  const pendingChanges = useMemo(() => {
+    if (isHistoricalView) return { added: [], deleted: [] };
+
+    const baseline = savedCards || [];
+    const current = activeDeck.cards || [];
+
+    const baselineMap = new Map<string, DeckCard>();
+    const baselineKeyMap = new Map<string, DeckCard>();
+    for (const b of baseline) {
+      baselineMap.set(b.id, b);
+      const key = `${b.scryfallId || b.name.toLowerCase()}_${b.category}`;
+      baselineKeyMap.set(key, b);
+    }
+
+    const currentMap = new Map<string, DeckCard>();
+    const currentKeyMap = new Map<string, DeckCard>();
+    for (const c of current) {
+      currentMap.set(c.id, c);
+      const key = `${c.scryfallId || c.name.toLowerCase()}_${c.category}`;
+      currentKeyMap.set(key, c);
+    }
+
+    interface DiffItem {
+      card: DeckCard;
+      diffQuantity: number;
+      category: DeckCategory;
+      previousQuantity?: number;
+      newQuantity?: number;
+    }
+
+    const added: DiffItem[] = [];
+    const deleted: DiffItem[] = [];
+
+    // Find cards added or quantities increased
+    for (const c of current) {
+      const match = baselineMap.get(c.id) || baselineKeyMap.get(`${c.scryfallId || c.name.toLowerCase()}_${c.category}`);
+      if (!match) {
+        added.push({
+          card: c,
+          diffQuantity: c.quantity,
+          category: c.category,
+          newQuantity: c.quantity,
+          previousQuantity: 0,
+        });
+      } else if (c.quantity > match.quantity) {
+        added.push({
+          card: c,
+          diffQuantity: c.quantity - match.quantity,
+          category: c.category,
+          newQuantity: c.quantity,
+          previousQuantity: match.quantity,
+        });
+      }
+    }
+
+    // Find cards deleted or quantities decreased
+    for (const b of baseline) {
+      const match = currentMap.get(b.id) || currentKeyMap.get(`${b.scryfallId || b.name.toLowerCase()}_${b.category}`);
+      if (!match) {
+        deleted.push({
+          card: b,
+          diffQuantity: b.quantity,
+          category: b.category,
+          newQuantity: 0,
+          previousQuantity: b.quantity,
+        });
+      } else if (b.quantity > match.quantity) {
+        deleted.push({
+          card: b,
+          diffQuantity: b.quantity - match.quantity,
+          category: b.category,
+          newQuantity: match.quantity,
+          previousQuantity: b.quantity,
+        });
+      }
+    }
+
+    return { added, deleted };
+  }, [savedCards, activeDeck.cards, isHistoricalView]);
+
+  const handleUndoAddedCard = (item: { card: DeckCard; diffQuantity: number; previousQuantity?: number }) => {
+    const existingCards = [...deck.cards];
+    if (item.previousQuantity && item.previousQuantity > 0) {
+      const idx = existingCards.findIndex((c) => c.id === item.card.id);
+      if (idx >= 0) {
+        existingCards[idx] = { ...existingCards[idx], quantity: item.previousQuantity };
+      }
+    } else {
+      const idx = existingCards.findIndex((c) => c.id === item.card.id);
+      if (idx >= 0) {
+        existingCards.splice(idx, 1);
+      }
+    }
+    onUpdateDeck({ ...deck, cards: existingCards, updatedAt: Date.now() });
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
+  };
+
+  const handleRestoreDeletedCard = (item: { card: DeckCard; diffQuantity: number; previousQuantity?: number; category: DeckCategory }) => {
+    const existingCards = [...deck.cards];
+    const idx = existingCards.findIndex((c) => c.id === item.card.id);
+    if (idx >= 0) {
+      existingCards[idx] = { ...existingCards[idx], quantity: item.previousQuantity || (existingCards[idx].quantity + item.diffQuantity) };
+    } else {
+      existingCards.push({
+        ...item.card,
+        quantity: item.diffQuantity,
+      });
+    }
+    onUpdateDeck({ ...deck, cards: existingCards, updatedAt: Date.now() });
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
+  };
   const {
     activePreview: hoverPreview,
     handleMouseEnter: onImageMouseEnter,
@@ -210,6 +357,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       } else {
         await DeckService.saveDeck(currentDeckToSave);
       }
+      DeckService.setLastSavedDeck(currentDeckToSave);
+      setSavedCards(JSON.parse(JSON.stringify(currentDeckToSave.cards || [])));
       setHasUnsavedChanges(false);
       DeckService.setDeckHasUnsavedChanges(deck.id, false);
       await refreshHistory();
@@ -1416,6 +1565,212 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             >
               <span>Live Version &rarr;</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Unsaved Changes Section (Added and Deleted Cards) */}
+      {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
+        <div className="mb-5 rounded-2xl bg-slate-900/95 border border-amber-500/40 shadow-xl overflow-hidden backdrop-blur-md animate-in fade-in duration-200">
+          <div className="p-3 sm:p-3.5 bg-slate-800/80 border-b border-slate-700/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+              </span>
+              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
+                Pending Changes
+              </h3>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {pendingChanges.added.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold font-mono">
+                    +{pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)} Added
+                  </span>
+                )}
+                {pendingChanges.deleted.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[11px] font-bold font-mono">
+                    -{pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)} Deleted
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400 hidden lg:inline">
+                These cards will be saved when you save your deck.
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSave()}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                title="Save changes to persist to backend and create snapshot"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSaving ? 'Saving...' : 'Save Deck'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* New Cards Added Section */}
+            <div className="rounded-xl bg-slate-950/60 border border-emerald-500/30 p-3 flex flex-col">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-500/20">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Cards Added</span>
+                  <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded">
+                    {pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}
+                  </span>
+                </div>
+              </div>
+
+              {pendingChanges.added.length === 0 ? (
+                <div className="py-4 text-center text-slate-500 text-xs italic">
+                  No cards have been added.
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                  {pendingChanges.added.map((item) => (
+                    <div
+                      key={`added-${item.card.id}-${item.category}`}
+                      className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-900/40 transition-colors text-xs"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] shrink-0">
+                          +{item.diffQuantity}
+                        </span>
+                        <div
+                          onClick={() => onSelectCard(toScryfallCard(item.card))}
+                          onMouseEnter={(e) =>
+                            onImageMouseEnter(e, {
+                              imageUrl: getCardLargeImageUrl(item.card),
+                              fallbackUrl: item.card.imageUrl,
+                              name: item.card.name,
+                              backImageUrl: item.card.backImageUrl,
+                              scryfallId: item.card.scryfallId,
+                            })
+                          }
+                          onMouseMove={onImageMouseMove}
+                          onMouseLeave={onImageMouseLeave}
+                          className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-emerald-700/50"
+                        >
+                          <img
+                            src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                            alt={item.card.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div
+                            onClick={() => onSelectCard(toScryfallCard(item.card))}
+                            className="font-medium text-slate-200 truncate hover:text-emerald-300 cursor-pointer"
+                            title={item.card.name}
+                          >
+                            {item.card.name}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                            <span className="capitalize text-slate-500">{item.category}</span>
+                            {item.card.manaCost && (
+                              <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUndoAddedCard(item)}
+                        className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors shrink-0"
+                        title="Undo addition (remove from deck)"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cards Deleted Section */}
+            <div className="rounded-xl bg-slate-950/60 border border-rose-500/30 p-3 flex flex-col">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-500/20">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400 uppercase tracking-wider">
+                  <Minus className="w-3.5 h-3.5" />
+                  <span>Cards Deleted</span>
+                  <span className="text-[11px] font-mono text-rose-300 bg-rose-950/80 px-1.5 py-0.5 rounded">
+                    {pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}
+                  </span>
+                </div>
+              </div>
+
+              {pendingChanges.deleted.length === 0 ? (
+                <div className="py-4 text-center text-slate-500 text-xs italic">
+                  No cards have been deleted.
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                  {pendingChanges.deleted.map((item) => (
+                    <div
+                      key={`deleted-${item.card.id}-${item.category}`}
+                      className="group flex items-center justify-between gap-2 p-1.5 rounded-lg bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/40 transition-colors text-xs"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold font-mono text-[11px] shrink-0">
+                          -{item.diffQuantity}
+                        </span>
+                        <div
+                          onClick={() => onSelectCard(toScryfallCard(item.card))}
+                          onMouseEnter={(e) =>
+                            onImageMouseEnter(e, {
+                              imageUrl: getCardLargeImageUrl(item.card),
+                              fallbackUrl: item.card.imageUrl,
+                              name: item.card.name,
+                              backImageUrl: item.card.backImageUrl,
+                              scryfallId: item.card.scryfallId,
+                            })
+                          }
+                          onMouseMove={onImageMouseMove}
+                          onMouseLeave={onImageMouseLeave}
+                          className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-rose-700/50 opacity-80"
+                        >
+                          <img
+                            src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                            alt={item.card.name}
+                            className="w-full h-full object-cover grayscale-30"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div
+                            onClick={() => onSelectCard(toScryfallCard(item.card))}
+                            className="font-medium text-slate-300 truncate hover:text-rose-300 cursor-pointer line-through text-slate-400"
+                            title={item.card.name}
+                          >
+                            {item.card.name}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                            <span className="capitalize text-slate-500">{item.category}</span>
+                            {item.card.manaCost && (
+                              <ManaCostBadge manaCost={item.card.manaCost} size="xs" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreDeletedCard(item)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors text-[11px] shrink-0 cursor-pointer"
+                        title="Restore card back to deck"
+                      >
+                        <RotateCcw className="w-3 h-3 text-rose-300" />
+                        <span>Restore</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

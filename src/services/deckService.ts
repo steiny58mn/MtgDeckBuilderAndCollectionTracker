@@ -1607,6 +1607,15 @@ export class DeckService {
   /**
    * Revert an in-memory deck back to its last saved remote state.
    */
+  static getLastSavedDeck(deckId: string): Deck | undefined {
+    return this.lastSavedDecks.get(deckId);
+  }
+
+  static setLastSavedDeck(deck: Deck): void {
+    if (!deck?.id) return;
+    this.lastSavedDecks.set(deck.id, JSON.parse(JSON.stringify(deck)));
+  }
+
   static revertDeck(deckId: string): Deck | null {
     const original = this.lastSavedDecks.get(deckId);
     if (original) {
