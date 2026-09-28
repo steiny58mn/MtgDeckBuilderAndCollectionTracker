@@ -48,14 +48,43 @@ export interface ApiHealthResponse {
 
 
 // ============================================================================
-// Constants & Tenant Partition Configuration
+// Constants & Centralized API Configuration (Imported from config/apiConfig)
 // ============================================================================
 
-const STORAGE_API_BASE_KEY = 'mtg_custom_api_base_url';
-const STORAGE_VAULT_KEY = 'mtg_cloud_vault_id';
+import {
+  getApiBaseUrl,
+  setApiBaseUrl,
+  resetApiBaseUrl,
+  getVaultId,
+  setVaultId,
+  resetVaultId,
+  getAuthHeaders,
+  buildApiUrl,
+  apiFetch,
+  DEFAULT_LOCAL_API_URL,
+  DEFAULT_PROD_API_URL,
+  STORAGE_API_BASE_KEY,
+  STORAGE_VAULT_KEY,
+  isLocalEnvironment,
+} from '../config/apiConfig';
 
-export const DEFAULT_API_BASE_URL = 
-  ((import.meta as any).env?.VITE_API_BASE_URL as string) || 'http://localhost:5205';
+export {
+  getApiBaseUrl,
+  setApiBaseUrl,
+  resetApiBaseUrl,
+  getVaultId,
+  setVaultId,
+  resetVaultId,
+  getAuthHeaders,
+  buildApiUrl,
+  apiFetch,
+  DEFAULT_LOCAL_API_URL,
+  DEFAULT_PROD_API_URL,
+  STORAGE_API_BASE_KEY,
+  STORAGE_VAULT_KEY,
+};
+
+export const DEFAULT_API_BASE_URL = DEFAULT_LOCAL_API_URL;
 
 export const DEFAULT_BINDER: Binder = {
   id: 'binder-main',
@@ -66,124 +95,16 @@ export const DEFAULT_BINDER: Binder = {
   updatedAt: Date.now(),
 };
 
-/**
- * Generate a randomized persistent Vault ID
- */
-export function generateRandomVaultId(): string {
-  const rand = Math.random().toString(36).substring(2, 8);
-  return `vault-${rand}`;
-}
-
-/**
- * Get active Vault / User ID used for backend tenant partition
- */
-export function getVaultId(): string {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_VAULT_KEY);
-    if (saved && saved.trim()) {
-      return saved.trim();
-    }
-    const newId = generateRandomVaultId();
-    localStorage.setItem(STORAGE_VAULT_KEY, newId);
-    console.info(`[DeckService] 🔑 Initialized new random Vault ID: "${newId}". Saved in localStorage['${STORAGE_VAULT_KEY}'].`);
-    return newId;
-  }
-  return 'vault-default';
-}
-
-/**
- * Set active Vault / User ID
- */
-export function setVaultId(vaultId: string): void {
-  if (typeof window !== 'undefined') {
-    const clean = vaultId.trim();
-    if (!clean) {
-      const fresh = generateRandomVaultId();
-      localStorage.setItem(STORAGE_VAULT_KEY, fresh);
-      console.info(`[DeckService] 🔑 Vault ID cleared -> generated fresh Vault ID: "${fresh}".`);
-    } else {
-      localStorage.setItem(STORAGE_VAULT_KEY, clean);
-      console.info(`[DeckService] 🔑 Vault ID set to: "${clean}".`);
-    }
-  }
-}
-
-/**
- * Reset active Vault ID to a newly generated ID
- */
-export function resetVaultId(): string {
-  const fresh = generateRandomVaultId();
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(STORAGE_VAULT_KEY, fresh);
-    console.info(`[DeckService] 🔑 Vault ID reset to: "${fresh}".`);
-  }
-  return fresh;
-}
-
-/**
- * Get standard headers including user / vault identification
- */
-export function getAuthHeaders(customHeaders: Record<string, string> = {}): Record<string, string> {
-  const vaultId = getVaultId();
-  return {
-    'Accept': 'application/json',
-    'X-Vault-Id': vaultId,
-    'X-User-Id': vaultId,
-    ...customHeaders,
-  };
-}
-
-/**
- * Get active API Base URL (supports localStorage override for live deployment debugging)
- */
-export function getApiBaseUrl(): string {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_API_BASE_KEY);
-    if (saved !== null) {
-      return saved.trim();
-    }
-  }
-  return DEFAULT_API_BASE_URL;
-}
-
-/**
- * Set active API Base URL
- */
-export function setApiBaseUrl(url: string): void {
-  if (typeof window !== 'undefined') {
-    const clean = url.trim();
-    if (!clean) {
-      localStorage.removeItem(STORAGE_API_BASE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_API_BASE_KEY, clean.replace(/\/+$/, ''));
-    }
-  }
-}
-
-/**
- * Reset API Base URL to default
- */
-export function resetApiBaseUrl(): void {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem(STORAGE_API_BASE_KEY);
-  }
-}
-
 // ============================================================================
-// Direct Remote API Endpoints (Fetch Calls)
+// Direct Remote API Endpoints (Using centralized apiFetch & buildApiUrl)
 // ============================================================================
-
 
 /**
  * Check backend service health and available endpoints
  */
 export async function getApiHealth(): Promise<ApiHealthResponse | null> {
-  const baseUrl = getApiBaseUrl();
   try {
-    const targetUrl = baseUrl ? `${baseUrl}/` : '/';
-    const res = await fetch(targetUrl, {
-      headers: getAuthHeaders(),
-    });
+    const res = await apiFetch('/');
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -196,12 +117,8 @@ export async function getApiHealth(): Promise<ApiHealthResponse | null> {
  * Check Turso database connection status on backend
  */
 export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/turso/status` : '/mtgtools/turso/status';
   try {
-    const res = await fetch(targetUrl, {
-      headers: getAuthHeaders(),
-    });
+    const res = await apiFetch('/mtgtools/turso/status');
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -383,8 +300,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
  * Fetch decks from remote C# API (/deckbuilder/decks)
  */
 export async function getRemoteDecks(): Promise<Deck[]> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks';
+  const targetUrl = buildApiUrl('/deckbuilder/decks');
   const headers = getAuthHeaders();
   const vaultId = headers['X-Vault-Id'];
   const start = performance.now();
@@ -394,9 +310,7 @@ export async function getRemoteDecks(): Promise<Deck[]> {
   console.log('[DeckService] Request Headers:', headers);
 
   try {
-    const res = await fetch(targetUrl, {
-      headers,
-    });
+    const res = await apiFetch('/deckbuilder/decks');
     const durationMs = Math.round(performance.now() - start);
 
     console.log(`[DeckService] Response status: ${res.status} ${res.statusText} (${durationMs}ms)`);
@@ -453,8 +367,7 @@ export async function getRemoteDecks(): Promise<Deck[]> {
  * Save/upsert deck to remote C# API (POST /deckbuilder/decks)
  */
 export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks` : '/deckbuilder/decks';
+  const targetUrl = buildApiUrl('/deckbuilder/decks');
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
@@ -492,9 +405,9 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   });
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await apiFetch('/deckbuilder/decks', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(preparedDeck),
     });
     const durationMs = Math.round(performance.now() - start);
@@ -1528,45 +1441,24 @@ export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
  * @param bbCodeType 1 = DeckUpdate, 2 = SetReviews, 3 = GameSummary
  */
 export async function getRemoteBBCode(color: string, bbCodeType: number = 3): Promise<string> {
-  const baseUrl = getApiBaseUrl();
-  const query = `?color=${encodeURIComponent(color)}&bbCodeType=${bbCodeType}`;
-  const candidates: string[] = [];
-  const isLocalDev =
-    typeof window !== 'undefined' &&
-    window.location &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const res = await apiFetch('/mtgtools/getbbcode', {
+    method: 'GET',
+    query: { color, bbCodeType },
+  });
 
-  if (isLocalDev) {
-    candidates.push(`/mtgtools/getbbcode${query}`);
-  }
-  if (baseUrl) {
-    candidates.push(`${baseUrl.replace(/\/+$/, '')}/mtgtools/getbbcode${query}`);
-  }
-  if (!candidates.some((c) => c.startsWith('/mtgtools/getbbcode'))) {
-    candidates.push(`/mtgtools/getbbcode${query}`);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    throw new Error(`API error (${res.status}): ${errorText || res.statusText}`);
   }
 
-  let lastError: any = null;
-  for (const targetUrl of candidates) {
-    try {
-      const res = await fetch(targetUrl, { method: 'GET' });
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        throw new Error(`API error (${res.status}): ${errorText || res.statusText}`);
-      }
-      let text = await res.text();
-      try {
-        const parsed = JSON.parse(text);
-        if (typeof parsed === 'string') text = parsed;
-      } catch {
-        // raw string
-      }
-      return text;
-    } catch (err: any) {
-      lastError = err;
-    }
+  let text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed === 'string') text = parsed;
+  } catch {
+    // raw string
   }
-  throw lastError || new Error('Failed to fetch BBCode from /mtgtools/getbbcode');
+  return text;
 }
 
 export class DeckService {

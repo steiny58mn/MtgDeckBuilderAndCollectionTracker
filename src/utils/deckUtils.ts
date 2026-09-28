@@ -1,3 +1,4 @@
+import { apiFetch } from '../config/apiConfig';
 import { 
   getApiBaseUrl, 
   getRemoteDeckHistory, 
@@ -1049,10 +1050,6 @@ export function generateBBCodeMTGNexusLocal(deck: Deck): string {
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckListApi(deck: Deck): Promise<string> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/createdecklist` : '/mtgtools/createdecklist';
-
-  // Format cards for the backend parser (quantity + card name)
   const cardLines = (deck.cards || [])
     .filter((c) => c.category !== 'maybeboard')
     .map((c) => `${c.quantity} ${c.name}`)
@@ -1062,7 +1059,7 @@ export async function createDeckListApi(deck: Deck): Promise<string> {
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
   formData.append('file', new Blob([cardLines], { type: 'text/plain' }), `${safeName}.txt`);
 
-  const res = await fetch(targetUrl, {
+  const res = await apiFetch('/mtgtools/createdecklist', {
     method: 'POST',
     body: formData,
   });
@@ -1085,9 +1082,6 @@ export async function createDeckListApi(deck: Deck): Promise<string> {
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckPickListApi(deck: Deck): Promise<string> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/mtgtools/createdeckpicklist` : '/mtgtools/createdeckpicklist';
-
   const cardLines = (deck.cards || [])
     .filter((c) => c.category !== 'maybeboard')
     .map((c) => `${c.quantity} ${c.name}`)
@@ -1097,7 +1091,7 @@ export async function createDeckPickListApi(deck: Deck): Promise<string> {
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
   formData.append('file', new Blob([cardLines], { type: 'text/plain' }), `${safeName}.txt`);
 
-  const res = await fetch(targetUrl, {
+  const res = await apiFetch('/mtgtools/createdeckpicklist', {
     method: 'POST',
     body: formData,
   });
