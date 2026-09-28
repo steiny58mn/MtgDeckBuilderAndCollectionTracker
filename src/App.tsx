@@ -686,7 +686,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-[1920px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 sm:py-8">
+      <main className="flex-1 max-w-[2560px] w-full mx-auto px-2 sm:px-3 lg:px-4 2xl:px-6 py-4 sm:py-6">
         {/* Dedicated Login Tab */}
         {activeTab === 'login' && (
           <LoginPage

@@ -2365,16 +2365,49 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       }
 
       const children = containerRef.current.children;
-      let matchedIndex = 0;
-      for (let i = children.length - 1; i >= 0; i--) {
-        const child = children[i] as HTMLElement;
-        if (child && mouseY >= child.offsetTop) {
-          matchedIndex = i;
-          break;
-        }
-      }
+      const BUTTON_ZONE_HEIGHT = 70; // px: gives plenty of room to click the buttons on the card before switching
 
-      setActiveCardIndex(matchedIndex);
+      setActiveCardIndex((currentIdx) => {
+        if (currentIdx === null) {
+          // Initial entry into pile: activate whichever card is at mouseY
+          for (let i = children.length - 1; i >= 0; i--) {
+            const child = children[i] as HTMLElement;
+            if (child && mouseY >= child.offsetTop) {
+              return i;
+            }
+          }
+          return 0;
+        }
+
+        const currentChild = children[currentIdx] as HTMLElement;
+        const currentTop = currentChild ? currentChild.offsetTop : 0;
+
+        // If mouse moved above current card's top, switch to the card above
+        if (mouseY < currentTop) {
+          for (let i = children.length - 1; i >= 0; i--) {
+            const child = children[i] as HTMLElement;
+            if (child && mouseY >= child.offsetTop) {
+              return i;
+            }
+          }
+          return 0;
+        }
+
+        // If mouse is within current card's button zone, DO NOT switch - let the user click the buttons!
+        if (mouseY < currentTop + BUTTON_ZONE_HEIGHT) {
+          return currentIdx;
+        }
+
+        // Mouse moved further down past the button zone: advance down the pile
+        for (let i = children.length - 1; i > currentIdx; i--) {
+          const prevChild = children[i - 1] as HTMLElement;
+          if (prevChild && mouseY >= prevChild.offsetTop + BUTTON_ZONE_HEIGHT) {
+            return i;
+          }
+        }
+
+        return currentIdx;
+      });
     };
 
     const handleMouseLeave = () => {
@@ -2400,9 +2433,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const piles = groupCardsIntoPiles(cards, sortCardsBy);
 
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4 items-start pt-2 pb-16">
+      <div
+        className="grid justify-center justify-items-center gap-2 sm:gap-2.5 items-start pt-2 pb-16 w-full"
+        style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 125px), 1fr))',
+        }}
+      >
         {piles.map((pile) => (
-          <div key={pile.id} className="flex flex-col min-w-0 bg-slate-900/40 rounded-xl p-2 sm:p-2.5 border border-slate-800/60 shadow-sm">
+          <div key={pile.id} className="flex flex-col min-w-0 w-full max-w-[250px] bg-slate-900/40 rounded-xl p-1.5 sm:p-2 border border-slate-800/60 shadow-sm">
             {/* Pile Header */}
             <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800 text-xs">
               <span className="font-bold text-slate-200 truncate">{pile.title}</span>
@@ -2432,7 +2470,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const thumbUrl =
       (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) ||
       (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
-    const isThisCommander = card.category === 'commander';
+    const isThisCommander =
+      card.category === 'commander' ||
+      commanderCards.some((c) => c.id === card.id || (c.name && card.name && c.name.toLowerCase() === card.name.toLowerCase()));
 
     return (
       <div
@@ -2479,8 +2519,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           }}
         />
 
-        {/* Badges on Top */}
-        <div className="absolute top-1 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
+        {/* Resting Badges on Top (visible when NOT hovered) */}
+        <div
+          className={`absolute top-1 left-1.5 flex items-center gap-1 z-10 pointer-events-none transition-opacity duration-150 ${
+            isActive ? 'opacity-0' : 'opacity-100'
+          }`}
+        >
           {card.quantity > 1 && (
             <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[10px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
               {card.quantity}x
@@ -2494,32 +2538,36 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
 
         {card.isFoil && (
-          <div className="absolute top-1 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
+          <div
+            className={`absolute top-1 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none transition-opacity duration-150 ${
+              isActive ? 'opacity-0' : 'opacity-100'
+            }`}
+          >
             <Sparkles className="w-2.5 h-2.5 text-amber-400" />
           </div>
         )}
 
-        {/* Hover Action Bar at Bottom of Full Card */}
+        {/* Hover Action Bar at Top of Card (only visible when hovering over card) */}
         <div
-          className={`absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent transition-all flex flex-col gap-1 z-20 ${
+          className={`absolute inset-x-0 top-0 p-1 sm:p-1.5 bg-gradient-to-b from-slate-950 via-slate-950/95 to-transparent transition-all flex flex-col gap-1 z-30 ${
             isActive ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
           {/* Top Row: Stepper, Price, Trash */}
-          <div className="flex items-center justify-between gap-1 w-full">
-            <div className="flex items-center gap-0.5 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between gap-0.5 sm:gap-1 w-full">
+            <div className="flex items-center gap-0.5 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm shrink-0">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleUpdateCardQuantity(card.id, -1);
                 }}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-0.5 sm:p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
                 title="Decrease quantity"
               >
-                <Minus className="w-3 h-3" />
+                <Minus className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
               </button>
-              <span className="text-[11px] font-mono font-bold text-slate-200 px-1">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-200 px-0.5 sm:px-1">
                 {card.quantity}
               </span>
               <button
@@ -2528,15 +2576,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   e.stopPropagation();
                   handleUpdateCardQuantity(card.id, 1);
                 }}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title="Increase quantity"
+                disabled={isThisCommander && card.quantity >= 1}
+                className="p-0.5 sm:p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase quantity'}
               >
-                <Plus className="w-3 h-3" />
+                <Plus className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
               </button>
             </div>
 
+            {isThisCommander && (
+              <span className="px-1 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[9px] sm:text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5 truncate">
+                <Crown className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-fuchsia-400" /> Cmdr
+              </span>
+            )}
+
             {unitPrice && (
-              <span className="text-[10px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">
+              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 font-semibold bg-slate-950/80 px-1 py-0.5 rounded border border-slate-800 truncate">
                 ${unitPrice}
               </span>
             )}
@@ -2547,52 +2602,54 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 e.stopPropagation();
                 handleRemoveCard(card.id);
               }}
-              className="p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer"
+              className="p-0.5 sm:p-1 rounded-md bg-rose-950/90 hover:bg-rose-900 border border-rose-700/60 text-rose-300 transition-colors cursor-pointer shrink-0"
               title="Remove from deck"
             >
-              <Trash2 className="w-3 h-3" />
+              <Trash2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
             </button>
           </div>
 
-          {/* Bottom Row: Main / Side / Maybe Category Buttons */}
-          <div className="flex items-center justify-center bg-slate-950/90 border border-slate-800 rounded-md overflow-hidden text-[10px] font-medium shadow-sm w-full">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleChangeCardCategory(card.id, 'main');
-              }}
-              className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
-                card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              Main
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleChangeCardCategory(card.id, 'sideboard');
-              }}
-              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              Side
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleChangeCardCategory(card.id, 'maybeboard');
-              }}
-              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              Maybe
-            </button>
-          </div>
+          {/* Bottom Row: Main / Side / Maybe Category Buttons (EXCLUDED from Commander) */}
+          {!isThisCommander && (
+            <div className="flex items-center justify-center bg-slate-950/90 border border-slate-800 rounded-md overflow-hidden text-[9px] sm:text-[10px] font-medium shadow-sm w-full">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleChangeCardCategory(card.id, 'main');
+                }}
+                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors cursor-pointer ${
+                  card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+              >
+                Main
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleChangeCardCategory(card.id, 'sideboard');
+                }}
+                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+              >
+                Side
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleChangeCardCategory(card.id, 'maybeboard');
+                }}
+                className={`flex-1 py-0.5 sm:py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+              >
+                Maybe
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2758,50 +2815,44 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </button>
                 </div>
 
-                {/* Category Quick Move Buttons */}
-                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
-                  <button
-                    onClick={() => handleChangeCardCategory(card.id, 'main')}
-                    className={`px-2 py-1.5 transition-colors cursor-pointer ${
-                      card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                    }`}
-                  >
-                    Main
-                  </button>
-                  {isThisCommander ? (
+                {/* Category Quick Move Buttons (EXCLUDED from Commander) */}
+                {!isThisCommander && (
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] shrink-0 font-medium shadow-sm">
                     <button
                       onClick={() => handleChangeCardCategory(card.id, 'main')}
-                      className="px-2 py-1.5 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
-                      title="Click to remove Commander status"
+                      className={`px-2 py-1.5 transition-colors cursor-pointer ${
+                        card.category === 'main' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
                     >
-                      👑 Cmdr
+                      Main
                     </button>
-                  ) : canAddAsCommander ? (
+                    {canAddAsCommander && (
+                      <button
+                        onClick={() => handleChangeCardCategory(card.id, 'commander')}
+                        className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
+                        title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+                      >
+                        {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                      className="px-2 py-1.5 transition-colors border-l border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-fuchsia-300 cursor-pointer"
-                      title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+                      onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+                      className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                        card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
                     >
-                      {commanderCards.length === 1 ? '+ Partner' : 'Cmdr'}
+                      Side
                     </button>
-                  ) : null}
-                  <button
-                    onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-                    className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                      card.category === 'sideboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                    }`}
-                  >
-                    Side
-                  </button>
-                  <button
-                    onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-                    className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
-                      card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                    }`}
-                  >
-                    Maybe
-                  </button>
-                </div>
+                    <button
+                      onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+                      className={`px-2 py-1.5 transition-colors border-l border-slate-800 cursor-pointer ${
+                        card.category === 'maybeboard' ? 'bg-fuchsia-500 text-slate-950 font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      Maybe
+                    </button>
+                  </div>
+                )}
 
                 {/* Commander Badge if active commander */}
                 {isThisCommander && (
@@ -2960,67 +3011,60 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             )}
           </div>
 
-          {/* Quick Category Relocation Buttons (Main, Side, Maybe, and Commander/Partner if eligible) */}
-          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] font-medium shadow-xs mt-1 w-full">
-            <button
-              type="button"
-              onClick={() => handleChangeCardCategory(card.id, 'main')}
-              className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
-                card.category === 'main'
-                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-              title="Move to Mainboard"
-            >
-              Main
-            </button>
-
-            {isThisCommander ? (
+          {/* Quick Category Relocation Buttons (EXCLUDED from Commander) */}
+          {!isThisCommander && (
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden text-[10px] font-medium shadow-xs mt-1 w-full">
               <button
                 type="button"
                 onClick={() => handleChangeCardCategory(card.id, 'main')}
-                className="px-1.5 py-1 transition-colors border-l border-slate-800 bg-fuchsia-500 text-slate-950 font-bold cursor-pointer"
-                title="Click to remove Commander status"
+                className={`flex-1 py-1 text-center transition-colors cursor-pointer ${
+                  card.category === 'main'
+                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+                title="Move to Mainboard"
               >
-                Cmdr
+                Main
               </button>
-            ) : canAddAsCommander ? (
+
+              {canAddAsCommander && (
+                <button
+                  type="button"
+                  onClick={() => handleChangeCardCategory(card.id, 'commander')}
+                  className="px-1.5 py-1 transition-colors border-l border-slate-800 text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
+                  title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+                >
+                  {commanderCards.length === 1 ? '+P' : 'Cmdr'}
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                className="px-1.5 py-1 transition-colors border-l border-slate-800 text-fuchsia-400 hover:bg-slate-800 hover:text-fuchsia-300 font-bold cursor-pointer"
-                title={commanderCards.length === 1 ? 'Designate as Partner Commander' : 'Designate as Commander'}
+                onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
+                className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'sideboard'
+                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+                title="Move to Sideboard"
               >
-                {commanderCards.length === 1 ? '+P' : 'Cmdr'}
+                Side
               </button>
-            ) : null}
 
-            <button
-              type="button"
-              onClick={() => handleChangeCardCategory(card.id, 'sideboard')}
-              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                card.category === 'sideboard'
-                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-              title="Move to Sideboard"
-            >
-              Side
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
-              className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
-                card.category === 'maybeboard'
-                  ? 'bg-fuchsia-500 text-slate-950 font-bold'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-              title="Move to Maybeboard"
-            >
-              Maybe
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => handleChangeCardCategory(card.id, 'maybeboard')}
+                className={`flex-1 py-1 text-center transition-colors border-l border-slate-800 cursor-pointer ${
+                  card.category === 'maybeboard'
+                    ? 'bg-fuchsia-500 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+                title="Move to Maybeboard"
+              >
+                Maybe
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
