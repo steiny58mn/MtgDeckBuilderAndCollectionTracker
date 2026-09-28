@@ -1,6 +1,6 @@
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ArrowLeft,
   GitCompare,
@@ -2365,17 +2365,71 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </div>
             </div>
 
-            {/* Cascading Cards Stack: Full cards overlapping, hover brings card to forefront */}
-            <div className="flex flex-col relative w-full pt-1 pb-1">
-              {pile.cards.map((card, idx) => renderCardPileItem(card, idx, pile.cards.length))}
-            </div>
+            {/* Cascading Cards Stack with Scrub-down Hover */}
+            <PileCardsColumn
+              pile={pile}
+              renderCardPileItem={renderCardPileItem}
+            />
           </div>
         ))}
       </div>
     );
   }
 
-  function renderCardPileItem(card: DeckCard, index: number, totalInPile: number) {
+  interface PileCardsColumnProps {
+    pile: PileGroup;
+    renderCardPileItem: (card: DeckCard, index: number, totalInPile: number, isActive: boolean) => React.ReactNode;
+  }
+
+  const PileCardsColumn: React.FC<PileCardsColumnProps> = ({ pile, renderCardPileItem }) => {
+    const [activeCardIndex, setActiveCardIndex] = useState<number | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!containerRef.current || pile.cards.length <= 1) return;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseY = e.clientY - rect.top;
+
+      const total = pile.cards.length;
+      // Step size is the exposed height of each stacked card (8.5% of card height at -91.5% overlap)
+      const cardHeight = rect.width * 1.4;
+      const step = Math.max(16, (1 - 0.915) * cardHeight);
+
+      // Stacked cards occupy index 0 to total - 2
+      const stackedCount = total - 1;
+      const stackedAreaHeight = stackedCount * step;
+
+      if (mouseY < 0) {
+        setActiveCardIndex(null);
+      } else if (mouseY < stackedAreaHeight) {
+        const idx = Math.min(stackedCount - 1, Math.max(0, Math.floor(mouseY / step)));
+        setActiveCardIndex(idx);
+      } else {
+        // Mouse is down over the bottom card's full body
+        setActiveCardIndex(total - 1);
+      }
+    };
+
+    const handleMouseLeave = () => {
+      setActiveCardIndex(null);
+    };
+
+    return (
+      <div
+        ref={containerRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        className="flex flex-col relative w-full pt-1 pb-1"
+      >
+        {pile.cards.map((card, idx) =>
+          renderCardPileItem(card, idx, pile.cards.length, activeCardIndex === idx)
+        )}
+      </div>
+    );
+  };
+
+  function renderCardPileItem(card: DeckCard, index: number, totalInPile: number, isActive: boolean) {
     const unitPrice = getCardUnitPrice(card);
     const thumbUrl =
       (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) ||
@@ -2386,7 +2440,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       <div
         key={card.id}
         style={{
-          marginTop: index > 0 ? '-88%' : '0',
+          marginTop: index > 0 ? '-91.5%' : '0',
+          zIndex: isActive ? 50 : undefined,
         }}
         onClick={() => {
           if (wasChordTriggeredRecently()) return;
@@ -2403,12 +2458,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           price: unitPrice,
           isFoil: card.isFoil,
         })}
-        className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-150 select-none cursor-pointer border bg-slate-950 hover:z-50 hover:shadow-2xl hover:scale-[1.02] ${
-          isThisCommander
+        className={`group relative aspect-[5/7] w-full rounded-xl overflow-hidden shadow-md transition-all duration-150 select-none cursor-pointer border bg-slate-950 ${
+          isActive
+            ? 'z-50 shadow-2xl scale-[1.02] border-violet-400'
+            : isThisCommander
             ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
-            : 'border-slate-800 hover:border-violet-400'
+            : 'border-slate-800'
         }`}
-        title="Click to inspect, hover to bring to forefront, or Right-Click / Dual-Click to pop up large image"
+        title="Click to inspect, scrub mouse to view card, or Right-Click / Dual-Click to pop up large image"
       >
         {/* Full Card Image */}
         <img
@@ -2425,28 +2482,32 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         />
 
         {/* Badges on Top */}
-        <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
+        <div className="absolute top-1 left-1.5 flex items-center gap-1 z-10 pointer-events-none">
           {card.quantity > 1 && (
-            <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[11px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
+            <span className="px-1.5 py-0.5 rounded bg-slate-950/90 text-violet-300 font-mono font-bold text-[10px] border border-violet-500/40 shadow-sm backdrop-blur-xs">
               {card.quantity}x
             </span>
           )}
           {isThisCommander && (
-            <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
+            <span className="px-1.5 py-0.5 rounded bg-fuchsia-950/90 text-fuchsia-300 font-bold text-[9px] border border-fuchsia-500/40 shadow-sm flex items-center gap-0.5">
               <Crown className="w-2.5 h-2.5 text-fuchsia-400" /> Cmdr
             </span>
           )}
         </div>
 
         {card.isFoil && (
-          <div className="absolute top-1.5 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
+          <div className="absolute top-1 right-1.5 z-10 bg-amber-950/90 border border-amber-600/60 rounded px-1 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-sm pointer-events-none">
             <Sparkles className="w-2.5 h-2.5 text-amber-400" />
           </div>
         )}
 
         {/* Hover Action Bar at Bottom of Full Card */}
-        <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-center justify-between gap-1 z-20">
-          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800">
+        <div
+          className={`absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent transition-all flex items-center justify-between gap-1 z-20 ${
+            isActive ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <div className="flex items-center gap-1 bg-slate-900/90 rounded-md p-0.5 border border-slate-800 shadow-sm">
             <button
               type="button"
               onClick={(e) => {
