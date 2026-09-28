@@ -1,3 +1,4 @@
+import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import React, { useState } from 'react';
 import { 
   ArrowLeft,
@@ -102,6 +103,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   );
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const {
+    activePreview: hoverPreview,
+    handleMouseEnter: onImageMouseEnter,
+    handleMouseMove: onImageMouseMove,
+    handleMouseLeave: onImageMouseLeave,
+    clearPreview: onImageClearPreview,
+  } = useImageHoverPreview(500);
+
+  const getCardLargeImageUrl = (card: DeckCard): string => {
+    if (card.imageUrl) {
+      if (card.imageUrl.includes('version=small')) {
+        return card.imageUrl.replace('version=small', 'version=large');
+      }
+      return card.imageUrl;
+    }
+    if (card.scryfallId) {
+      return `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large`;
+    }
+    return '';
+  };
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean;
     title: string;
@@ -1730,6 +1751,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           deck={activeDeck}
         />
       )}
+
+      {/* 1-Second Delayed Image Hover Popup */}
+      <ImageHoverPopup preview={hoverPreview} />
     </div>
   );
 
@@ -1771,7 +1795,74 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           isThisCommander ? 'bg-fuchsia-950/15 hover:bg-fuchsia-950/25' : 'hover:bg-slate-800/50'
         }`}
       >
-        {/* Top Row: Controls (Quantity, Location, Commander status, Remove) */}
+        {/* Top Row: Card Details */}
+        <div className="flex items-center gap-3">
+          {/* Thumbnail */}
+          <div
+            onClick={() => {
+              onImageClearPreview();
+              onSelectCard(toScryfallCard(card));
+            }}
+            onMouseEnter={(e) =>
+              onImageMouseEnter(e, {
+                imageUrl: getCardLargeImageUrl(card),
+                fallbackUrl: thumbUrl,
+                name: card.name,
+                backImageUrl: card.backImageUrl,
+                scryfallId: card.scryfallId,
+              })
+            }
+            onMouseMove={onImageMouseMove}
+            onMouseLeave={onImageMouseLeave}
+            className="w-12 h-16 rounded bg-slate-950 overflow-hidden shrink-0 border border-slate-800 cursor-pointer hover:border-fuchsia-400 transition-colors shadow-sm"
+          >
+            {thumbUrl ? (
+              <img
+                src={thumbUrl}
+                alt={card.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
+                    e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small`;
+                  }
+                }}
+              />
+            ) : (
+              <div className="w-full h-full bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-bold">MTG</div>
+            )}
+          </div>
+
+          {/* Info */}
+          <div className="min-w-0 flex-1 flex flex-col justify-center">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                onClick={() => onSelectCard(toScryfallCard(card))}
+                className="text-sm font-bold text-slate-200 hover:text-violet-400 cursor-pointer break-words leading-tight"
+              >
+                {card.name}
+              </span>
+              <div className="shrink-0 flex items-center gap-1.5 mt-0.5">
+                <ManaCostBadge manaCost={card.mana_cost} size="sm" />
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-1.5">
+              <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner">
+                {card.set}
+              </span>
+              <span className="truncate">{card.type_line}</span>
+            </div>
+          </div>
+
+          {/* Price */}
+          <div className="text-right shrink-0 min-w-[3.5rem]">
+            <span className="text-xs font-bold text-emerald-400 block">${lineTotal}</span>
+            <span className="text-[10px] text-slate-500 block">${(Number(unitPrice) || 0).toFixed(2)}</span>
+          </div>
+        </div>
+
+        {/* Bottom Row: Controls (Quantity, Location, Commander status, Remove) */}
         <div className="flex items-center justify-between gap-2">
           {isHistoricalView ? (
             <div className="flex items-center gap-2 flex-wrap">
@@ -1890,59 +1981,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </>
           )}
         </div>
-
-        {/* Bottom Row: Card Details */}
-        <div className="flex items-center gap-3">
-          {/* Thumbnail */}
-          <div
-            onClick={() => onSelectCard(toScryfallCard(card))}
-            className="w-12 h-16 rounded bg-slate-950 overflow-hidden shrink-0 border border-slate-800 cursor-pointer hover:border-fuchsia-400 transition-colors shadow-sm"
-          >
-            {thumbUrl ? (
-              <img
-                src={thumbUrl}
-                alt={card.name}
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                    e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small`;
-                  }
-                }}
-              />
-            ) : (
-              <div className="w-full h-full bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-bold">MTG</div>
-            )}
-          </div>
-
-          {/* Info */}
-          <div className="min-w-0 flex-1 flex flex-col justify-center">
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                onClick={() => onSelectCard(toScryfallCard(card))}
-                className="text-sm font-bold text-slate-200 hover:text-violet-400 cursor-pointer break-words leading-tight"
-              >
-                {card.name}
-              </span>
-              <div className="shrink-0 flex items-center gap-1.5 mt-0.5">
-                <ManaCostBadge manaCost={card.mana_cost} size="sm" />
-              </div>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-1.5">
-              <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner">
-                {card.set}
-              </span>
-              <span className="truncate">{card.type_line}</span>
-            </div>
-          </div>
-
-          {/* Price */}
-          <div className="text-right shrink-0 min-w-[3.5rem]">
-            <span className="text-xs font-bold text-emerald-400 block">${lineTotal}</span>
-            <span className="text-[10px] text-slate-500 block">${(Number(unitPrice) || 0).toFixed(2)}</span>
-          </div>
-        </div>
       </div>
     );
   }
@@ -1969,7 +2007,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         }`}
       >
         <div
-          onClick={() => onSelectCard(toScryfallCard(card))}
+          onClick={() => {
+            onImageClearPreview();
+            onSelectCard(toScryfallCard(card));
+          }}
+          onMouseEnter={(e) =>
+            onImageMouseEnter(e, {
+              imageUrl: getCardLargeImageUrl(card),
+              fallbackUrl: thumbUrl,
+              name: card.name,
+              backImageUrl: card.backImageUrl,
+              scryfallId: card.scryfallId,
+            })
+          }
+          onMouseMove={onImageMouseMove}
+          onMouseLeave={onImageMouseLeave}
           className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
         >
           <img

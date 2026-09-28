@@ -1,3 +1,4 @@
+import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { ConfirmModal } from "./ConfirmModal";
 import React, { useState, useEffect } from 'react';
 import { 
@@ -80,6 +81,26 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
+  const {
+    activePreview: hoverPreview,
+    handleMouseEnter: onImageMouseEnter,
+    handleMouseMove: onImageMouseMove,
+    handleMouseLeave: onImageMouseLeave,
+    clearPreview: onImageClearPreview,
+  } = useImageHoverPreview(500);
+
+  const getCardLargeImageUrl = (card: CollectionCard): string => {
+    if (card.imageUrl) {
+      if (card.imageUrl.includes('version=small')) {
+        return card.imageUrl.replace('version=small', 'version=large');
+      }
+      return card.imageUrl;
+    }
+    if (card.scryfallId) {
+      return `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large`;
+    }
+    return '';
+  };
 
   // Sync when activeBinder prop changes
   useEffect(() => {
@@ -750,7 +771,20 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                               {/* Left: Thumbnail & Name */}
                               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                 <div
-                                  onClick={() => onSelectCard(cardToScryfallCard(card))}
+                                  onClick={() => {
+                                    onImageClearPreview();
+                                    onSelectCard(cardToScryfallCard(card));
+                                  }}
+                                  onMouseEnter={(e) =>
+                                    onImageMouseEnter(e, {
+                                      imageUrl: getCardLargeImageUrl(card),
+                                      fallbackUrl: card.imageUrl,
+                                      name: card.name,
+                                      scryfallId: card.scryfallId,
+                                    })
+                                  }
+                                  onMouseMove={onImageMouseMove}
+                                  onMouseLeave={onImageMouseLeave}
                                   className="w-8 h-11 bg-slate-950 rounded overflow-hidden shrink-0 cursor-pointer border border-slate-800 hover:border-emerald-500 transition-colors relative"
                                 >
                                   <img
@@ -875,7 +909,20 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                   >
                     {/* Card Visual */}
                     <div
-                      onClick={() => onSelectCard(cardToScryfallCard(card))}
+                      onClick={() => {
+                        onImageClearPreview();
+                        onSelectCard(cardToScryfallCard(card));
+                      }}
+                      onMouseEnter={(e) =>
+                        onImageMouseEnter(e, {
+                          imageUrl: getCardLargeImageUrl(card),
+                          fallbackUrl: card.imageUrl,
+                          name: card.name,
+                          scryfallId: card.scryfallId,
+                        })
+                      }
+                      onMouseMove={onImageMouseMove}
+                      onMouseLeave={onImageMouseLeave}
                       className="cursor-pointer relative aspect-[5/7] bg-slate-950 overflow-hidden"
                     >
                       <img
@@ -1105,6 +1152,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
         onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
         confirmText="Delete"
       />
+      <ImageHoverPopup preview={hoverPreview} />
     </div>
   );
 };

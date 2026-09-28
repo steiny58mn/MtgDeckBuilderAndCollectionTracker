@@ -140,21 +140,58 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const canHavePartner = isCommanderDeck && commanderCards.length >= 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
 
   // Available Partners Shelf state
-  // Hover preview pop-up state
+  // Hover preview pop-up state with 1-second delay
   const [hoveredCardPreview, setHoveredCardPreview] = useState<{
     card: ScryfallCard;
     x: number;
     y: number;
   } | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingHoverRef = useRef<{ card: ScryfallCard; x: number; y: number } | null>(null);
+
+  const handleCardMouseEnter = (e: React.MouseEvent, card: ScryfallCard) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    pendingHoverRef.current = { card, x: e.clientX, y: e.clientY };
+    hoverTimeoutRef.current = setTimeout(() => {
+      if (pendingHoverRef.current) {
+        setHoveredCardPreview(pendingHoverRef.current);
+      }
+    }, 500);
+  };
+
+  const handleCardMouseMove = (e: React.MouseEvent) => {
+    if (pendingHoverRef.current) {
+      pendingHoverRef.current.x = e.clientX;
+      pendingHoverRef.current.y = e.clientY;
+    }
+    setHoveredCardPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : null));
+  };
+
+  const handleCardMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    pendingHoverRef.current = null;
+    setHoveredCardPreview(null);
+  };
 
   // Clear hover preview on scroll or window resize
   useEffect(() => {
-    const handleDismissPreview = () => setHoveredCardPreview(null);
+    const handleDismissPreview = () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      pendingHoverRef.current = null;
+      setHoveredCardPreview(null);
+    };
     window.addEventListener('scroll', handleDismissPreview, true);
     window.addEventListener('resize', handleDismissPreview);
     return () => {
       window.removeEventListener('scroll', handleDismissPreview, true);
       window.removeEventListener('resize', handleDismissPreview);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     };
   }, []);
 
@@ -1228,12 +1265,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           >
                             <div
                               onClick={() => {
-                                setHoveredCardPreview(null);
+                                handleCardMouseLeave();
                                 onSelectCard(pCard);
                               }}
-                              onMouseEnter={(e) => setHoveredCardPreview({ card: pCard, x: e.clientX, y: e.clientY })}
-                              onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card: pCard, x: e.clientX, y: e.clientY })}
-                              onMouseLeave={() => setHoveredCardPreview(null)}
+                              onMouseEnter={(e) => handleCardMouseEnter(e, pCard)}
+                              onMouseMove={handleCardMouseMove}
+                              onMouseLeave={handleCardMouseLeave}
                               className="relative aspect-[5/7] bg-slate-950 overflow-hidden cursor-pointer"
                             >
                               {img ? (
@@ -1976,12 +2013,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 {/* Image Container with Click to Inspect */}
                 <div 
                   onClick={() => {
-                    setHoveredCardPreview(null);
+                    handleCardMouseLeave();
                     onSelectCard(card);
                   }}
-                  onMouseEnter={(e) => setHoveredCardPreview({ card, x: e.clientX, y: e.clientY })}
-                  onMouseMove={(e) => setHoveredCardPreview((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { card, x: e.clientX, y: e.clientY })}
-                  onMouseLeave={() => setHoveredCardPreview(null)}
+                  onMouseEnter={(e) => handleCardMouseEnter(e, card)}
+                  onMouseMove={handleCardMouseMove}
+                  onMouseLeave={handleCardMouseLeave}
                   className="cursor-pointer relative overflow-hidden aspect-[5/7] bg-slate-950"
                 >
                                     {/* Edhrec Stats */}
