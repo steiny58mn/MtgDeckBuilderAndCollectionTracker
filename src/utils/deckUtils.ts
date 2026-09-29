@@ -65,6 +65,7 @@ import {
   formatDeckSummaryTextBlock,
   compareDeckFilesApi,
   formatCardsForApiComparison,
+  formatCardsForDeckListApi,
   getCardApiName,
   compareDecks,
   CompareDecks
@@ -1135,10 +1136,11 @@ export function generateDeckPickListLocal(deck: Deck): string {
 
 /**
  * Calls remote C# API POST /mtgtools/createdecklist to obtain the BBCode formatted decklist.
+ * Formats the deck with the Commander designated under Sideboard and non-split cards trimmed.
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckListApi(deck: Deck): Promise<string> {
-  const cardLines = formatCardsForApiComparison(deck);
+  const cardLines = formatCardsForDeckListApi(deck);
 
   const formData = new FormData();
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
@@ -1221,10 +1223,11 @@ export function resolveMtgNexusEditUrl(rawUrl?: string): string {
 
 /**
  * Calls remote C# API POST /mtgtools/createdeckpicklist to obtain the physical card picklist.
+ * Formats the deck with the Commander designated under Sideboard and non-split cards trimmed.
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckPickListApi(deck: Deck): Promise<string> {
-  const cardLines = formatCardsForApiComparison(deck);
+  const cardLines = formatCardsForDeckListApi(deck);
 
   const formData = new FormData();
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');

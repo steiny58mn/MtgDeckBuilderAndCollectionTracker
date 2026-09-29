@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Consolidated MTG Deck, Collection & Remote API Service
  * Handles direct communication with remote C# Web API (api.frostpointlabs.com)
  * and manages reactive in-memory state for decks and binders.
@@ -985,6 +985,77 @@ export function formatCardsForApiComparison(
   return Array.from(cardMap.entries())
     .map(([name, qty]) => `${qty} ${name}`)
     .join('\n');
+}
+
+/**
+ * Formats a deck into plain text card lines suitable for /mtgtools/createdecklist
+ * and /mtgtools/createdeckpicklist.
+ * - Trims multi-faced card names to front face (via getCardApiName)
+ * - Flags the Commander(s) as being in the Sideboard section so the C# backend recognises them
+ * - Includes any regular sideboard cards under Sideboard
+ * - Excludes maybeboard cards
+ */
+export function formatCardsForDeckListApi(deck: Deck): string {
+  if (!deck || !deck.cards) return '';
+
+  const cards = deck.cards;
+  let commanderCards = cards.filter((c) => c.category === 'commander');
+  let mainCards = cards.filter((c) => c.category === 'main');
+  const sideCards = cards.filter((c) => c.category === 'sideboard');
+
+  // If no card has category 'commander' explicitly set, check commanderName/commanderId
+  if (commanderCards.length === 0 && (deck.commanderName || deck.commanderId)) {
+    const matchingIdx = mainCards.findIndex(
+      (c) =>
+        (deck.commanderId && c.scryfallId === deck.commanderId) ||
+        (deck.commanderName &&
+          c.name.toLowerCase().trim() === deck.commanderName.toLowerCase().trim())
+    );
+    if (matchingIdx !== -1) {
+      commanderCards = [mainCards[matchingIdx]];
+      mainCards = mainCards.filter((_, idx) => idx !== matchingIdx);
+    }
+  }
+
+  // Aggregate mainboard cards
+  const mainMap = new Map<string, number>();
+  for (const c of mainCards) {
+    if (!c || !c.name || c.category === 'maybeboard') continue;
+    const name = getCardApiName(c);
+    if (!name) continue;
+    mainMap.set(name, (mainMap.get(name) || 0) + (c.quantity || 1));
+  }
+
+  // Aggregate sideboard & commander cards
+  const sideMap = new Map<string, number>();
+  // Commanders first in sideboard
+  for (const c of commanderCards) {
+    if (!c || !c.name) continue;
+    const name = getCardApiName(c);
+    if (!name) continue;
+    sideMap.set(name, (sideMap.get(name) || 0) + (c.quantity || 1));
+  }
+  for (const c of sideCards) {
+    if (!c || !c.name || c.category === 'maybeboard') continue;
+    const name = getCardApiName(c);
+    if (!name) continue;
+    sideMap.set(name, (sideMap.get(name) || 0) + (c.quantity || 1));
+  }
+
+  const lines: string[] = [];
+  for (const [name, qty] of mainMap.entries()) {
+    lines.push(`${qty} ${name}`);
+  }
+
+  if (sideMap.size > 0) {
+    lines.push('');
+    lines.push('Sideboard');
+    for (const [name, qty] of sideMap.entries()) {
+      lines.push(`${qty} ${name}`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /**
