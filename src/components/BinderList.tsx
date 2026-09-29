@@ -1,8 +1,9 @@
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
-import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink } from 'lucide-react';
+import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink, Upload } from 'lucide-react';
 import { Binder } from '../types/mtg';
+import { BinderImportModal } from './BinderImportModal';
 
 interface BinderListProps {
   binders: Binder[];
@@ -19,7 +20,8 @@ export const BinderList: React.FC<BinderListProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  useBodyScrollLock(showCreateModal);
+  const [showImportModal, setShowImportModal] = useState(false);
+  useBodyScrollLock(showCreateModal || showImportModal);
   const [newBinderName, setNewBinderName] = useState('');
   const [newBinderDesc, setNewBinderDesc] = useState('');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
@@ -58,13 +60,23 @@ export const BinderList: React.FC<BinderListProps> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all"
-        >
-          <FolderPlus className="w-4 h-4" />
-          New Binder
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-emerald-500/50 text-slate-200 hover:text-white rounded-xl text-sm font-bold shadow-md transition-all cursor-pointer"
+            title="Import collection from CSV or text file"
+          >
+            <Upload className="w-4 h-4 text-emerald-400" />
+            Import CSV
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all cursor-pointer"
+          >
+            <FolderPlus className="w-4 h-4" />
+            New Binder
+          </button>
+        </div>
       </div>
 
       {filteredBinders.length > 0 ? (
@@ -212,6 +224,15 @@ export const BinderList: React.FC<BinderListProps> = ({
           setConfirmState(prev => ({ ...prev, isOpen: false }));
         }}
         onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      <BinderImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        existingBinders={binders}
+        onImportComplete={(importedBinder) => {
+          onSelectBinder(importedBinder);
+        }}
       />
     </div>
   );

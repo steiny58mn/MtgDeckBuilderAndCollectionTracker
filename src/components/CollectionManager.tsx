@@ -27,12 +27,14 @@ import {
   Mountain,
   Crown,
   BookOpen,
-  Columns3
+  Columns3,
+  Upload
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
 import { getCardColorCategoryRank } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
+import { BinderImportModal } from './BinderImportModal';
 
 interface CollectionManagerProps {
   collection: CollectionCard[];
@@ -83,6 +85,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
   const { peekCard, setPeekCard, wasChordTriggeredRecently, getCardChordProps } = useCardDualClickPeek();
   const {
     activePreview: hoverPreview,
@@ -474,6 +477,13 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-violet-400' : ''}`} />
               <span>{isRefreshingPrices ? 'Syncing...' : 'Live Prices'}</span>
+            </button>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors"
+              title="Import Collection from CSV"
+            >
+              <Upload className="w-4 h-4" />
             </button>
             <button
               onClick={handleExportCsv}
@@ -1162,6 +1172,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       />
       <ImageHoverPopup preview={hoverPreview} />
       <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
+
+      <BinderImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        existingBinders={binders}
+        onImportComplete={(importedBinder) => {
+          if (onSelectBinder) {
+            onSelectBinder(importedBinder);
+          }
+        }}
+      />
     </div>
   );
 };
