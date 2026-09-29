@@ -8,7 +8,8 @@ import {
   Trash2, 
   Search, 
   FolderPlus,
-  Upload
+  Upload,
+  ExternalLink
 } from 'lucide-react';
 import { Deck, MTGFormat, CollectionCard } from '../types/mtg';
 import { calculateDeckStats } from '../utils/deckUtils';
@@ -289,8 +290,17 @@ export const DeckList: React.FC<DeckListProps> = ({
 
                 {/* Deck Info Body */}
                 <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                  <div onClick={() => onSelectDeck(deck)} className="cursor-pointer">
-                    <h3 className="text-base font-bold text-white group-hover:text-fuchsia-400 transition-colors line-clamp-1">
+                  <a
+                    href={`?deck=${encodeURIComponent(deck.id)}`}
+                    onClick={(e) => {
+                      if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+                        e.preventDefault();
+                        onSelectDeck(deck);
+                      }
+                    }}
+                    className="block cursor-pointer group/title text-left"
+                  >
+                    <h3 className="text-base font-bold text-white group-hover/title:text-fuchsia-400 transition-colors line-clamp-1">
                       {deck.name}
                     </h3>
                     {deck.description && (
@@ -298,7 +308,7 @@ export const DeckList: React.FC<DeckListProps> = ({
                         {deck.description}
                       </p>
                     )}
-                  </div>
+                  </a>
 
                   {/* Stats snippet */}
                   <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/80">
@@ -316,6 +326,16 @@ export const DeckList: React.FC<DeckListProps> = ({
 
                     {/* Action buttons */}
                     <div className="flex items-center gap-1">
+                      <a
+                        href={`?deck=${encodeURIComponent(deck.id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-sky-300 hover:bg-slate-800 transition-colors inline-flex items-center justify-center cursor-pointer"
+                        title="Open deck in new tab"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

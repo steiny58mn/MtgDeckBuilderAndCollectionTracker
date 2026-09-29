@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
+import { getCardColorCategoryRank } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 
 interface CollectionManagerProps {
@@ -184,12 +185,18 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       return profitB - profitA;
     }
     if (sortBy === 'cmc') {
-      return (a.cmc || 0) - (b.cmc || 0);
+      const diff = (a.cmc || 0) - (b.cmc || 0);
+      if (diff !== 0) return diff;
+      return a.name.localeCompare(b.name);
     }
     if (sortBy === 'color') {
-      const colorA = (a.colors || []).join('');
-      const colorB = (b.colors || []).join('');
-      return colorA.localeCompare(colorB);
+      const rankA = getCardColorCategoryRank(a);
+      const rankB = getCardColorCategoryRank(b);
+      if (rankA !== rankB) return rankA - rankB;
+      const cmcA = a.cmc || 0;
+      const cmcB = b.cmc || 0;
+      if (cmcA !== cmcB) return cmcA - cmcB;
+      return a.name.localeCompare(b.name);
     }
     return 0;
   });

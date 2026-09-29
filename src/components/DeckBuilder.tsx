@@ -45,11 +45,21 @@ import {
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
-import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander, getCardCategorySortOrder } from '../utils/deckUtils';
+import { 
+  calculateDeckStats, 
+  getCardPartnerInfo, 
+  canCardsPartnerTogether, 
+  canBePrimaryCommander, 
+  getCardCategorySortOrder,
+  getCardEffectiveColors,
+  getCardColorCategoryRank,
+  getCardColorGroup
+} from '../utils/deckUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { DeckStatsModal } from './DeckStatsModal';
+import { GamechangersPanel } from './GamechangersPanel';
 import { CommanderRecommendationsModal } from './CommanderRecommendationsModal';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
@@ -97,6 +107,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [priceRefreshMessage, setPriceRefreshMessage] = useState<string | null>(null);
   const [isNexusSyncing, setIsNexusSyncing] = useState(false);
   const [nexusSyncToast, setNexusSyncToast] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [dragOverCategory, setDragOverCategory] = useState<DeckCategory | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
@@ -756,6 +768,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
   };
 
+  const handleDropOnCategory = (e: React.DragEvent, targetCategory: DeckCategory) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCategory(null);
+    const cardId = e.dataTransfer.getData('text/plain') || draggedCardId;
+    setDraggedCardId(null);
+    if (!cardId) return;
+
+    const card = deck.cards.find((c) => c.id === cardId);
+    if (!card) return;
+
+    if (card.category === targetCategory) return;
+
+    handleChangeCardCategory(cardId, targetCategory);
+    setPriceRefreshMessage(`Moved "${card.name}" to ${targetCategory === 'commander' ? 'Commander' : targetCategory.charAt(0).toUpperCase() + targetCategory.slice(1)}`);
+    setTimeout(() => setPriceRefreshMessage(null), 3000);
+  };
+
   const stats = calculateDeckStats(activeDeck, statsScope);
 
   // Commander calculations
@@ -1144,18 +1174,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         const cmcA = a.cmc || 0;
         const cmcB = b.cmc || 0;
         if (cmcA !== cmcB) return cmcA - cmcB;
-        // Secondary sort by color
-        const colorA = (a.colors || []).join('');
-        const colorB = (b.colors || []).join('');
-        if (colorA !== colorB) return colorA.localeCompare(colorB);
+        // Secondary sort by color rank
+        const rankA = getCardColorCategoryRank(a);
+        const rankB = getCardColorCategoryRank(b);
+        if (rankA !== rankB) return rankA - rankB;
         // Tertiary sort by name
         return a.name.localeCompare(b.name);
       }
       if (sortCardsBy === 'color') {
-        const colorA = (a.colors || []).join('');
-        const colorB = (b.colors || []).join('');
-        if (colorA !== colorB) return colorA.localeCompare(colorB);
-        // Secondary sort by name
+        const rankA = getCardColorCategoryRank(a);
+        const rankB = getCardColorCategoryRank(b);
+        if (rankA !== rankB) return rankA - rankB;
+        // Secondary sort by mana value
+        const cmcA = a.cmc || 0;
+        const cmcB = b.cmc || 0;
+        if (cmcA !== cmcB) return cmcA - cmcB;
+        // Tertiary sort by name
         return a.name.localeCompare(b.name);
       }
       return a.name.localeCompare(b.name);
@@ -2113,6 +2147,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
       </div>
 
+      {/* Easy-to-view, collapsible Gamechangers Panel */}
+      <GamechangersPanel deck={activeDeck} onSelectCard={onSelectCard} />
+
       {/* Category Grid View */}
       {viewMode === 'category-grid' ? (
         <div className="space-y-4">
@@ -2804,23 +2841,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       colorOrder.forEach((o) => colorMap.set(o.key, []));
 
       cards.forEach((c) => {
-        const type = c.type_line?.toLowerCase() || '';
-        if (type.includes('land')) {
-          colorMap.get('land')!.push(c);
-          return;
-        }
-        const colors = c.colors || [];
-        if (colors.length === 0) {
-          colorMap.get('colorless')!.push(c);
-        } else if (colors.length === 1) {
-          const col = colors[0];
-          if (colorMap.has(col)) {
-            colorMap.get(col)!.push(c);
-          } else {
-            colorMap.get('colorless')!.push(c);
-          }
+        const group = getCardColorGroup(c);
+        if (colorMap.has(group)) {
+          colorMap.get(group)!.push(c);
         } else {
-          colorMap.get('multi')!.push(c);
+          colorMap.get('colorless')!.push(c);
         }
       });
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -79,6 +79,16 @@ export default function App() {
 
   // Subscribe to reactive database & local library state
   useEffect(() => {
+    // Check initial URL parameters for deep-linking in new tabs
+    const params = new URLSearchParams(window.location.search);
+    const initialDeckId = params.get('deck');
+    const initialBinderId = params.get('binder');
+    const initialTab = params.get('tab') as 'decks' | 'collection' | 'search' | 'login' | null;
+
+    if (initialTab && ['decks', 'collection', 'search', 'login'].includes(initialTab)) {
+      setActiveTab(initialTab);
+    }
+
     const unsubDecks = DeckService.subscribeDecks((updatedDecks) => {
       console.log(`[App] 📥 Received updated decks (${updatedDecks.length} deck(s)):`, updatedDecks.map(d => ({
         id: d.id,
@@ -88,8 +98,17 @@ export default function App() {
       })));
       setDecks(updatedDecks);
       setActiveDeck(prev => {
-        if (!prev) return null;
-        return updatedDecks.find(d => d.id === prev.id) || prev;
+        if (prev) {
+          return updatedDecks.find(d => d.id === prev.id) || prev;
+        }
+        if (initialDeckId) {
+          const match = updatedDecks.find(d => d.id === initialDeckId);
+          if (match) {
+            setActiveTab('decks');
+            return match;
+          }
+        }
+        return null;
       });
     });
 
@@ -106,8 +125,17 @@ export default function App() {
       })));
       setBinders(updatedBinders);
       setActiveBinder(prev => {
-        if (!prev) return null;
-        return updatedBinders.find(b => b.id === prev.id) || prev;
+        if (prev) {
+          return updatedBinders.find(b => b.id === prev.id) || prev;
+        }
+        if (initialBinderId) {
+          const match = updatedBinders.find(b => b.id === initialBinderId);
+          if (match) {
+            setActiveTab('collection');
+            return match;
+          }
+        }
+        return null;
       });
     });
 
@@ -122,7 +150,71 @@ export default function App() {
       unsubBinders();
       unsubSync();
     };
-  }, [activeDeck?.id, activeBinder?.id]);
+  }, []);
+
+  // Synchronize URL search params to reflect active deck, binder, and tab for new tabs/sharing
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (activeDeck) {
+        url.searchParams.set('deck', activeDeck.id);
+        url.searchParams.delete('binder');
+        url.searchParams.delete('tab');
+      } else if (activeBinder) {
+        url.searchParams.set('binder', activeBinder.id);
+        url.searchParams.delete('deck');
+        url.searchParams.delete('tab');
+      } else {
+        url.searchParams.delete('deck');
+        url.searchParams.delete('binder');
+        if (activeTab !== 'decks') {
+          url.searchParams.set('tab', activeTab);
+        } else {
+          url.searchParams.delete('tab');
+        }
+      }
+      window.history.replaceState({}, '', url.toString());
+    } catch (err) {
+      console.error('URL sync error:', err);
+    }
+  }, [activeDeck?.id, activeBinder?.id, activeTab]);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const deckId = params.get('deck');
+      const binderId = params.get('binder');
+      const tab = params.get('tab') as 'decks' | 'collection' | 'search' | 'login' | null;
+
+      if (deckId) {
+        const foundDeck = DeckService.getLocalDecks().find(d => d.id === deckId);
+        if (foundDeck) {
+          setActiveDeck(foundDeck);
+          setActiveTab('decks');
+          return;
+        }
+      }
+      if (binderId) {
+        const foundBinder = DeckService.getLocalBinders().find(b => b.id === binderId);
+        if (foundBinder) {
+          setActiveBinder(foundBinder);
+          setActiveTab('collection');
+          return;
+        }
+      }
+      setActiveDeck(null);
+      setActiveBinder(null);
+      if (tab && ['decks', 'collection', 'search', 'login'].includes(tab)) {
+        setActiveTab(tab);
+      } else {
+        setActiveTab('decks');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   /**
    * Helper to gate actions that require saving to user account

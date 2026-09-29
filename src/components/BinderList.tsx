@@ -1,7 +1,7 @@
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
-import { Bookmark, Search, FolderPlus, Trash2, X } from 'lucide-react';
+import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink } from 'lucide-react';
 import { Binder } from '../types/mtg';
 
 interface BinderListProps {
@@ -69,7 +69,8 @@ export const BinderList: React.FC<BinderListProps> = ({
 
       {filteredBinders.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {filteredBinders.map((binder) => (            <div
+          {filteredBinders.map((binder) => (
+            <div
               key={binder.id}
               onClick={() => onSelectBinder(binder)}
               className="group p-5 bg-slate-900 border border-slate-800 hover:border-emerald-500/60 rounded-2xl shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer flex flex-col justify-between relative"
@@ -78,25 +79,48 @@ export const BinderList: React.FC<BinderListProps> = ({
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 shadow-inner">
                   <Bookmark className="w-6 h-6 text-emerald-500" />
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmState({
-                      isOpen: true,
-                      title: 'Delete Binder',
-                      message: `Are you sure you want to delete the binder "${binder.name}"? Cards within the binder will remain in your collection.`,
-                      onConfirm: () => onDeleteBinder(binder.id)
-                    });
-                  }}
-                  className="p-1.5 rounded-md bg-slate-800 text-slate-400 hover:bg-rose-900/40 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
-                  title="Delete Binder"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <a
+                    href={`?binder=${encodeURIComponent(binder.id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-1.5 rounded-md bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-sky-300 transition-colors inline-flex items-center justify-center cursor-pointer"
+                    title="Open binder in new tab"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmState({
+                        isOpen: true,
+                        title: 'Delete Binder',
+                        message: `Are you sure you want to delete the binder "${binder.name}"? Cards within the binder will remain in your collection.`,
+                        onConfirm: () => onDeleteBinder(binder.id)
+                      });
+                    }}
+                    className="p-1.5 rounded-md bg-slate-800 text-slate-400 hover:bg-rose-900/40 hover:text-rose-400 transition-colors"
+                    title="Delete Binder"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-100 group-hover:text-emerald-400 transition-colors line-clamp-1">{binder.name}</h3>
-                <p className="text-xs text-slate-500 mt-1 line-clamp-2 min-h-[32px]">{binder.description || 'No description'}</p>
+                <a
+                  href={`?binder=${encodeURIComponent(binder.id)}`}
+                  onClick={(e) => {
+                    if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+                      e.preventDefault();
+                      onSelectBinder(binder);
+                    }
+                  }}
+                  className="block text-left"
+                >
+                  <h3 className="text-lg font-bold text-slate-100 group-hover:text-emerald-400 transition-colors line-clamp-1">{binder.name}</h3>
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2 min-h-[32px]">{binder.description || 'No description'}</p>
+                </a>
               </div>
             </div>
           ))}
