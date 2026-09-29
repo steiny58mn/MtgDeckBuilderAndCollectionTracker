@@ -187,17 +187,9 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     }
   }, [parsedPreview]);
 
-  // Preload both decklist and picklist via API when clicking into current deck
+  // Fetch or generate export layout ONLY when the modal is open and deck/format is active
   useEffect(() => {
-    if (!deck || isHistorical) return;
-    DeckService.preloadDeckFormats(deck, false).catch((err) => {
-      console.warn('[DeckExportModal] Preload error:', err);
-    });
-  }, [deck?.id, isHistorical, retryApiTrigger]);
-
-  // Fetch or generate export layout whenever deck or selected export format changes
-  useEffect(() => {
-    if (!deck) {
+    if (!isOpen || !deck) {
       setExportedContent('');
       setIsApiLoading(false);
       setApiExportError(null);
@@ -254,7 +246,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       setApiExportError(null);
       setExportedContent(generateExportContent(selectedExportFormat, deck));
     }
-  }, [deck, selectedExportFormat, isHistorical, retryApiTrigger]);
+  }, [isOpen, deck, selectedExportFormat, isHistorical, retryApiTrigger]);
 
   useBodyScrollLock(isOpen);
   useEscapeKey(isOpen, onClose);

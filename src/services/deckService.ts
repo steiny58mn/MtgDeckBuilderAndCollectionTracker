@@ -2129,6 +2129,8 @@ export class DeckService {
 
   private static deckListCache = new Map<string, string>();
   private static pickListCache = new Map<string, string>();
+  private static deckListInFlight = new Map<string, Promise<string>>();
+  private static pickListInFlight = new Map<string, Promise<string>>();
 
   private static getDeckCacheKey(deck: Deck): string {
     const cardSummary = (deck.cards || [])
@@ -2161,9 +2163,22 @@ export class DeckService {
     if (!forceRefresh && this.deckListCache.has(key)) {
       return this.deckListCache.get(key)!;
     }
-    const result = await createDeckListApi(deck);
-    this.deckListCache.set(key, result);
-    return result;
+    if (!forceRefresh && this.deckListInFlight.has(key)) {
+      return this.deckListInFlight.get(key)!;
+    }
+
+    const promise = (async () => {
+      try {
+        const result = await createDeckListApi(deck);
+        this.deckListCache.set(key, result);
+        return result;
+      } finally {
+        this.deckListInFlight.delete(key);
+      }
+    })();
+
+    this.deckListInFlight.set(key, promise);
+    return promise;
   }
 
   /**
@@ -2174,9 +2189,22 @@ export class DeckService {
     if (!forceRefresh && this.pickListCache.has(key)) {
       return this.pickListCache.get(key)!;
     }
-    const result = await createDeckPickListApi(deck);
-    this.pickListCache.set(key, result);
-    return result;
+    if (!forceRefresh && this.pickListInFlight.has(key)) {
+      return this.pickListInFlight.get(key)!;
+    }
+
+    const promise = (async () => {
+      try {
+        const result = await createDeckPickListApi(deck);
+        this.pickListCache.set(key, result);
+        return result;
+      } finally {
+        this.pickListInFlight.delete(key);
+      }
+    })();
+
+    this.pickListInFlight.set(key, promise);
+    return promise;
   }
 
   /**
