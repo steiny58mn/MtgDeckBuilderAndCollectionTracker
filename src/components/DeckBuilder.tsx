@@ -337,7 +337,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   // Keep saved baseline synced when switching to a different deck
   useEffect(() => {
-    DeckService.enrichDeckCards(deck).catch(() => {});
+    let isCancelled = false;
+    DeckService.enrichDeckCards(deck)
+      .then((enrichedDeck) => {
+        if (!isCancelled && enrichedDeck && enrichedDeck !== deck) {
+          DeckService.setLastSavedDeck(enrichedDeck);
+          setSavedCards(JSON.parse(JSON.stringify(enrichedDeck.cards || [])));
+          onUpdateDeck(enrichedDeck);
+        }
+      })
+      .catch(() => {});
+
     const fromService = DeckService.getLastSavedDeck(deck.id);
     if (fromService && fromService.cards) {
       setSavedCards(JSON.parse(JSON.stringify(fromService.cards)));
@@ -345,6 +355,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       DeckService.setLastSavedDeck(deck);
       setSavedCards(JSON.parse(JSON.stringify(deck.cards || [])));
     }
+
+    return () => {
+      isCancelled = true;
+    };
   }, [deck.id]);
 
   useEffect(() => {

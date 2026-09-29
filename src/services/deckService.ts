@@ -267,21 +267,23 @@ export function normalizeBinderCard(card: any): CollectionCard {
     currentPriceUsd: card.currentPriceUsd ?? card.CurrentPriceUsd ?? card.priceUsd,
     addedAt: parseTimestamp(card.addedAt ?? card.AddedAt),
     notes: card.notes ?? card.Notes,
-    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
+    isGamechanger: Boolean(card.game_changer ?? card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
+    game_changer: Boolean(card.game_changer ?? card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
   };
 }
 
 /**
- * Automatically enriches deck cards that are missing type_line / typeLine using Scryfall.
- * Repositions cards from 'Other' to their proper type categories.
+ * Automatically enriches deck cards that are missing metadata or out of date using Scryfall.
+ * Repositions cards from 'Other' to proper type categories and updates game_changer flags strictly from Scryfall.
  */
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
-  const missing = deck.cards.filter((c) => ((!c.type_line && !(c as any).typeLine) || (c.isGamechanger === undefined && c.game_changer === undefined)) && Boolean(c.name));
-  if (missing.length === 0) return deck;
 
   try {
-    const cardsToFetch = missing.map((c) => ({ name: c.name, set: c.set }));
+    const validCards = deck.cards.filter((c) => Boolean(c.name));
+    if (validCards.length === 0) return deck;
+
+    const cardsToFetch = validCards.map((c) => ({ name: c.name, set: c.set }));
     const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
     let changed = false;
@@ -293,10 +295,14 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        const isGc = Boolean(matched.game_changer || matched.gameChanger || matched.isGamechanger || matched.is_gamechanger);
+        // Strictly from Scryfall data
+        const isGc = Boolean(matched.game_changer);
         
-        const needsUpdate = !c.type_line || (c.isGamechanger === undefined && c.game_changer === undefined);
-        if (needsUpdate || isGc !== Boolean(c.isGamechanger || c.game_changer)) {
+        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
+        const typeMismatch = !c.type_line && Boolean(typeLine);
+        const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
+
+        if (gcMismatch || typeMismatch || colorMismatch) {
           changed = true;
           return {
             ...c,
@@ -310,8 +316,8 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
             color_identity: matched.color_identity || c.color_identity,
             rarity: matched.rarity || c.rarity,
             set_name: matched.set_name || c.set_name,
-            isGamechanger: isGc || Boolean(c.isGamechanger || c.game_changer),
-            game_changer: isGc || Boolean(c.isGamechanger || c.game_changer),
+            isGamechanger: isGc,
+            game_changer: isGc,
           };
         }
       }

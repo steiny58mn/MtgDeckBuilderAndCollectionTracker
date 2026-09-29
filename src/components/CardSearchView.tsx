@@ -1000,7 +1000,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-28">
+    <div className="space-y-5 pb-12">
       {/* Context & Navigation Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-md">
         {/* Left: Mode Switcher & Target info */}
@@ -2413,23 +2413,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
       {/* Dual Click Card Popup Modal */}
       <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
-
-      {/* Sticky Floating Return to Deck Button */}
-      {activeDeck && onReturnToDeck && (
-        <div className="fixed bottom-6 left-6 z-30">
-          <button
-            onClick={onReturnToDeck}
-            className="group inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-400 hover:from-fuchsia-400 hover:to-fuchsia-300 text-slate-950 text-xs font-bold shadow-2xl hover:shadow-fuchsia-500/25 transition-all hover:scale-105 cursor-pointer border border-fuchsia-300/40"
-          >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            <span>Return to {activeDeck.name}</span>
-            <span className="px-1.5 py-0.5 rounded-full bg-slate-950/20 text-[10px] font-mono">
-              {activeDeck.cards.filter((c) => c.category === 'main' || c.category === 'commander').reduce((s, c) => s + c.quantity, 0)}
-              {activeDeck.format === 'commander' ? '/100' : ''} cards
-            </span>
-          </button>
-        </div>
-      )}
     </div>
   );
 };

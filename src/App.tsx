@@ -517,7 +517,8 @@ export default function App() {
         rarity: card.rarity,
         imageUrl: getCardImageUrl(card, 'normal'),
         priceUsd: priceUsd,
-        isGamechanger: Boolean(card.isGamechanger || card.is_gamechanger || card.game_changer || card.gameChanger || (card as any).game_changer),
+        isGamechanger: Boolean(card.game_changer),
+        game_changer: Boolean(card.game_changer),
       };
       currentCards.push(newCard);
     }
@@ -615,7 +616,8 @@ export default function App() {
         rarity: item.rarity,
         imageUrl: item.imageUrl,
         priceUsd: item.currentPriceUsd,
-        isGamechanger: Boolean((item as any).isGamechanger || (item as any).is_gamechanger || (item as any).game_changer || (item as any).gameChanger),
+        isGamechanger: Boolean((item as any).game_changer),
+        game_changer: Boolean((item as any).game_changer),
       };
       currentCards.push(newCard);
     }
@@ -829,7 +831,16 @@ export default function App() {
           ) : (
             <DeckList
               decks={decks}
-              onSelectDeck={(d) => setActiveDeck(d)}
+              onSelectDeck={(d) => {
+                setActiveDeck(d);
+                DeckService.enrichDeckCards(d)
+                  .then((enriched) => {
+                    if (enriched) {
+                      setActiveDeck((prev) => (prev?.id === enriched.id ? enriched : prev));
+                    }
+                  })
+                  .catch(() => {});
+              }}
               onCreateDeck={handleCreateDeck}
               onDuplicateDeck={handleDuplicateDeck}
               onDeleteDeck={handleDeleteDeck}
