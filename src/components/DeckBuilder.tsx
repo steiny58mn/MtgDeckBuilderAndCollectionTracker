@@ -54,7 +54,8 @@ import {
   getCardEffectiveColors,
   getCardColorCategoryRank,
   getCardColorGroup,
-  detectGamechangers
+  detectGamechangers,
+  sortWUBRG
 } from '../utils/deckUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -799,6 +800,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     ? commanderCards.map((c) => c.name).join(' // ')
     : commanderCards[0]?.name || deck.commanderName;
 
+  const deckColorIdentity = useMemo(() => {
+    if (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0) {
+      return sortWUBRG(deck.commanderColorIdentity);
+    }
+    const cmdrCards = deck.cards.filter((c) => c.category === 'commander');
+    if (cmdrCards.length > 0) {
+      const pips: string[] = [];
+      cmdrCards.forEach((c) => {
+        const cols = (c.color_identity || c.colors || []) as unknown[];
+        cols.forEach((col) => { if (typeof col === 'string') pips.push(col); });
+      });
+      if (pips.length > 0) return sortWUBRG(Array.from(new Set(pips)));
+    }
+    const allPips: string[] = [];
+    deck.cards.forEach((c) => {
+      const cols = (c.color_identity || c.colors || []) as unknown[];
+      cols.forEach((col) => { if (typeof col === 'string') allPips.push(col); });
+    });
+    return sortWUBRG(Array.from(new Set(allPips)));
+  }, [deck]);
+
   const handleUpdateDeckNameToCommander = () => {
     if (!commanderName) return;
     setTitle(commanderName);
@@ -1530,6 +1552,32 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     </h1>
                     <Pencil className="w-3 h-3 text-slate-500 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                   </div>
+
+                  {/* Color Identity Indicator Bar */}
+                  {deckColorIdentity.length > 0 && (
+                    <div className="flex items-center gap-1 shrink-0 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80 shadow-xs" title={`Color Identity: ${deckColorIdentity.join('')}`}>
+                      {deckColorIdentity.map((color) => {
+                        let bgClass = 'bg-slate-700 text-slate-200 border-slate-600';
+                        switch (color) {
+                          case 'W': bgClass = 'bg-amber-100 text-amber-950 border-amber-300 font-bold'; break;
+                          case 'U': bgClass = 'bg-sky-600 text-white border-sky-400 font-bold'; break;
+                          case 'B': bgClass = 'bg-neutral-800 text-slate-200 border-neutral-600 font-bold'; break;
+                          case 'R': bgClass = 'bg-rose-600 text-white border-rose-400 font-bold'; break;
+                          case 'G': bgClass = 'bg-emerald-600 text-white border-emerald-400 font-bold'; break;
+                          case 'C': bgClass = 'bg-zinc-400 text-zinc-900 border-zinc-300 font-bold'; break;
+                        }
+                        return (
+                          <span
+                            key={color}
+                            className={`inline-flex items-center justify-center rounded-full border shadow-xs w-4 h-4 text-[9px] select-none ${bgClass}`}
+                            title={color}
+                          >
+                            {color}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {/* Commander Badges to the right of the Deck Title */}
                   {deck.format === 'commander' && commanderCards.length > 0 && (

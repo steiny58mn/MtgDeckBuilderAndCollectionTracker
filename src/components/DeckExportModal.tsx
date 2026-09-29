@@ -907,6 +907,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
             priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
             priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
             isFoil: entry.isFoil,
+            isGamechanger: Boolean(matchedScry?.game_changer || matchedScry?.gameChanger || matchedScry?.isGamechanger || matchedScry?.is_gamechanger),
+            game_changer: Boolean(matchedScry?.game_changer || matchedScry?.gameChanger || matchedScry?.isGamechanger || matchedScry?.is_gamechanger),
           };
         });
 
@@ -1035,6 +1037,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
           priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
           isFoil: item.isFoil,
+          isGamechanger: Boolean(matchedScry?.game_changer || matchedScry?.gameChanger || matchedScry?.isGamechanger || matchedScry?.is_gamechanger),
+          game_changer: Boolean(matchedScry?.game_changer || matchedScry?.gameChanger || matchedScry?.isGamechanger || matchedScry?.is_gamechanger),
         };
       });
 
