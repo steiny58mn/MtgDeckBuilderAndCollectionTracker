@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { 
@@ -59,6 +60,32 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   const [actionFeedback, setActionFeedback] = useState<{ [cardName: string]: string }>({});
   const [cutsToggled, setCutsToggled] = useState<{ [cardName: string]: boolean }>({});
   const [addsToggled, setAddsToggled] = useState<{ [cardName: string]: boolean }>({});
+  const [copiedCuts, setCopiedCuts] = useState<boolean>(false);
+  const [copiedAdds, setCopiedAdds] = useState<boolean>(false);
+
+  const handleCopyCuts = async () => {
+    if (!summaryResult?.cutCards?.length) return;
+    const text = summaryResult.cutCards.map((c) => `${c.quantity} ${c.name}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCuts(true);
+      setTimeout(() => setCopiedCuts(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy cuts:', err);
+    }
+  };
+
+  const handleCopyAdds = async () => {
+    if (!summaryResult?.addedCards?.length) return;
+    const text = summaryResult.addedCards.map((c) => `${c.quantity} ${c.name}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedAdds(true);
+      setTimeout(() => setCopiedAdds(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy adds:', err);
+    }
+  };
 
   const getCardImage = (name: string): string => {
     const c = cardMap.get(name.toLowerCase());
@@ -293,6 +320,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   };
 
   useBodyScrollLock(isOpen);
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -650,9 +678,22 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                         <MinusCircle className="w-4 h-4 text-red-400" />
                         <span className="text-xs font-bold text-red-300 uppercase tracking-wider">Cuts</span>
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-red-950 text-red-400 font-bold border border-red-500/30">
-                        {summaryResult.cutsCount} cards
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {summaryResult.cutCards.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleCopyCuts}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-500/30 transition-colors cursor-pointer"
+                            title="Copy list of cut cards to clipboard"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedCuts ? 'Copied!' : 'Copy'}</span>
+                          </button>
+                        )}
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-950 text-red-400 font-bold border border-red-500/30">
+                          {summaryResult.cutsCount} cards
+                        </span>
+                      </div>
                     </div>
 
                     <div className="overflow-y-auto max-h-72 space-y-1 pr-1">
@@ -742,9 +783,22 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
                         <PlusCircle className="w-4 h-4 text-emerald-400" />
                         <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Adds</span>
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 font-bold border border-emerald-500/30">
-                        {summaryResult.addsCount} cards
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {summaryResult.addedCards.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleCopyAdds}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 transition-colors cursor-pointer"
+                            title="Copy list of added cards to clipboard"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedAdds ? 'Copied!' : 'Copy'}</span>
+                          </button>
+                        )}
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 font-bold border border-emerald-500/30">
+                          {summaryResult.addsCount} cards
+                        </span>
+                      </div>
                     </div>
 
                     <div className="overflow-y-auto max-h-72 space-y-1 pr-1">

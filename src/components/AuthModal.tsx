@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 ﻿import React, { useState } from 'react';
 import { 
@@ -52,6 +53,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useBodyScrollLock(isOpen);
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 

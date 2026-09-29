@@ -10,7 +10,7 @@ import {
   FolderPlus,
   Upload
 } from 'lucide-react';
-import { Deck, MTGFormat } from '../types/mtg';
+import { Deck, MTGFormat, CollectionCard } from '../types/mtg';
 import { calculateDeckStats } from '../utils/deckUtils';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckService } from '../services/deckService';
@@ -43,7 +43,37 @@ export const DeckList: React.FC<DeckListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [sortBy, setSortBy] = useState<'name' | 'completion' | 'updated'>('name');
   useBodyScrollLock(showCreateModal);
+
+  const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+  useEffect(() => {
+    return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+  }, []);
+
+  const collectionMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    collectionCards.forEach((c) => {
+      const name = c.name.toLowerCase().trim();
+      map.set(name, (map.get(name) || 0) + (c.quantity || 1));
+    });
+    return map;
+  }, [collectionCards]);
+
+  const getDeckCompletion = React.useCallback((d: Deck) => {
+    let owned = 0;
+    let total = 0;
+    (d.cards || []).forEach((c) => {
+      if (c.category === 'main' || c.category === 'commander') {
+        const qty = c.quantity || 1;
+        total += qty;
+        const inCol = collectionMap.get(c.name.toLowerCase().trim()) || 0;
+        owned += Math.min(qty, inCol);
+      }
+    });
+    const pct = total > 0 ? Math.round((owned / total) * 100) : 0;
+    return { owned, total, pct };
+  }, [collectionMap]);
 
   // New deck form state
   const [newDeckName, setNewDeckName] = useState('');
@@ -60,7 +90,18 @@ export const DeckList: React.FC<DeckListProps> = ({
         d.commanderName?.toLowerCase().includes(searchQuery.toLowerCase());
       return matchFormat && matchSearch;
     })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+    .sort((a, b) => {
+      if (sortBy === 'completion') {
+        const compA = getDeckCompletion(a).pct;
+        const compB = getDeckCompletion(b).pct;
+        if (compB !== compA) return compB - compA;
+      } else if (sortBy === 'updated') {
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        if (timeB !== timeA) return timeB - timeA;
+      }
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+    });
 
   useEffect(() => {
     console.log(`[DeckList] 📋 State check: ${decks.length} total deck(s), ${filteredDecks.length} matching filter.`, {
@@ -143,8 +184,9 @@ export const DeckList: React.FC<DeckListProps> = ({
         </div>
       </div>
 
-      {/* Format Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+      {/* Format Pills & Sort Dropdown */}
+      <div className="flex items-center justify-between gap-3 overflow-x-auto pb-1 text-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
         {formats.map((fmt) => (
           <button
             key={fmt.id}
@@ -158,6 +200,20 @@ export const DeckList: React.FC<DeckListProps> = ({
             {fmt.label}
           </button>
         ))}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0 text-xs">
+          <span className="text-slate-500 font-medium hidden sm:inline">Sort:</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="bg-slate-900 border border-slate-800 text-slate-300 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-fuchsia-500 cursor-pointer"
+          >
+            <option value="name">Name (A–Z)</option>
+            <option value="completion">Collection % (Can Build)</option>
+            <option value="updated">Recently Updated</option>
+          </select>
+        </div>
       </div>
 
       {/* Decks Grid */}
@@ -165,6 +221,7 @@ export const DeckList: React.FC<DeckListProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {filteredDecks.map((deck) => {
             const stats = calculateDeckStats(deck);
+            const completion = getDeckCompletion(deck);
             const coverArt = deck.commanderArtUrl || deck.coverCardUrl || (deck.cards[0]?.imageUrl);
 
             return (
@@ -207,6 +264,20 @@ export const DeckList: React.FC<DeckListProps> = ({
                     {deck.commanderName && (
                       <span className="px-2 py-0.5 rounded-md bg-fuchsia-950/80 backdrop-blur-xs border border-amber-700/80 text-[10px] font-semibold text-fuchsia-300 truncate max-w-[140px]">
                         {deck.commanderName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                    {completion.total > 0 && (
+                      <span className={`px-2 py-0.5 rounded-md backdrop-blur-xs border text-[10px] font-bold shadow-xs ${
+                        completion.pct === 100
+                          ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300'
+                          : completion.pct >= 75
+                          ? 'bg-sky-950/90 border-sky-500/80 text-sky-300'
+                          : 'bg-slate-950/80 border-slate-700 text-slate-300'
+                      }`}>
+                        {completion.pct === 100 ? '✓ 100% Owned' : `${completion.pct}% Owned`}
                       </span>
                     )}
                   </div>

@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useEffect } from 'react';
 import { 
@@ -57,6 +58,35 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [colCondition, setColCondition] = useState<CardCondition>('NM');
   const [colPrice, setColPrice] = useState<string>('');
   const [colAddedToast, setColAddedToast] = useState(false);
+  const [showPrintings, setShowPrintings] = useState(false);
+  const [printingsList, setPrintingsList] = useState<ScryfallCard[]>([]);
+  const [isLoadingPrintings, setIsLoadingPrintings] = useState(false);
+
+  const handleLoadPrintings = async () => {
+    if (!displayCard) return;
+    if (showPrintings) {
+      setShowPrintings(false);
+      return;
+    }
+    setShowPrintings(true);
+    if (printingsList.length > 0) return;
+
+    try {
+      setIsLoadingPrintings(true);
+      const cleanName = displayCard.name.split(' // ')[0].trim();
+      const res = await fetch(`https://api.scryfall.com/cards/search?q=!"${encodeURIComponent(cleanName)}"+include:extras&unique=prints`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.data)) {
+          setPrintingsList(data.data);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching printings:', err);
+    } finally {
+      setIsLoadingPrintings(false);
+    }
+  };
 
   // Whenever `card` changes or modal opens, initialize displayCard and fetch complete Scryfall record if needed
   useEffect(() => {
@@ -81,6 +111,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   }, [card?.id, (card as any)?.scryfallId, isOpen]);
 
   useBodyScrollLock(isOpen && !!displayCard);
+  useEscapeKey(isOpen && !!displayCard, onClose);
 
   if (!isOpen || !displayCard) return null;
 
@@ -179,8 +210,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             </button>
           )}
 
+          {/* Printings & Art Picker Toggle */}
+          <button
+            type="button"
+            onClick={handleLoadPrintings}
+            className="w-full max-w-[320px] mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 transition-colors cursor-pointer"
+          >
+            <Layers className="w-3.5 h-3.5 text-violet-400" />
+            <span>{showPrintings ? 'Hide Printings' : 'View All Printings & Art'}</span>
+            {isLoadingPrintings && <Loader2 className="w-3 h-3 animate-spin text-violet-400 ml-1" />}
+          </button>
+
           {/* Pricing Badges */}
-          <div className="grid grid-cols-3 gap-2 w-full max-w-[320px] mt-4">
+          <div className="grid grid-cols-3 gap-2 w-full max-w-[320px] mt-2">
             <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
               <span className="block text-[10px] uppercase font-semibold text-slate-400">Regular</span>
               <span className="text-sm font-bold text-emerald-400">

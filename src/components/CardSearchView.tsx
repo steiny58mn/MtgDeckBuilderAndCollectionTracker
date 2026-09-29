@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Layers,
   Bookmark,
+  Shield,
+  HelpCircle,
   SlidersHorizontal,
   RotateCcw,
   Check,
@@ -2198,17 +2200,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                                 type="button"
                                 onClick={() => onQuickAddToDeck(card, 'main')}
                                 disabled={isAtLimit}
-                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   isAtLimit
                                     ? 'bg-slate-900 border border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
                                     : initialTargetCategory === 'main'
-                                      ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
-                                      : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                      ? 'bg-violet-600/30 border border-violet-500/60 hover:bg-violet-500 hover:text-white text-violet-200 cursor-pointer shadow-sm active:scale-95'
+                                      : 'bg-slate-800 hover:bg-violet-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
                                 title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Mainboard${mainCopies > 0 ? ` (Currently: ${mainCopies})` : ''}`}
                               >
-                                <Plus className="w-3 h-3 shrink-0" />
-                                <span>Main</span>
+                                <Layers className="w-3.5 h-3.5 shrink-0" />
                                 {mainCopies > 0 && (
                                   <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({mainCopies})</span>
                                 )}
@@ -2218,17 +2219,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                                 type="button"
                                 onClick={() => onQuickAddToDeck(card, 'sideboard')}
                                 disabled={isAtLimit}
-                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   isAtLimit
                                     ? 'bg-slate-900 border border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
                                     : initialTargetCategory === 'sideboard'
-                                      ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
-                                      : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                      ? 'bg-sky-600/30 border border-sky-500/60 hover:bg-sky-500 hover:text-white text-sky-200 cursor-pointer shadow-sm active:scale-95'
+                                      : 'bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
                                 title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Sideboard${sideCopies > 0 ? ` (Currently: ${sideCopies})` : ''}`}
                               >
-                                <Plus className="w-3 h-3 shrink-0" />
-                                <span>Side</span>
+                                <Shield className="w-3.5 h-3.5 shrink-0" />
                                 {sideCopies > 0 && (
                                   <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({sideCopies})</span>
                                 )}
@@ -2237,15 +2237,14 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => onQuickAddToDeck(card, 'maybeboard')}
-                                className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
+                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   initialTargetCategory === 'maybeboard'
-                                    ? 'bg-fuchsia-600/30 border border-fuchsia-500/60 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-200 cursor-pointer shadow-sm active:scale-95'
-                                    : 'bg-slate-800 hover:bg-fuchsia-500 hover:text-slate-950 text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                    ? 'bg-amber-600/30 border border-amber-500/60 hover:bg-amber-500 hover:text-white text-amber-200 cursor-pointer shadow-sm active:scale-95'
+                                    : 'bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
                                 title={`Add 1 copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
                               >
-                                <Plus className="w-3 h-3 shrink-0" />
-                                <span>Maybe</span>
+                                <HelpCircle className="w-3.5 h-3.5 shrink-0" />
                                 {maybeCopies > 0 && (
                                   <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({maybeCopies})</span>
                                 )}

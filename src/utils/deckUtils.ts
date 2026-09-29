@@ -1,3 +1,61 @@
+export function detectCardManaProduction(card: DeckCard, commanderColors: string[] = ['W', 'U', 'B', 'R', 'G']): string[] {
+  const rawProduced = (card as any).produced_mana || (card as any).producedMana;
+  if (Array.isArray(rawProduced) && rawProduced.length > 0) {
+    return Array.from(new Set(rawProduced.map((c: string) => c.toUpperCase())));
+  }
+
+  const name = (card.name || '').toLowerCase();
+  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
+  const oracleText = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
+
+  const isLand = typeLine.includes('land');
+  const isManaProducer = isLand || oracleText.includes('add ') || oracleText.includes('{t}: add');
+  if (!isManaProducer) return [];
+
+  const produced: Set<string> = new Set();
+
+  // Basic lands
+  if (name.includes('plains')) produced.add('W');
+  if (name.includes('island')) produced.add('U');
+  if (name.includes('swamp')) produced.add('B');
+  if (name.includes('mountain')) produced.add('R');
+  if (name.includes('forest')) produced.add('G');
+  if (name.includes('wastes')) produced.add('C');
+
+  // Any color lands / rocks
+  if (
+    oracleText.includes('any color') ||
+    oracleText.includes('any one color') ||
+    oracleText.includes('mana of any color') ||
+    name.includes('command tower') ||
+    name.includes('city of brass') ||
+    name.includes('mana confluence') ||
+    name.includes('exotic orchard') ||
+    name.includes('reflecting pool') ||
+    name.includes('birds of paradise') ||
+    name.includes('arcane signet')
+  ) {
+    commanderColors.forEach((c) => produced.add(c));
+  }
+
+  // Fetchlands
+  if (oracleText.includes('search your library for a plains')) produced.add('W');
+  if (oracleText.includes('search your library for an island')) produced.add('U');
+  if (oracleText.includes('search your library for a swamp')) produced.add('B');
+  if (oracleText.includes('search your library for a mountain')) produced.add('R');
+  if (oracleText.includes('search your library for a forest')) produced.add('G');
+
+  // Specific symbols
+  if (oracleText.includes('{w}')) produced.add('W');
+  if (oracleText.includes('{u}')) produced.add('U');
+  if (oracleText.includes('{b}')) produced.add('B');
+  if (oracleText.includes('{r}')) produced.add('R');
+  if (oracleText.includes('{g}')) produced.add('G');
+  if (oracleText.includes('{c}')) produced.add('C');
+
+  return Array.from(produced);
+}
+
 import { apiFetch } from '../config/apiConfig';
 import { 
   getApiBaseUrl, 
@@ -12,7 +70,7 @@ import {
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem } from '../types/mtg';
 
-export function calculateDeckStats(deck: Deck): DeckStats {
+export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): DeckStats {
   const cards = deck.cards || [];
 
   let totalCards = 0;
@@ -42,7 +100,15 @@ export function calculateDeckStats(deck: Deck): DeckStats {
 
     if (card.category === 'main' || card.category === 'commander') {
       mainboardCount += qty;
+    } else if (card.category === 'sideboard') {
+      sideboardCount += qty;
+    } else if (card.category === 'maybeboard') {
+      maybeboardCount += qty;
+    }
 
+    const shouldIncludeInAnalysis = scope === 'all' || (card.category === 'main' || card.category === 'commander');
+
+    if (shouldIncludeInAnalysis) {
       const isLand = (card.type_line || (card as any).typeLine || '').toLowerCase().includes('land');
       if (!isLand) {
         const roundedCmc = Math.min(7, Math.max(0, Math.floor(card.cmc || 0)));
@@ -74,10 +140,6 @@ export function calculateDeckStats(deck: Deck): DeckStats {
       else if (t.includes('Enchantment')) typeBreakdown.Enchantment += qty;
       else if (t.includes('Land')) typeBreakdown.Land += qty;
       else typeBreakdown.Other += qty;
-    } else if (card.category === 'sideboard') {
-      sideboardCount += qty;
-    } else if (card.category === 'maybeboard') {
-      maybeboardCount += qty;
     }
 
     // Pricing calculation
@@ -1232,5 +1294,274 @@ export function compareDeckSnapshots(
     changed,
     totalAddedCount,
     totalRemovedCount,
+  };
+}
+
+
+// ==========================================
+// Basic Land Balancing Helper
+// ==========================================
+export interface BasicLandBalanceResult {
+  currentCounts: Record<string, number>;
+  recommendedCounts: Record<string, number>;
+  totalBasics: number;
+}
+
+export function calculateBasicLandBalance(deck: Deck, targetBasics?: number): BasicLandBalanceResult {
+  const basicNames: Record<string, string> = {
+    W: 'Plains',
+    U: 'Island',
+    B: 'Swamp',
+    R: 'Mountain',
+    G: 'Forest',
+  };
+
+  const currentCounts: Record<string, number> = {
+    Plains: 0,
+    Island: 0,
+    Swamp: 0,
+    Mountain: 0,
+    Forest: 0,
+  };
+
+  let totalExistingBasics = 0;
+  (deck.cards || []).forEach((c) => {
+    if (c.category === 'main') {
+      const n = c.name.split(' // ')[0].trim();
+      if (n in currentCounts) {
+        currentCounts[n] += c.quantity || 1;
+        totalExistingBasics += c.quantity || 1;
+      }
+    }
+  });
+
+  const totalBasics = targetBasics !== undefined ? targetBasics : totalExistingBasics;
+  const recommendedCounts: Record<string, number> = {
+    Plains: 0,
+    Island: 0,
+    Swamp: 0,
+    Mountain: 0,
+    Forest: 0,
+  };
+
+  if (totalBasics <= 0) {
+    return { currentCounts, recommendedCounts, totalBasics };
+  }
+
+  // Calculate pips for colored spells
+  const stats = calculateDeckStats(deck, 'main');
+  const pips = stats.colorPips;
+  const colors = ['W', 'U', 'B', 'R', 'G'] as const;
+
+  // Check active colors from pips or commander color identity
+  const cmdr = getDeckCommander(deck);
+  const activeColors = colors.filter(
+    (col) => (pips[col] > 0) || (cmdr?.colorIdentity?.includes(col))
+  );
+
+  const totalActivePips = activeColors.reduce((sum, col) => sum + (pips[col] || 0), 0);
+
+  if (totalActivePips === 0) {
+    const validColors = activeColors.length > 0 ? activeColors : colors;
+    const baseShare = Math.floor(totalBasics / validColors.length);
+    let rem = totalBasics % validColors.length;
+    validColors.forEach((col) => {
+      const landName = basicNames[col];
+      recommendedCounts[landName] = baseShare + (rem > 0 ? 1 : 0);
+      if (rem > 0) rem--;
+    });
+    return { currentCounts, recommendedCounts, totalBasics };
+  }
+
+  let allocated = 0;
+  const colorAllocations: { col: typeof colors[number]; exact: number; floor: number; remainder: number }[] = [];
+
+  activeColors.forEach((col) => {
+    const colPips = pips[col] || 0;
+    const exact = (colPips / totalActivePips) * totalBasics;
+    const floor = Math.max(colPips > 0 ? 1 : 0, Math.floor(exact));
+    allocated += floor;
+    colorAllocations.push({
+      col,
+      exact,
+      floor,
+      remainder: exact - floor,
+    });
+  });
+
+  let remainingToDistribute = totalBasics - allocated;
+  colorAllocations.sort((a, b) => b.remainder - a.remainder);
+
+  colorAllocations.forEach((item) => {
+    let finalCount = item.floor;
+    if (remainingToDistribute > 0) {
+      finalCount += 1;
+      remainingToDistribute -= 1;
+    } else if (remainingToDistribute < 0 && finalCount > 1) {
+      finalCount -= 1;
+      remainingToDistribute += 1;
+    }
+    recommendedCounts[basicNames[item.col]] = finalCount;
+  });
+
+  return { currentCounts, recommendedCounts, totalBasics };
+}
+
+// ==========================================
+// Commander Salt Score & Power Level Bracket
+// ==========================================
+export interface SaltyCardInfo {
+  name: string;
+  weight: number;
+  reason: string;
+}
+
+export interface DeckPowerAndSaltResult {
+  saltScore: number;
+  saltRating: 'Low' | 'Moderate' | 'High' | 'Very High' | 'Salty';
+  powerBracket: {
+    bracket: number; // 1 to 4
+    name: string;
+    description: string;
+    badgeColor: string;
+  };
+  saltyCards: SaltyCardInfo[];
+}
+
+const SALT_REGISTRY: Record<string, { weight: number; reason: string }> = {
+  'Armageddon': { weight: 4.0, reason: 'Mass Land Destruction' },
+  'Winter Orb': { weight: 4.0, reason: 'Stax / Mana Lock' },
+  'Stasis': { weight: 4.0, reason: 'Total Untap Lock' },
+  'Static Orb': { weight: 4.0, reason: 'Stax / Mana Denial' },
+  "Thassa's Oracle": { weight: 4.0, reason: 'Compact 2-Card Win Condition' },
+  'Tergrid, God of Fright': { weight: 3.8, reason: 'Oppressive Sac/Discard Theft' },
+  'Vorinclex, Voice of Hunger': { weight: 3.8, reason: 'Mana Doubling + Opponent Mana Lock' },
+  'Jin-Gitaxias, Core Augur': { weight: 3.8, reason: 'Discards All Opponents Hands' },
+  'Opposition Agent': { weight: 3.7, reason: 'Search Hate & Card Theft' },
+  'Drannith Magistrate': { weight: 3.5, reason: 'Locks Opponents from Casting Commanders' },
+  'Blood Moon': { weight: 3.5, reason: 'Nonbasic Land Denial' },
+  'Back to Basics': { weight: 3.5, reason: 'Nonbasic Land Denial' },
+  'Cyclonic Rift': { weight: 3.2, reason: 'Asymmetrical Instant-Speed Board Wipe' },
+  'Rhystic Study': { weight: 3.0, reason: 'High-Tax Continuous Card Advantage' },
+  'Smothering Tithe': { weight: 3.0, reason: 'Explosive Treasure Tax Engine' },
+  'Dockside Extortionist': { weight: 3.2, reason: 'Explosive Fast Mana' },
+  'Mana Crypt': { weight: 3.2, reason: 'Free Fast Mana' },
+  'Sol Ring': { weight: 1.5, reason: 'Format Staple Fast Mana' },
+  'Mana Drain': { weight: 2.8, reason: 'Efficient Counterspell + Mana Ramp' },
+  'Necropotence': { weight: 3.0, reason: 'Massive Card Draw Engine' },
+  "Bolas's Citadel": { weight: 3.0, reason: 'Casts Deck from Library' },
+  'Demonic Tutor': { weight: 2.5, reason: 'Unconditional Cheap Tutor' },
+  'Vampiric Tutor': { weight: 2.5, reason: 'Instant-Speed Cheap Tutor' },
+  'Fierce Guardianship': { weight: 2.8, reason: 'Free Counterspell' },
+  'Deflecting Swat': { weight: 2.8, reason: 'Free Spell Redirect' },
+  'Grand Arbiter Augustin IV': { weight: 3.2, reason: 'Oppressive Tax Commander' },
+  'Toxrill, the Corrosive': { weight: 3.0, reason: 'Continuous Board Wipe on End Step' },
+  'Urza, Lord High Artificer': { weight: 3.2, reason: 'Infinite Mana Engine + Stax Enabler' },
+  'Esper Sentinel': { weight: 2.2, reason: 'Turn 1 Creature Tax Draw' },
+  'The One Ring': { weight: 2.5, reason: 'Indestructible Protection + Exponential Draw' },
+  'Orcish Bowmasters': { weight: 2.4, reason: 'Punishes All Opponent Card Draw' },
+  'Mystic Remora': { weight: 2.0, reason: 'Aggressive Early Game Card Draw' },
+  'Teferi\'s Protection': { weight: 2.0, reason: 'Total Immunity Phase-Out' },
+  'Farewell': { weight: 2.2, reason: 'Exiles Everything' },
+  'Craterhoof Behemoth': { weight: 2.0, reason: 'Instant Lethal Trample Wincon' },
+  'Torment of Hailfire': { weight: 2.2, reason: 'Mass Life Loss / Board Wipe Finisher' },
+};
+
+export function calculateCommanderSaltAndPower(deck: Deck): DeckPowerAndSaltResult {
+  const cards = deck.cards || [];
+  const saltyCards: SaltyCardInfo[] = [];
+  let rawSaltSum = 0;
+
+  // Track key power level indicators
+  let fastManaCount = 0;
+  let tutorCount = 0;
+  let freeSpellsCount = 0;
+
+  cards.forEach((c) => {
+    if (c.category !== 'main' && c.category !== 'commander') return;
+    const cleanName = c.name.split(' // ')[0].trim();
+    const entry = SALT_REGISTRY[cleanName];
+    if (entry) {
+      saltyCards.push({
+        name: cleanName,
+        weight: entry.weight,
+        reason: entry.reason,
+      });
+      rawSaltSum += entry.weight * (c.quantity || 1);
+    }
+
+    const lowerName = cleanName.toLowerCase();
+    const oracle = (c.oracle_text || (c as any).oracleText || '').toLowerCase();
+    const typeLine = (c.type_line || (c as any).typeLine || '').toLowerCase();
+
+    // Fast Mana
+    if (['sol ring', 'mana crypt', 'mana vault', 'mox opal', 'mox diamond', 'chrome mox', 'lotus petal', 'jeweled lotus', 'dockside extortionist'].includes(lowerName)) {
+      fastManaCount += c.quantity || 1;
+    }
+
+    // Tutors
+    if (
+      ['demonic tutor', 'vampiric tutor', 'mystical tutor', 'worldly tutor', 'enlightened tutor', 'gamble', 'imperial seal'].includes(lowerName) ||
+      (oracle.includes('search your library') && !typeLine.includes('land') && (c.cmc || 0) <= 3 && !oracle.includes('basic land'))
+    ) {
+      tutorCount += c.quantity || 1;
+    }
+
+    // Free spells
+    if (['fierce guardianship', 'deflecting swat', 'force of will', 'force of negation', 'pact of negation', 'deadly rolie', 'flawless maneuver'].includes(lowerName)) {
+      freeSpellsCount += c.quantity || 1;
+    }
+  });
+
+  saltyCards.sort((a, b) => b.weight - a.weight);
+
+  // Normalize Salt Score (0 to 100 scale)
+  const saltScore = Math.min(100, Math.round(rawSaltSum * 2.2));
+
+  let saltRating: DeckPowerAndSaltResult['saltRating'] = 'Low';
+  if (saltScore >= 60) saltRating = 'Salty';
+  else if (saltScore >= 40) saltRating = 'Very High';
+  else if (saltScore >= 25) saltRating = 'High';
+  else if (saltScore >= 12) saltRating = 'Moderate';
+
+  // Power Level Bracket Estimation (1 to 4)
+  const stats = calculateDeckStats(deck, 'main');
+  const avgCmc = typeof stats.averageCmc === 'number' ? stats.averageCmc : parseFloat(String(stats.averageCmc) || '3.5');
+
+  let bracket = 1;
+  let name = 'Bracket 1: Casual / Precon';
+  let description = 'Battlecruiser EDH, social casual play, few tutors, minimal fast mana.';
+  let badgeColor = 'bg-emerald-950 border-emerald-600 text-emerald-300';
+
+  const hasThoracleCombo = cards.some(c => c.name.toLowerCase().includes("thassa's oracle")) &&
+    cards.some(c => c.name.toLowerCase().includes('demonic consultation') || c.name.toLowerCase().includes('tainted pact'));
+
+  if (hasThoracleCombo || (fastManaCount >= 4 && tutorCount >= 4 && avgCmc < 2.3)) {
+    bracket = 4;
+    name = 'Bracket 4: cEDH / Competitive';
+    description = 'Tournament viable, turn 2-3 win condition combos, maximum density of fast mana and free counterspells.';
+    badgeColor = 'bg-rose-950 border-rose-500 text-rose-300';
+  } else if ((fastManaCount >= 2 && tutorCount >= 3) || (avgCmc <= 2.7 && tutorCount >= 2) || freeSpellsCount >= 2) {
+    bracket = 3;
+    name = 'Bracket 3: High Power / Optimized';
+    description = 'Streamlined curve, fast mana engines, efficient tutors, high interaction density.';
+    badgeColor = 'bg-amber-950 border-amber-500 text-amber-300';
+  } else if (tutorCount >= 1 || fastManaCount >= 1 || avgCmc <= 3.2 || saltyCards.length >= 2) {
+    bracket = 2;
+    name = 'Bracket 2: Tuned / Focused';
+    description = 'Synergy-focused deck with good mana curve, consistent game plan, and solid interaction.';
+    badgeColor = 'bg-sky-950 border-sky-500 text-sky-300';
+  }
+
+  return {
+    saltScore,
+    saltRating,
+    powerBracket: {
+      bracket,
+      name,
+      description,
+      badgeColor,
+    },
+    saltyCards,
   };
 }

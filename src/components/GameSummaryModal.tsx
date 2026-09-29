@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 ﻿import React, { useState, useEffect } from 'react';
 import {
@@ -86,6 +87,7 @@ export const GameSummaryModal: React.FC<GameSummaryModalProps> = ({
   };
 
   useBodyScrollLock(isOpen);
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 

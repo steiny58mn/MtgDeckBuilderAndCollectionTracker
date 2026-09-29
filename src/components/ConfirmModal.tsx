@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
@@ -22,6 +23,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   cancelText = 'Cancel'
 }) => {
   useBodyScrollLock(isOpen);
+  useEscapeKey(isOpen, onCancel);
 
   if (!isOpen) return null;
 

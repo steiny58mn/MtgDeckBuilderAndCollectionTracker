@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
@@ -19,7 +20,10 @@ import {
   RefreshCw,
   AlertTriangle,
   ListChecks,
-  Loader2
+  Loader2,
+  Printer,
+  ExternalLink,
+  Zap
 } from 'lucide-react';
 import { Deck, DeckCard, MTGFormat } from '../types/mtg';
 import { 
@@ -88,10 +92,16 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
   const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
   const [targetDeckToOverwrite, setTargetDeckToOverwrite] = useState<Deck | null>(deck || (existingDecks.length > 0 ? existingDecks[0] : null));
-  const [activeTab, setActiveTab] = useState<'export' | 'import'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'export' | 'import' | 'proxy'>(initialTab);
+  const [proxyScope, setProxyScope] = useState<'main' | 'all'>('main');
   
   // Export State
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatKey>('bbcode');
+  const [nexusThreadUrl, setNexusThreadUrl] = useState<string>(() => {
+    return deck ? localStorage.getItem(`mtgnexus_url_${deck.id}`) || '' : '';
+  });
+  const [copiedUserscriptToast, setCopiedUserscriptToast] = useState(false);
+  const [showUserscriptHelp, setShowUserscriptHelp] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exportedContent, setExportedContent] = useState<string>('');
   const [isApiLoading, setIsApiLoading] = useState<boolean>(false);
@@ -237,11 +247,85 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   }, [deck, selectedExportFormat, isHistorical, retryApiTrigger]);
 
   useBodyScrollLock(isOpen);
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 
   // Export handlers
   const currentExportOption = EXPORT_FORMATS.find((f) => f.key === selectedExportFormat) || EXPORT_FORMATS[0];
+
+  const handlePrintProxies = () => {
+    if (!deck) return;
+    const cardsToPrint: DeckCard[] = [];
+    deck.cards.forEach((c) => {
+      const include = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
+      if (include) {
+        for (let i = 0; i < (c.quantity || 1); i++) {
+          cardsToPrint.push(c);
+        }
+      }
+    });
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups to open the printable proxy sheet.');
+      return;
+    }
+
+    const totalPages = Math.ceil(cardsToPrint.length / 9);
+    const pagesHtml: string[] = [];
+
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      const pageCards = cardsToPrint.slice(pageIdx * 9, (pageIdx + 1) * 9);
+      const isLastPage = pageIdx === totalPages - 1;
+      const cardsHtml = pageCards
+        .map((c) => {
+          const img = c.imageUrl || (c.scryfallId ? 'https://api.scryfall.com/cards/' + c.scryfallId + '?format=image&version=normal' : null);
+          if (img) {
+            return '<div class="card-slot"><img src="' + img + '" alt="' + c.name + '" crossorigin="anonymous" /></div>';
+          }
+          return '<div class="card-slot"><div class="placeholder">' + c.name + '</div></div>';
+        })
+        .join('');
+
+      pagesHtml.push(
+        '<div class="sheet ' + (isLastPage ? '' : 'page-break') + '">' + cardsHtml + '</div>'
+      );
+    }
+
+    const docContent = [
+      '<!DOCTYPE html>',
+      '<html>',
+      '<head>',
+      '  <meta charset="utf-8" />',
+      '  <title>Proxies - ' + deck.name + '</title>',
+      '  <style>',
+      '    @page { size: letter portrait; margin: 0.25in; }',
+      '    @media print {',
+      '      body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+      '      .page-break { page-break-after: always; break-after: page; }',
+      '    }',
+      '    body { font-family: sans-serif; margin: 0; padding: 0.25in; background: #f1f5f9; color: #0f172a; }',
+      '    .sheet { display: grid; grid-template-columns: repeat(3, 2.5in); grid-template-rows: repeat(3, 3.5in); gap: 0; width: 7.5in; height: 10.5in; margin: 0 auto 0.25in auto; background: white; }',
+      '    @media print { .sheet { box-shadow: none; margin: 0 auto; } }',
+      '    .card-slot { width: 2.5in; height: 3.5in; box-sizing: border-box; border: 0.25px dashed #cbd5e1; overflow: hidden; display: flex; align-items: center; justify-content: center; background: white; }',
+      '    .card-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }',
+      '    .placeholder { padding: 10px; text-align: center; font-size: 12px; font-weight: bold; }',
+      '  </style>',
+      '</head>',
+      '<body>',
+      pagesHtml.join(''),
+      '  <script>',
+      '    window.onload = function() { setTimeout(function() { window.print(); }, 500); };',
+      '  </script>',
+      '</body>',
+      '</html>'
+    ].join('\n');
+
+    printWindow.document.open();
+    printWindow.document.write(docContent);
+    printWindow.document.close();
+  };
 
   const handleCopyExport = (textToCopy?: string) => {
     if (!deck) return;
@@ -249,6 +333,50 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2200);
+  };
+
+  const handleSaveNexusUrl = (url: string) => {
+    setNexusThreadUrl(url);
+    if (deck) {
+      if (url.trim()) {
+        localStorage.setItem(`mtgnexus_url_${deck.id}`, url.trim());
+      } else {
+        localStorage.removeItem(`mtgnexus_url_${deck.id}`);
+      }
+    }
+  };
+
+  const handleCopyAndOpenNexus = async () => {
+    const textToCopy = exportedContent || (deck ? generateExportContent('bbcode', deck) : '');
+    if (!textToCopy) return;
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+
+      const targetUrl = nexusThreadUrl.trim() || 'https://www.mtgnexus.com';
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('Failed to copy to clipboard:', e);
+    }
+  };
+
+  const handleCopyUserscript = async () => {
+    try {
+      const res = await fetch('/scripts/mtgnexus-deck-sync.user.js');
+      let scriptCode = '';
+      if (res.ok) {
+        scriptCode = await res.text();
+      } else {
+        scriptCode = '// Install Tampermonkey and visit: ' + window.location.origin + '/scripts/mtgnexus-deck-sync.user.js';
+      }
+      await navigator.clipboard.writeText(scriptCode);
+      setCopiedUserscriptToast(true);
+      setTimeout(() => setCopiedUserscriptToast(false), 2500);
+    } catch (err) {
+      window.open('/scripts/mtgnexus-deck-sync.user.js', '_blank');
+    }
   };
 
   const handleDownloadExport = () => {
@@ -879,10 +1007,105 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               </span>
             )}
           </button>
+
+          {deck && (
+            <button
+              onClick={() => setActiveTab('proxy')}
+              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'proxy'
+                  ? 'bg-fuchsia-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print Proxies</span>
+            </button>
+          )}
         </div>
 
         {/* Modal Body */}
-        {activeTab === 'export' && deck ? (
+        {activeTab === 'proxy' && deck ? (
+        <div className="flex-1 flex flex-col p-5 bg-slate-900 overflow-y-auto space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Printer className="w-4 h-4 text-violet-400" />
+                <span>Printable Proxy Sheets</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Generates a print-ready 3×3 grid of cards sized to official MTG card dimensions (2.5" × 3.5").
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setProxyScope('main')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                    proxyScope === 'main' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Mainboard Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProxyScope('all')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                    proxyScope === 'all' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  All Boards
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePrintProxies}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Open Print Window</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs text-slate-400 flex items-center justify-between">
+              <span>Card Preview (9 per sheet)</span>
+              <span>
+                Total Sheets: {Math.ceil(
+                  deck.cards.reduce((sum, c) => (proxyScope === 'all' || (c.category === 'main' || c.category === 'commander') ? sum + c.quantity : sum), 0) / 9
+                )}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2 p-3 bg-slate-950 rounded-2xl border border-slate-800/80">
+              {deck.cards
+                .filter((c) => proxyScope === 'all' || (c.category === 'main' || c.category === 'commander'))
+                .slice(0, 18)
+                .map((c, i) => (
+                  <div key={i} className="aspect-[5/7] rounded-lg overflow-hidden border border-slate-800 bg-slate-900 relative">
+                    <img
+                      src={c.imageUrl || (c.scryfallId ? `https://api.scryfall.com/cards/${c.scryfallId}?format=image&version=small` : '')}
+                      alt={c.name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                    {c.quantity > 1 && (
+                      <span className="absolute bottom-1 right-1 px-1 rounded bg-black/80 text-[10px] font-mono text-white font-bold">
+                        {c.quantity}x
+                      </span>
+                    )}
+                  </div>
+                ))}
+            </div>
+            {deck.cards.length > 18 && (
+              <p className="text-[11px] text-slate-500 text-center">... and {deck.cards.length - 18} more cards will be included in the print job.</p>
+            )}
+          </div>
+        </div>
+      ) : activeTab === 'export' && deck ? (
           /* =================== EXPORT TAB =================== */
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
             {/* Format Selector Column */}
@@ -975,6 +1198,68 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {selectedExportFormat === 'bbcode' && (
+                <div className="my-3 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900 to-sky-950/70 border border-emerald-500/40 shadow-lg space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        <Zap className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>MTGNexus Automated Sync</span>
+                          <span className="px-1.5 py-0.2 rounded-md bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                            Userscript
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Automatically find and replace <code className="text-emerald-300 font-mono">[deck]...[/deck]</code> in your first thread post.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <a
+                        href="/scripts/mtgnexus-deck-sync.user.js"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-semibold border border-emerald-600/40 cursor-pointer transition-colors"
+                        title="Install directly into Tampermonkey / Violentmonkey"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Install Userscript</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleCopyUserscript}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer transition-colors"
+                      >
+                        {copiedUserscriptToast ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedUserscriptToast ? 'Script Copied!' : 'Copy Script'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80">
+                    <input
+                      type="url"
+                      value={nexusThreadUrl}
+                      onChange={(e) => handleSaveNexusUrl(e.target.value)}
+                      placeholder="Your MTGNexus Thread / Edit URL (e.g. https://www.mtgnexus.com/viewtopic.php?t=...)"
+                      className="flex-1 min-w-[240px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyAndOpenNexus}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Copy &amp; Open Thread</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {selectedExportFormat === 'mtgo' && (
                 <div className="my-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3 text-xs">

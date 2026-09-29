@@ -1,3 +1,4 @@
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
@@ -28,19 +29,26 @@ import {
   Columns3,
   List,
   Swords,
+  Search,
   Zap,
   Shield,
   Mountain,
   Bookmark,
   HelpCircle,
-  FileText
+  FileText,
+  BarChart2,
+  ArrowLeftRight,
+  CheckCircle2,
+  Check
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
-import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem } from '../types/mtg';
+import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
 import { calculateDeckStats, getCardPartnerInfo, canCardsPartnerTogether, canBePrimaryCommander, getCardCategorySortOrder } from '../utils/deckUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
+import { DeckStatsModal } from './DeckStatsModal';
+import { CommanderRecommendationsModal } from './CommanderRecommendationsModal';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
@@ -90,6 +98,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
   const [showPendingChangesModal, setShowPendingChangesModal] = useState(false);
   useBodyScrollLock(showPendingChangesModal);
+  useEscapeKey(showPendingChangesModal, () => setShowPendingChangesModal(false));
   const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>(() => {
     try {
@@ -131,6 +140,130 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     } catch {}
   }, [activeCategoryTab]);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
+  const [selectedCmcFilter, setSelectedCmcFilter] = useState<string | number | null>(null);
+  const [cardFilterQuery, setCardFilterQuery] = useState<string>('');
+  const [statsScope, setStatsScope] = useState<'main' | 'all'>('main');
+  const [cardToSwap, setCardToSwap] = useState<DeckCard | null>(null);
+  const [showOwnership, setShowOwnership] = useState<boolean>(false);
+  const [missingCardsCopied, setMissingCardsCopied] = useState<boolean>(false);
+
+  // Collection tracking
+  const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+  useEffect(() => {
+    return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+  }, []);
+
+  const collectionCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    collectionCards.forEach((c) => {
+      const name = c.name.toLowerCase().trim();
+      map.set(name, (map.get(name) || 0) + (c.quantity || 1));
+    });
+    return map;
+  }, [collectionCards]);
+
+
+  const handleExportMissingCards = async () => {
+    if (ownershipStats.missingList.length === 0) return;
+    const lines = ownershipStats.missingList.map((item) => `${item.missingQty} ${item.card.name}`);
+    await navigator.clipboard.writeText(lines.join('\n'));
+    setMissingCardsCopied(true);
+    setTimeout(() => setMissingCardsCopied(false), 2500);
+  };
+
+  const handleApplyBasicBalance = (recommended: Record<string, number>) => {
+    const basicDefaults: Record<string, { typeLine: string; colors: string[] }> = {
+      Plains: { typeLine: 'Basic Land — Plains', colors: ['W'] },
+      Island: { typeLine: 'Basic Land — Island', colors: ['U'] },
+      Swamp: { typeLine: 'Basic Land — Swamp', colors: ['B'] },
+      Mountain: { typeLine: 'Basic Land — Mountain', colors: ['R'] },
+      Forest: { typeLine: 'Basic Land — Forest', colors: ['G'] },
+    };
+
+    let updatedCards = [...activeDeck.cards];
+    const basicNames = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
+    const existingFound = new Set<string>();
+
+    updatedCards = updatedCards.map((c) => {
+      if (c.category !== 'main') return c;
+      const cleanName = c.name.split(' // ')[0].trim();
+      if (basicNames.includes(cleanName)) {
+        existingFound.add(cleanName);
+        const newQty = recommended[cleanName] !== undefined ? recommended[cleanName] : c.quantity;
+        return { ...c, quantity: newQty };
+      }
+      return c;
+    }).filter((c) => {
+      const cleanName = c.name.split(' // ')[0].trim();
+      if (basicNames.includes(cleanName) && c.category === 'main') {
+        return c.quantity > 0;
+      }
+      return true;
+    });
+
+    basicNames.forEach((name) => {
+      const targetQty = recommended[name] || 0;
+      if (targetQty > 0 && !existingFound.has(name)) {
+        updatedCards.push({
+          id: `basic-${name.toLowerCase()}-${Date.now()}`,
+          scryfallId: `basic-${name.toLowerCase()}`,
+          set: 'basics',
+          name,
+          category: 'main' as DeckCategory,
+          quantity: targetQty,
+          cmc: 0,
+          mana_cost: '',
+          type_line: basicDefaults[name].typeLine,
+          colors: basicDefaults[name].colors,
+          color_identity: basicDefaults[name].colors,
+          rarity: 'common',
+        });
+      }
+    });
+
+    onUpdateDeck({ ...activeDeck, cards: updatedCards });
+  };
+
+  const handleAddRecommendation = (cardName: string, category: DeckCategory) => {
+    const existing = activeDeck.cards.find(
+      (c) => c.name.toLowerCase().trim() === cardName.toLowerCase().trim() && c.category === category
+    );
+    if (existing) {
+      const updated = activeDeck.cards.map((c) => (c.id === existing.id ? { ...c, quantity: c.quantity + 1 } : c));
+      onUpdateDeck({ ...activeDeck, cards: updated });
+    } else {
+      const newCard: DeckCard = {
+        id: `rec-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        scryfallId: `rec-${cardName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        set: 'rec',
+        name: cardName,
+        category,
+        quantity: 1,
+        cmc: 0,
+        mana_cost: '',
+        type_line: '',
+        rarity: 'rare',
+      };
+      onUpdateDeck({ ...activeDeck, cards: [...activeDeck.cards, newCard] });
+    }
+  };
+
+  const handleExecuteSwap = (newCard: DeckCard) => {
+    if (!cardToSwap) return;
+    const updatedCards = activeDeck.cards.map((c) => {
+      if (c.id === cardToSwap.id) {
+        return { ...c, category: newCard.category };
+      }
+      if (c.id === newCard.id) {
+        return { ...c, category: 'main' as DeckCategory };
+      }
+      return c;
+    });
+    onUpdateDeck({ ...activeDeck, cards: updatedCards });
+    setCardToSwap(null);
+  };
   const [historyList, setHistoryList] = useState<DeckHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
   const [isHistoricalLoading, setIsHistoricalLoading] = useState<boolean>(false);
@@ -138,6 +271,31 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const isHistoricalView = selectedHistoryId !== 'current';
   const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
+  const ownershipStats = useMemo(() => {
+    let owned = 0;
+    let needed = 0;
+    let missingPrice = 0;
+    const missingList: { card: DeckCard; missingQty: number }[] = [];
+
+    activeDeck.cards.forEach((c) => {
+      const isMainOrCmdr = c.category === 'main' || c.category === 'commander';
+      if (!isMainOrCmdr) return;
+      const qty = c.quantity || 1;
+      needed += qty;
+      const inCol = collectionCountMap.get(c.name.toLowerCase().trim()) || 0;
+      const ownedCopies = Math.min(qty, inCol);
+      owned += ownedCopies;
+      if (ownedCopies < qty) {
+        const missingQty = qty - ownedCopies;
+        const unitPrice = (c.isFoil && c.priceUsdFoil) ? c.priceUsdFoil : (c.priceUsd || 0);
+        missingPrice += unitPrice * missingQty;
+        missingList.push({ card: c, missingQty });
+      }
+    });
+
+    return { owned, needed, missingPrice, missingList };
+  }, [activeDeck.cards, collectionCountMap]);
+
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
   );
@@ -560,7 +718,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
   };
 
-  const stats = calculateDeckStats(activeDeck);
+  const stats = calculateDeckStats(activeDeck, statsScope);
 
   // Commander calculations
   const commanderCards = activeDeck.cards.filter((c) => c.category === 'commander');
@@ -961,10 +1119,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
   };
 
+  const matchesCardFilter = (c: DeckCard) => {
+    if (!cardFilterQuery.trim()) return true;
+    const q = cardFilterQuery.toLowerCase().trim();
+    return (
+      c.name.toLowerCase().includes(q) ||
+      (c.type_line || (c as any).typeLine || '').toLowerCase().includes(q) ||
+      (c.oracle_text || '').toLowerCase().includes(q)
+    );
+  };
+
   // Main cards include all mainboard cards; commanders are kept separate in their own panel at the top
-  const mainCards = sortCards(activeDeck.cards.filter((c) => c.category === 'main'));
-  const sideCards = sortCards(activeDeck.cards.filter((c) => c.category === 'sideboard'));
-  const maybeCards = sortCards(activeDeck.cards.filter((c) => c.category === 'maybeboard'));
+  const rawMainCards = sortCards(activeDeck.cards.filter((c) => c.category === 'main'));
+  const rawSideCards = sortCards(activeDeck.cards.filter((c) => c.category === 'sideboard'));
+  const rawMaybeCards = sortCards(activeDeck.cards.filter((c) => c.category === 'maybeboard'));
+
+  const mainCards = rawMainCards.filter(matchesCardFilter);
+  const sideCards = rawSideCards.filter(matchesCardFilter);
+  const maybeCards = rawMaybeCards.filter(matchesCardFilter);
 
   // Subgroup mainboard cards by Type
   const groupCardsByType = (cards: DeckCard[]) => {
@@ -1414,6 +1586,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   >
                     <GitCompare className="w-3.5 h-3.5 text-cyan-400" />
                     <span>{isHistoricalView ? 'Compare with Live' : 'Compare'}</span>
+                    {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
+                        {pendingChanges.added.length > 0 && (
+                          <span className="text-emerald-400">+{pendingChanges.added.reduce((s, i) => s + i.diffQuantity, 0)}</span>
+                        )}
+                        {pendingChanges.deleted.length > 0 && (
+                          <span className="text-rose-400">-{pendingChanges.deleted.reduce((s, i) => s + i.diffQuantity, 0)}</span>
+                        )}
+                      </span>
+                    )}
                   </button>
 
                   <button
@@ -1427,6 +1609,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   >
                     <Share2 className="w-3.5 h-3.5 text-violet-400" />
                     <span>Export</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowStatsModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-violet-500/20 text-slate-300 hover:text-violet-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="View Deck Statistics, Mana Curve, and Land Balance"
+                  >
+                    <BarChart2 className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Curve & Stats</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowRecommendationsModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-200 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Browse recommended Commander staples and synergy cards"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Recs</span>
                   </button>
 
                   <button
@@ -1712,7 +1914,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
 
         {/* View Mode Switcher and Add Cards Button */}
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          {/* Collection Ownership Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowOwnership(!showOwnership)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+              showOwnership
+                ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Toggle collection ownership badges and missing cards"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Owned:</span>
+            <span className="font-mono">{ownershipStats.owned}/{ownershipStats.needed}</span>
+          </button>
+
+          {/* Quick Search / Filter Input */}
+          <div className="relative">
+            <input
+              type="text"
+              value={cardFilterQuery}
+              onChange={(e) => setCardFilterQuery(e.target.value)}
+              placeholder="Filter deck..."
+              className="w-28 sm:w-36 lg:w-44 bg-slate-900 border border-slate-800 rounded-lg text-xs pl-7 pr-6 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:w-48 transition-all"
+            />
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2 pointer-events-none" />
+            {cardFilterQuery && (
+              <button
+                type="button"
+                onClick={() => setCardFilterQuery('')}
+                className="absolute right-1.5 top-1.5 p-0.5 text-slate-500 hover:text-slate-300 rounded cursor-pointer"
+                title="Clear filter"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
           {/* Sort By */}
           <select
             value={sortCardsBy}
@@ -1945,7 +2185,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         {showStats && (
           <div className="mt-3">
-            <ManaCurveChart stats={stats} />
+            <ManaCurveChart
+                  stats={stats}
+                  scope={statsScope}
+                  onScopeChange={setStatsScope}
+                  selectedCmc={selectedCmcFilter}
+                  onSelectCmc={setSelectedCmcFilter}
+                />
           </div>
         )}
       </div>
@@ -2288,6 +2534,31 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         />
       )}
 
+      {/* Deck Stats & Mana Analysis Modal */}
+      {showStatsModal && (
+        <DeckStatsModal
+          isOpen={showStatsModal}
+          onClose={() => setShowStatsModal(false)}
+          deck={activeDeck}
+          stats={stats}
+          scope={statsScope}
+          onScopeChange={setStatsScope}
+          selectedCmc={selectedCmcFilter}
+          onSelectCmc={setSelectedCmcFilter}
+          onApplyBasicBalance={handleApplyBasicBalance}
+        />
+      )}
+
+      {/* Commander Recommendations Modal */}
+      {showRecommendationsModal && (
+        <CommanderRecommendationsModal
+          isOpen={showRecommendationsModal}
+          onClose={() => setShowRecommendationsModal(false)}
+          deck={activeDeck}
+          onAddCard={handleAddRecommendation}
+        />
+      )}
+
       {/* 1-Second Delayed Image Hover Popup */}
       <ImageHoverPopup preview={hoverPreview} />
       <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
@@ -2569,7 +2840,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   }
 
   function renderPilesView(cards: DeckCard[]) {
-    if (cards.length === 0) return null;
+    if (cards.length === 0) {
+      if (cardFilterQuery.trim()) {
+        return (
+          <div className="text-center py-12 text-slate-400 text-sm bg-slate-900/40 rounded-2xl border border-slate-800/60 my-4">
+            No cards match "<span className="text-violet-300 font-semibold">{cardFilterQuery}</span>".
+            <button
+              type="button"
+              onClick={() => setCardFilterQuery('')}
+              className="ml-2 text-violet-400 hover:text-violet-300 underline cursor-pointer"
+            >
+              Clear filter
+            </button>
+          </div>
+        );
+      }
+      return null;
+    }
     const piles = groupCardsIntoPiles(cards, sortCardsBy);
 
     return (
@@ -2621,8 +2908,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           marginTop: index > 0 ? 'calc(-140% + 30px)' : '0',
           zIndex: isActive ? 50 : undefined,
         }}
-        onClick={() => {
+        onClick={(e) => {
           if (wasChordTriggeredRecently()) return;
+          if (e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!(isThisCommander && card.quantity >= 1)) {
+              handleUpdateCardQuantity(card.id, 1);
+            }
+            return;
+          }
+          if (e.altKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleUpdateCardQuantity(card.id, -1);
+            return;
+          }
           onImageClearPreview();
           onSelectCard(toScryfallCard(card));
         }}
@@ -2643,7 +2944,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             ? 'border-fuchsia-500/80 shadow-fuchsia-500/20'
             : 'border-slate-800'
         }`}
-        title="Click to inspect, scrub mouse to view card, or Right-Click / Dual-Click to pop up large image"
+        title="Click to inspect | Shift+Click to +1 | Alt+Click to -1 | scrub mouse down pile | Right-Click / Dual-Click for large popup"
       >
         {/* Full Card Image */}
         <img
@@ -2793,6 +3094,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   }
 
   function renderCardListOrGrid(cards: DeckCard[]) {
+    if (cards.length === 0) {
+      if (cardFilterQuery.trim()) {
+        return (
+          <div className="text-center py-8 text-slate-400 text-sm bg-slate-900/40 rounded-xl border border-slate-800/60 my-2">
+            No cards match "<span className="text-violet-300 font-semibold">{cardFilterQuery}</span>".
+            <button
+              type="button"
+              onClick={() => setCardFilterQuery('')}
+              className="ml-2 text-violet-400 hover:text-violet-300 underline cursor-pointer"
+            >
+              Clear filter
+            </button>
+          </div>
+        );
+      }
+      return null;
+    }
     if (viewMode === 'grid') {
       return (
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-5 gap-4 sm:gap-5 pt-2">
