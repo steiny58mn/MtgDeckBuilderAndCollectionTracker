@@ -37,6 +37,7 @@ import {
   createDeckListApi,
   createDeckPickListApi,
   getExportFilenameBase,
+  resolveMtgNexusEditUrl,
 } from '../utils/deckExport';
 import { 
   IMPORT_FORMATS, 
@@ -69,6 +70,7 @@ interface DeckExportModalProps {
   onImportAppendToDeck?: (cardsToAdd: DeckCard[]) => Promise<void>;
   onImportOverwriteDeck?: (overwrittenDeck: Deck, originalDeck: Deck) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
+  onUpdateNexusUrl?: (url: string) => void;
   initialTab?: 'export' | 'import';
 }
 
@@ -82,6 +84,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   onImportAppendToDeck,
   onImportOverwriteDeck,
   onBatchImportCompleted,
+  onUpdateNexusUrl,
   initialTab = 'export',
 }) => {
   const sortedExistingDecks = useMemo(() => {
@@ -98,8 +101,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   // Export State
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatKey>('bbcode');
   const [nexusThreadUrl, setNexusThreadUrl] = useState<string>(() => {
-    return deck ? localStorage.getItem(`mtgnexus_url_${deck.id}`) || '' : '';
+    return deck?.mtgNexusEditThreadUrl || (deck ? localStorage.getItem(`mtgnexus_url_${deck.id}`) || '' : '');
   });
+
+  // Keep nexusThreadUrl in sync if deck prop updates
+  useEffect(() => {
+    if (deck?.mtgNexusEditThreadUrl !== undefined) {
+      setNexusThreadUrl(deck.mtgNexusEditThreadUrl || '');
+    }
+  }, [deck?.id, deck?.mtgNexusEditThreadUrl]);
   const [copiedUserscriptToast, setCopiedUserscriptToast] = useState(false);
   const [showUserscriptHelp, setShowUserscriptHelp] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -344,10 +354,20 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         localStorage.removeItem(`mtgnexus_url_${deck.id}`);
       }
     }
+    if (onUpdateNexusUrl) {
+      onUpdateNexusUrl(url);
+    }
   };
 
   const handleCopyAndOpenNexus = async () => {
-    const textToCopy = exportedContent || (deck ? generateExportContent('bbcode', deck) : '');
+    let textToCopy = selectedExportFormat === 'bbcode' ? exportedContent : '';
+    if (!textToCopy && deck) {
+      try {
+        textToCopy = await DeckService.createDeckList(deck);
+      } catch {
+        textToCopy = generateExportContent('bbcode', deck);
+      }
+    }
     if (!textToCopy) return;
 
     try {
@@ -355,8 +375,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2200);
 
-      const targetUrl = nexusThreadUrl.trim() || 'https://www.mtgnexus.com';
-      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      const targetUrl = resolveMtgNexusEditUrl(nexusThreadUrl);
+      window.open(targetUrl, '_blank', 'noopener');
     } catch (e) {
       console.error('Failed to copy to clipboard:', e);
     }
@@ -1256,7 +1276,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
                     >
                       <Zap className="w-3.5 h-3.5" />
-                      <span>Copy &amp; Open Thread</span>
+                      <span>Copy &amp; Open {nexusThreadUrl.includes('posting.php') || nexusThreadUrl.includes('mode=edit') || nexusThreadUrl.includes('p=') ? 'Edit Page' : 'Thread'}</span>
                     </button>
                   </div>
                 </div>

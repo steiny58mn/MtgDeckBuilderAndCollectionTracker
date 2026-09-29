@@ -1,21 +1,27 @@
 ﻿// ==UserScript==
 // @name         MTGNexus Deck Sync Assistant
 // @namespace    https://frostpointlabs.com/
-// @version      1.1
+// @version      1.3
 // @description  Automatically update [deck] tags in your MTGNexus primer and thread posts from the MTG Deck Builder.
 // @author       Andy & Antigravity
-// @match        *://*.mtgnexus.com/*
-// @match        *://mtgnexus.com/*
-// @run-at       document-end
-// @grant        GM_setClipboard
+// @match        https://www.mtgnexus.com/*
+// @match        https://mtgnexus.com/*
+// @match        http://www.mtgnexus.com/*
+// @match        http://mtgnexus.com/*
+// @include      *://*.mtgnexus.com/*
+// @include      *://mtgnexus.com/*
+// @include      *mtgnexus.com*
+// @run-at       document-idle
+// @grant        none
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  console.log('[MTGNexus Deck Sync] ⚡ Script loaded on:', window.location.href);
+  console.log('%c[MTGNexus Deck Sync] ⚡ Script initialized on: ' + window.location.href, 'color: #38bdf8; font-weight: bold; font-size: 13px;');
 
   const DECK_REGEX = /\[deck(?:=[^\]]*)?\][\s\S]*?\[\/deck\]/i;
+  let hasAutoRedirected = false;
 
   function showToast(message, isError = false) {
     const existing = document.getElementById('nexus-sync-toast');
@@ -26,16 +32,16 @@
     toast.innerHTML = `<span style="font-size:16px;">${isError ? '⚠️' : '✅'}</span> <span>${message}</span>`;
     Object.assign(toast.style, {
       position: 'fixed',
-      bottom: '75px',
+      bottom: '80px',
       right: '24px',
       backgroundColor: isError ? '#881337' : '#064e3b',
       color: '#fff',
-      padding: '12px 18px',
+      padding: '12px 20px',
       borderRadius: '10px',
-      boxShadow: '0 12px 30px rgba(0,0,0,0.6)',
+      boxShadow: '0 12px 30px rgba(0,0,0,0.7)',
       fontSize: '13px',
       fontWeight: '600',
-      zIndex: '999999',
+      zIndex: '2147483647',
       transition: 'opacity 0.3s ease',
       border: isError ? '1px solid #f43f5e' : '1px solid #10b981',
       display: 'flex',
@@ -44,14 +50,13 @@
       fontFamily: 'system-ui, -apple-system, sans-serif'
     });
 
-    document.body.appendChild(toast);
+    (document.body || document.documentElement).appendChild(toast);
     setTimeout(() => {
       toast.style.opacity = '0';
       setTimeout(() => toast.remove(), 400);
     }, 4500);
   }
 
-  // Helper to replace [deck] tag in a textarea
   function replaceDeckInTextarea(textarea, newDeckBBCode) {
     if (!textarea) return false;
     const currentText = textarea.value || '';
@@ -73,11 +78,10 @@
     showToast('✓ [deck] tag successfully replaced! Review and click Submit.');
     triggerChange(textarea);
 
-    // Visual pulse
     const origBorder = textarea.style.borderColor;
     textarea.style.transition = 'border-color 0.4s ease, box-shadow 0.4s ease';
     textarea.style.borderColor = '#10b981';
-    textarea.style.boxShadow = '0 0 18px rgba(16, 185, 129, 0.5)';
+    textarea.style.boxShadow = '0 0 18px rgba(16, 185, 129, 0.6)';
     setTimeout(() => {
       textarea.style.borderColor = origBorder;
       textarea.style.boxShadow = 'none';
@@ -92,17 +96,40 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  // --- 1. FLOATING ACTION BUTTON (ALWAYS VISIBLE ON MTGNEXUS) ---
+  // --- THREAD AUTO REDIRECT ---
+  function checkAutoRedirectOnThread() {
+    if (hasAutoRedirected) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasAutoUpdate = urlParams.get('autoupdate') === 'deck' || window.location.hash.includes('autoupdate=deck');
+    if (!hasAutoUpdate) return;
+
+    // Only redirect if viewing a topic and NOT on the edit form
+    if (window.location.pathname.includes('posting.php')) return;
+
+    const editLinks = Array.from(document.querySelectorAll('a[href*="mode=edit"]'));
+    if (editLinks.length > 0) {
+      hasAutoRedirected = true;
+      console.log('[MTGNexus Deck Sync] Auto-redirecting to edit page...', editLinks[0].href);
+      showToast('Found deck post! Opening edit page...');
+      const editUrl = new URL(editLinks[0].href, window.location.origin);
+      editUrl.searchParams.set('autoupdate', 'deck');
+      window.location.href = editUrl.toString();
+    }
+  }
+
+  // --- FLOATING ACTION BUTTON ---
   function injectFloatingSyncButton() {
     if (document.getElementById('nexus-floating-sync-btn')) return;
+    const target = document.body || document.documentElement;
+    if (!target) return;
 
     const floatContainer = document.createElement('div');
     floatContainer.id = 'nexus-floating-sync-btn';
     Object.assign(floatContainer.style, {
       position: 'fixed',
-      bottom: '18px',
-      right: '18px',
-      zIndex: '999998',
+      bottom: '20px',
+      right: '20px',
+      zIndex: '2147483647',
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
@@ -111,31 +138,27 @@
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.innerHTML = '<span style="font-size:14px; margin-right:4px;">⚡</span><span>Sync Deck</span>';
+    btn.innerHTML = '<span style="font-size:16px; margin-right:6px;">⚡</span><span style="font-weight:800; font-size:13px; letter-spacing:0.5px;">SYNC DECK</span>';
     Object.assign(btn.style, {
-      backgroundColor: '#0f172a',
-      color: '#38bdf8',
-      border: '1px solid #0284c7',
-      borderRadius: '24px',
-      padding: '8px 16px',
-      fontSize: '12px',
-      fontWeight: '700',
+      backgroundColor: '#0284c7',
+      color: '#ffffff',
+      border: '2px solid #38bdf8',
+      borderRadius: '30px',
+      padding: '10px 20px',
       cursor: 'pointer',
-      boxShadow: '0 8px 20px rgba(0,0,0,0.5)',
+      boxShadow: '0 8px 25px rgba(2, 132, 199, 0.6)',
       display: 'flex',
       alignItems: 'center',
-      transition: 'all 0.2s ease'
+      transition: 'transform 0.15s ease, background-color 0.2s ease'
     });
 
     btn.onmouseenter = () => {
-      btn.style.backgroundColor = '#0284c7';
-      btn.style.color = '#ffffff';
-      btn.style.boxShadow = '0 10px 25px rgba(2, 132, 199, 0.4)';
+      btn.style.backgroundColor = '#0369a1';
+      btn.style.transform = 'scale(1.05)';
     };
     btn.onmouseleave = () => {
-      btn.style.backgroundColor = '#0f172a';
-      btn.style.color = '#38bdf8';
-      btn.style.boxShadow = '0 8px 20px rgba(0,0,0,0.5)';
+      btn.style.backgroundColor = '#0284c7';
+      btn.style.transform = 'scale(1)';
     };
 
     btn.addEventListener('click', async () => {
@@ -149,36 +172,33 @@
       }
 
       if (!clipText || !DECK_REGEX.test(clipText)) {
-        showToast('Clipboard does not contain a valid [deck]...[/deck] block. Copy from Deck Builder first!', true);
+        showToast('Clipboard does not contain a valid [deck] block. Copy from Deck Builder first!', true);
         return;
       }
 
-      // If we are already on an edit page with a textarea
       if (textarea) {
         replaceDeckInTextarea(textarea, clipText);
         return;
       }
 
-      // If on a thread view page, find the first edit button
       const editLinks = Array.from(document.querySelectorAll('a[href*="mode=edit"]'));
       if (editLinks.length > 0) {
-        const firstEdit = editLinks[0];
         sessionStorage.setItem('mtgnexus_pending_deck_sync', clipText);
-        showToast('Deck copied! Opening edit post page...');
-        const editUrl = new URL(firstEdit.href, window.location.origin);
+        showToast('Deck verified! Opening edit post page...');
+        const editUrl = new URL(editLinks[0].href, window.location.origin);
         editUrl.searchParams.set('autoupdate', 'deck');
         window.location.href = editUrl.toString();
         return;
       }
 
-      showToast('No editable post found on this page. Navigate to your thread and log in!', true);
+      showToast('No editable post found on this page. Make sure you are logged in!', true);
     });
 
     floatContainer.appendChild(btn);
-    document.body.appendChild(floatContainer);
+    target.appendChild(floatContainer);
   }
 
-  // --- 2. IN-THREAD EDIT BUTTON HOOKS ---
+  // --- IN-THREAD EDIT BUTTONS ---
   function hookInThreadEditButtons() {
     const editLinks = document.querySelectorAll('a[href*="mode=edit"]');
     editLinks.forEach((editLink) => {
@@ -191,7 +211,7 @@
       const inlineBtn = document.createElement('a');
       inlineBtn.href = 'javascript:void(0);';
       inlineBtn.className = 'button button-icon-only';
-      inlineBtn.title = 'Sync Deck from Deck Builder Clipboard';
+      inlineBtn.title = 'Sync Deck from Deck Builder';
       inlineBtn.innerHTML = '<span style="color:#10b981; font-weight:bold; margin-right:3px;">⚡</span><span style="font-weight:bold; font-size:11px;">Sync</span>';
       inlineBtn.style.marginLeft = '4px';
       inlineBtn.style.padding = '3px 8px';
@@ -218,7 +238,7 @@
           editUrl.searchParams.set('autoupdate', 'deck');
           window.location.href = editUrl.toString();
         } catch (err) {
-          showToast('Please allow clipboard permissions or paste manually on the edit screen.', true);
+          showToast('Please grant clipboard permissions or paste manually on the edit screen.', true);
         }
       });
 
@@ -226,22 +246,32 @@
     });
   }
 
-  // --- 3. POST EDITING SCREEN (posting.php) ---
+  // --- POST EDITING SCREEN ---
   function hookPostEditor() {
     const textarea = document.getElementById('message') || document.querySelector('textarea[name="message"]') || document.querySelector('textarea');
     if (!textarea || document.getElementById('nexus-editor-sync-bar')) return;
 
-    // Check if redirect triggered auto-update
     const urlParams = new URLSearchParams(window.location.search);
     const pendingDeck = sessionStorage.getItem('mtgnexus_pending_deck_sync');
-    if (urlParams.get('autoupdate') === 'deck' && pendingDeck) {
-      sessionStorage.removeItem('mtgnexus_pending_deck_sync');
-      setTimeout(() => {
-        replaceDeckInTextarea(textarea, pendingDeck);
-      }, 400);
+    if (urlParams.get('autoupdate') === 'deck') {
+      if (pendingDeck) {
+        sessionStorage.removeItem('mtgnexus_pending_deck_sync');
+        setTimeout(() => {
+          replaceDeckInTextarea(textarea, pendingDeck);
+        }, 400);
+      } else if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then((clip) => {
+          if (clip && DECK_REGEX.test(clip)) {
+            setTimeout(() => {
+              replaceDeckInTextarea(textarea, clip);
+            }, 400);
+          }
+        }).catch(() => {
+          // User action required for clipboard permissions in some browsers
+        });
+      }
     }
 
-    // Insert sync toolbar above textarea
     const bar = document.createElement('div');
     bar.id = 'nexus-editor-sync-bar';
     Object.assign(bar.style, {
@@ -258,11 +288,14 @@
 
     bar.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:15px;">⚡</span>
+        <span style="font-size:16px;">⚡</span>
         <span style="font-size:12px; font-weight:700; color:#38bdf8;">MTGNexus Deck Sync Assistant</span>
-        <span style="font-size:11px; color:#94a3b8;">— Auto-replace [deck] tag from Clipboard</span>
+        <span style="font-size:11px; color:#94a3b8;">— Replace [deck] tag from Clipboard</span>
       </div>
-      <div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" id="btn-nexus-copy-edit-url" title="Copy this direct edit URL to paste into MTG Deck Builder" style="background:#1e293b; color:#94a3b8; font-weight:600; border:1px solid #334155; border-radius:6px; padding:6px 12px; font-size:11px; cursor:pointer;">
+          Copy Edit URL
+        </button>
         <button type="button" id="btn-nexus-sync-clip" style="background:#10b981; color:#022c22; font-weight:700; border:none; border-radius:6px; padding:6px 14px; font-size:11px; cursor:pointer;">
           Paste &amp; Replace [deck]
         </button>
@@ -270,6 +303,20 @@
     `;
 
     textarea.parentElement.insertBefore(bar, textarea);
+
+    const copyUrlBtn = document.getElementById('btn-nexus-copy-edit-url');
+    if (copyUrlBtn) {
+      copyUrlBtn.addEventListener('click', async () => {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('autoupdate');
+        try {
+          await navigator.clipboard.writeText(cleanUrl.toString());
+          showToast('Direct Edit URL copied! Paste it into MTG Deck Builder.');
+        } catch {
+          prompt('Direct Edit URL:', cleanUrl.toString());
+        }
+      });
+    }
 
     const clipBtn = document.getElementById('btn-nexus-sync-clip');
     if (clipBtn) {
@@ -282,7 +329,7 @@
         }
 
         if (!clip || !DECK_REGEX.test(clip)) {
-          showToast('Clipboard does not contain a valid [deck]...[/deck] block. Copy from Deck Builder first.', true);
+          showToast('Clipboard does not contain a valid [deck] block. Copy from Deck Builder first.', true);
           return;
         }
 
@@ -291,23 +338,19 @@
     }
   }
 
-  // --- INITIALIZE & OBSERVE ---
-  function init() {
+  function setup() {
+    checkAutoRedirectOnThread();
     injectFloatingSyncButton();
     hookInThreadEditButtons();
     hookPostEditor();
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', setup);
   } else {
-    init();
+    setup();
   }
 
-  // Re-check periodically or on dynamic changes
-  setInterval(() => {
-    hookInThreadEditButtons();
-    hookPostEditor();
-  }, 1500);
-
+  // Periodic poll to ensure presence even on dynamic SPAs or late DOM renders
+  setInterval(setup, 1000);
 })();

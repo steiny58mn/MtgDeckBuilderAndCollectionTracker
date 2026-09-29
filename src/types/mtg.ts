@@ -122,6 +122,8 @@ export interface Deck {
   updatedAt: number;
   coverCardUrl?: string;
   tags?: string[];
+  mtgNexusEditThreadUrl?: string;
+  mtgNexusEditThreadURL?: string;
 }
 
 export type CardCondition = 'NM' | 'LP' | 'MP' | 'HP' | 'DMG';

@@ -182,9 +182,32 @@ export function normalizeDeck(deck: any): Deck {
   const rawCards = deck.cards || deck.Cards || [];
   const cards = Array.isArray(rawCards) ? rawCards.map(normalizeCard) : [];
 
+  const deckId = deck.id || deck.Id || deck.deckId || deck.DeckId || '';
+
+  let mtgNexusEditThreadUrl =
+    deck.mtgNexusEditThreadUrl ??
+    deck.mtgNexusEditThreadURL ??
+    deck.MtgNexusEditThreadUrl ??
+    deck.MtgNexusEditThreadURL ??
+    deck.mtgThreadUrl ??
+    deck.MtgThreadUrl;
+
+  if (!mtgNexusEditThreadUrl && deckId && typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('mtgnexus_url_' + deckId);
+      if (cached) mtgNexusEditThreadUrl = cached;
+    } catch {}
+  }
+
+  if (deckId && mtgNexusEditThreadUrl && typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('mtgnexus_url_' + deckId, mtgNexusEditThreadUrl);
+    } catch {}
+  }
+
   return {
     ...deck,
-    id: deck.id || deck.Id || deck.deckId || deck.DeckId || '',
+    id: deckId,
     name: deck.name || deck.Name || 'Untitled Deck',
     description: deck.description ?? deck.Description,
     format: (deck.format || deck.Format || 'commander').toLowerCase() as any,
@@ -193,6 +216,8 @@ export function normalizeDeck(deck: any): Deck {
     commanderArtUrl: deck.commanderArtUrl ?? deck.CommanderArtUrl,
     commanderColorIdentity: deck.commanderColorIdentity ?? deck.CommanderColorIdentity ?? [],
     coverCardUrl: deck.coverCardUrl ?? deck.CoverCardUrl,
+    mtgNexusEditThreadUrl: mtgNexusEditThreadUrl ? mtgNexusEditThreadUrl.trim() : undefined,
+    mtgNexusEditThreadURL: mtgNexusEditThreadUrl ? mtgNexusEditThreadUrl.trim() : undefined,
     tags: deck.tags ?? deck.Tags ?? [],
     createdAt: parseTimestamp(deck.createdAt ?? deck.CreatedAt),
     updatedAt: parseTimestamp(deck.updatedAt ?? deck.UpdatedAt),
@@ -372,8 +397,21 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const start = performance.now();
 
+  const rawNexusUrl =
+    deck.mtgNexusEditThreadUrl ||
+    (deck as any).mtgNexusEditThreadURL ||
+    (deck as any).MtgNexusEditThreadUrl ||
+    (deck as any).MtgNexusEditThreadURL ||
+    (deck.id && typeof window !== 'undefined' ? localStorage.getItem('mtgnexus_url_' + deck.id) : '') ||
+    '';
+  const mtgNexusEditThreadUrl = rawNexusUrl.trim() || undefined;
+
   const preparedDeck = {
     ...deck,
+    deckId: deck.id || (deck as any).deckId,
+    id: deck.id || (deck as any).deckId,
+    mtgNexusEditThreadUrl,
+    mtgNexusEditThreadURL: mtgNexusEditThreadUrl,
     totalCards: (deck.cards || []).reduce((sum, c) => sum + (c.quantity || 1), 0),
     cards: (deck.cards || []).map((c) => {
       const typeLine = c.type_line || (c as any).typeLine || (c as any).TypeLine || '';
@@ -401,6 +439,7 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
     deckId: deck.id,
     name: deck.name,
     format: deck.format,
+    mtgNexusEditThreadUrl,
     cardCount: preparedDeck.totalCards,
     vaultId: headers['X-Vault-Id'],
   });
@@ -1788,6 +1827,7 @@ export class DeckService {
           commanderArtUrl: existing.commanderArtUrl,
           commanderColorIdentity: existing.commanderColorIdentity,
           coverCardUrl: existing.coverCardUrl,
+          mtgNexusEditThreadUrl: existing.mtgNexusEditThreadUrl,
           totalCards: (existing.cards || []).reduce((s, c) => s + (c.quantity || 1), 0),
           createdAt: existing.createdAt,
           updatedAt: existing.updatedAt,

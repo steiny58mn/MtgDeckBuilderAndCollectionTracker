@@ -88,6 +88,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [title, setTitle] = useState(deck.name);
   const [description, setDescription] = useState(deck.description || '');
+  const [nexusUrl, setNexusUrl] = useState(deck.mtgNexusEditThreadUrl || '');
   const [format, setFormat] = useState<MTGFormat>(deck.format);
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [priceRefreshMessage, setPriceRefreshMessage] = useState<string | null>(null);
@@ -488,11 +489,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   React.useEffect(() => {
     setTitle(deck.name);
     setDescription(deck.description || '');
+    setNexusUrl(deck.mtgNexusEditThreadUrl || '');
     setFormat(deck.format);
     setSelectedHistoryId('current');
     setHistoricalDeck(null);
     setHasUnsavedChanges(DeckService.hasUnsavedChanges(deck.id));
-  }, [deck.id]);
+  }, [deck.id, deck.mtgNexusEditThreadUrl]);
 
   // Subscribe to unsaved status changes
   React.useEffect(() => {
@@ -513,6 +515,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         name: title.trim() || baseDeck.name,
         description: description.trim(),
         format: format,
+        mtgNexusEditThreadUrl: (nexusUrl || baseDeck.mtgNexusEditThreadUrl || '').trim() || undefined,
         updatedAt: Date.now(),
       };
       if (onSaveDeck) {
@@ -747,6 +750,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       name: title.trim() || 'Untitled Deck',
       description: description.trim(),
       format,
+      mtgNexusEditThreadUrl: nexusUrl.trim() || undefined,
     };
     onUpdateDeck(updated);
     setIsEditingTitle(false);
@@ -1382,6 +1386,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Optional deck strategy or notes..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-xs text-slate-300 focus:outline-none focus:border-fuchsia-500"
+              />
+              <input
+                type="url"
+                value={nexusUrl}
+                onChange={(e) => setNexusUrl(e.target.value)}
+                placeholder="MTGNexus Thread / Edit URL (e.g. https://www.mtgnexus.com/viewtopic.php?t=...)"
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-xs text-slate-300 focus:outline-none focus:border-fuchsia-500"
               />
               <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2250,12 +2261,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           name: isHistoricalView ? activeDeck.name : title,
           description: isHistoricalView ? activeDeck.description : description,
           format: activeDeck.format,
+          mtgNexusEditThreadUrl: nexusUrl || activeDeck.mtgNexusEditThreadUrl,
         }}
         isHistorical={isHistoricalView}
         existingDecks={DeckService.getLocalDecks()}
         isOpen={showExportModal}
         onClose={() => {
           setShowExportModal(false);
+        }}
+        onUpdateNexusUrl={(newUrl: string) => {
+          const trimmed = newUrl.trim() || undefined;
+          setNexusUrl(newUrl);
+          const updated: Deck = {
+            ...activeDeck,
+            mtgNexusEditThreadUrl: trimmed,
+          };
+          onUpdateDeck(updated);
+          setHasUnsavedChanges(true);
+          DeckService.setDeckHasUnsavedChanges(activeDeck.id, true);
         }}
         onImportAsNewDeck={handleImportAsNewDeck}
         onImportAppendToDeck={handleAppendCardsToDeck}

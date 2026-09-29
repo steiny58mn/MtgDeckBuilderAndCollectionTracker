@@ -5,7 +5,10 @@ import {
   generateBBCodeMTGNexusLocal,
   createDeckListApi,
   createDeckPickListApi,
+  resolveMtgNexusEditUrl,
 } from './deckUtils';
+
+export { resolveMtgNexusEditUrl };
 
 export type ExportFormatKey = 
   | 'bbcode'

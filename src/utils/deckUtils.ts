@@ -935,7 +935,8 @@ export function adjustDeckListBBCode(
   apiOutput: string,
   deckName?: string,
   colorStyle?: string,
-  commanderCards: DeckCard[] = []
+  commanderCards: DeckCard[] = [],
+  deckCards: DeckCard[] = []
 ): string {
   let result = apiOutput.trim();
 
@@ -944,6 +945,70 @@ export function adjustDeckListBBCode(
 
   // Strip redundant [card] tags if present
   result = result.replace(/\[card\](.*?)\[\/card\]/gi, '$1');
+
+  // If output does not contain category headers (e.g. 'Creature (10)'), categorize using deckCards
+  if (!/^[A-Za-z\s]+\s*\(\d+\)/m.test(result) && deckCards.length > 0) {
+    const cardMap = new Map<string, DeckCard>();
+    deckCards.forEach((c) => cardMap.set((c.name || '').toLowerCase().trim(), c));
+
+    const categoryOrder = [
+      'Creature',
+      'Planeswalker',
+      'Instant',
+      'Sorcery',
+      'Artifact',
+      'Enchantment',
+      'Battle',
+      'Land',
+      'Other',
+    ];
+
+    const getCat = (c?: DeckCard): string => {
+      if (!c) return 'Other';
+      const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
+      if (type.includes('land')) return 'Land';
+      if (type.includes('creature')) return 'Creature';
+      if (type.includes('planeswalker')) return 'Planeswalker';
+      if (type.includes('instant')) return 'Instant';
+      if (type.includes('sorcery')) return 'Sorcery';
+      if (type.includes('artifact')) return 'Artifact';
+      if (type.includes('enchantment')) return 'Enchantment';
+      if (type.includes('battle')) return 'Battle';
+      return 'Other';
+    };
+
+    const grouped: Record<string, { qty: number; name: string }[]> = {};
+    const lines = result.split(/\r?\n/);
+    lines.forEach((line) => {
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      if (match) {
+        const qty = parseInt(match[1], 10);
+        const name = match[2].trim();
+        const cardObj = cardMap.get(name.toLowerCase());
+        const cat = getCat(cardObj);
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push({ qty, name });
+      }
+    });
+
+    const rebuilt: string[] = [];
+    categoryOrder.forEach((cat) => {
+      const items = grouped[cat];
+      if (items && items.length > 0) {
+        const total = items.reduce((s, x) => s + x.qty, 0);
+        rebuilt.push(`${cat} (${total})`);
+        items
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach((x) => rebuilt.push(`${x.qty} ${x.name}`));
+        rebuilt.push('');
+      }
+    });
+
+    if (rebuilt.length > 0) {
+      result = rebuilt.join('\n').trim();
+    }
+  }
 
   // Handle General / Commander section
   if (commanderCards.length > 0) {
@@ -1075,12 +1140,14 @@ export function generateBBCodeMTGNexusLocal(deck: Deck): string {
   const commanderCards = cards.filter((c) => c.category === 'commander');
   const mainCards = cards.filter((c) => c.category === 'main');
   const sideCards = cards.filter((c) => c.category === 'sideboard');
+  const maybeCards = cards.filter((c) => c.category === 'maybeboard');
 
   const commanderInfo = getDeckCommander(deck);
   const colorStyle = getDeckColorStyle(commanderInfo.colorIdentity);
 
-  const lines = [];
-  lines.push(`[deck=${deck.name || 'Deck'} style=${colorStyle}]`);
+  const lines: string[] = [];
+  const safeName = (deck.name || 'Deck').replace(/[\]]/g, '');
+  lines.push(`[deck=${safeName} style=${colorStyle}]`);
 
   if (commanderCards.length > 0) {
     const count = commanderCards.reduce((s, c) => s + c.quantity, 0);
@@ -1089,17 +1156,68 @@ export function generateBBCodeMTGNexusLocal(deck: Deck): string {
     lines.push('');
   }
 
-  if (mainCards.length > 0) {
-    const count = mainCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`Mainboard (${count})`);
-    mainCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
+  const categoryOrder = [
+    'Creature',
+    'Planeswalker',
+    'Instant',
+    'Sorcery',
+    'Artifact',
+    'Enchantment',
+    'Battle',
+    'Land',
+    'Other',
+  ];
+
+  const getCardType = (c: DeckCard): string => {
+    const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
+    if (type.includes('land')) return 'Land';
+    if (type.includes('creature')) return 'Creature';
+    if (type.includes('planeswalker')) return 'Planeswalker';
+    if (type.includes('instant')) return 'Instant';
+    if (type.includes('sorcery')) return 'Sorcery';
+    if (type.includes('artifact')) return 'Artifact';
+    if (type.includes('enchantment')) return 'Enchantment';
+    if (type.includes('battle')) return 'Battle';
+    return 'Other';
+  };
+
+  const groupedMain: Record<string, DeckCard[]> = {};
+  mainCards.forEach((c) => {
+    const cat = getCardType(c);
+    if (!groupedMain[cat]) groupedMain[cat] = [];
+    groupedMain[cat].push(c);
+  });
+
+  categoryOrder.forEach((cat) => {
+    const list = groupedMain[cat];
+    if (list && list.length > 0) {
+      const count = list.reduce((s, c) => s + c.quantity, 0);
+      lines.push(`${cat} (${count})`);
+      list
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+      lines.push('');
+    }
+  });
 
   if (sideCards.length > 0) {
     const count = sideCards.reduce((s, c) => s + c.quantity, 0);
     lines.push(`Sideboard (${count})`);
-    sideCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    sideCards
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    lines.push('');
+  }
+
+  if (maybeCards.length > 0) {
+    const count = maybeCards.reduce((s, c) => s + c.quantity, 0);
+    lines.push(`Maybeboard (${count})`);
+    maybeCards
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
     lines.push('');
   }
 
@@ -1132,11 +1250,68 @@ export async function createDeckListApi(deck: Deck): Promise<string> {
   }
 
   const rawOutput = await res.text();
-  const commanderInfo = getDeckCommander(deck);
-  const colorStyle = getDeckColorStyle(commanderInfo.colorIdentity);
-  const commanderCards = (deck.cards || []).filter((c) => c.category === 'commander');
+  const trimmed = rawOutput.trim();
 
-  return adjustDeckListBBCode(rawOutput, deck.name, colorStyle, commanderCards);
+  // Use the output directly from the API generation as it has the deck tags as desired already
+  if (/^\[deck/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Fallback wrapping if the API output does not yet contain [deck] tags
+  return `[deck=${deck.name || 'Deck'}]\n${trimmed}\n[/deck]`;
+}
+
+/**
+ * Resolves an MTGNexus URL (thread URL, post anchor, or direct edit URL) into a direct edit page URL.
+ * Automatically extracts post IDs (p=... or #p...) and converts to posting.php?mode=edit&p=...
+ * In either case, appends autoupdate=deck so the userscript automatically replaces the decklist.
+ * If only a topic ID is provided (viewtopic.php?t=...), appends autoupdate=deck so the userscript can auto-navigate.
+ */
+export function resolveMtgNexusEditUrl(rawUrl?: string): string {
+  if (!rawUrl || !rawUrl.trim()) return 'https://www.mtgnexus.com';
+  let urlStr = rawUrl.trim();
+  if (!/^https?:\/\//i.test(urlStr)) {
+    urlStr = 'https://' + urlStr;
+  }
+
+  try {
+    const url = new URL(urlStr);
+    // Normalize hostname to www.mtgnexus.com to ensure cookie / dark mode consistency
+    if (url.hostname === 'mtgnexus.com') {
+      url.hostname = 'www.mtgnexus.com';
+    }
+
+    // Already an edit URL - ensure autoupdate=deck is present
+    if (url.pathname.includes('posting.php') && url.searchParams.get('mode') === 'edit') {
+      url.searchParams.set('autoupdate', 'deck');
+      return url.toString();
+    }
+
+    // Check query params for post ID 'p'
+    let postId = url.searchParams.get('p');
+
+    // Check hash for post ID (e.g. #p12345 or #12345)
+    if (!postId && url.hash) {
+      const match = url.hash.match(/p?(\d+)/i);
+      if (match) {
+        postId = match[1];
+      }
+    }
+
+    if (postId) {
+      return `https://${url.hostname}/posting.php?mode=edit&p=${postId}&autoupdate=deck`;
+    }
+
+    // If thread URL with topic ID 't', append autoupdate=deck for userscript auto-redirect
+    if (url.pathname.includes('viewtopic.php')) {
+      url.searchParams.set('autoupdate', 'deck');
+      return url.toString();
+    }
+
+    return url.toString();
+  } catch {
+    return urlStr;
+  }
 }
 
 /**
