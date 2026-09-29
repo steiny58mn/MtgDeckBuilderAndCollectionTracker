@@ -1782,6 +1782,61 @@ export interface GamechangerCardInfo {
 /**
  * Detects all gamechangers in a deck strictly from Scryfall / card data flags.
  */
+const KNOWN_GAMECHANGERS = new Set([
+  'gamble',
+  'demonic tutor',
+  'sol ring',
+  'mana crypt',
+  'rhystic study',
+  'the one ring',
+  'cyclonic rift',
+  'dockside extortionist',
+  'thassa\'s oracle',
+  'underworld breach',
+  'necropotence',
+  'vampiric tutor',
+  'mystical tutor',
+  'worldly tutor',
+  'enlightened tutor',
+  'mana vault',
+  'jeweled lotus',
+  'mox diamond',
+  'chrome mox',
+  'mox opal',
+  'fierce guardianship',
+  'deflecting swat',
+  'flawless maneuver',
+  'deadly rollick',
+  'timetwister',
+  'wheel of fortune',
+  'yawgmoth\'s will',
+  'intuition',
+  'survival of the fittest',
+  'gilded drake',
+  'sylvan library',
+  'smothering tithe',
+  'force of will',
+  'force of negation',
+]);
+
+export function isCardGamechanger(card: any): boolean {
+  if (!card) return false;
+  const explicit = Boolean(
+    card.isGamechanger || 
+    card.is_gamechanger || 
+    card.game_changer ||
+    card.gameChanger ||
+    card.IsGamechanger ||
+    card.is_game_changer ||
+    card.GameChanger ||
+    card.gamechanger
+  );
+  if (explicit) return true;
+
+  const name = (card.name || '').split(' // ')[0].toLowerCase().trim();
+  return KNOWN_GAMECHANGERS.has(name);
+}
+
 export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
   if (!deck || !Array.isArray(deck.cards)) return [];
 
@@ -1794,18 +1849,7 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const cleanName = card.name.split(' // ')[0].trim();
     if (seenCardNames.has(cleanName)) return;
 
-    const isGamechanger = Boolean(
-      card.isGamechanger || 
-      card.is_gamechanger || 
-      card.game_changer ||
-      card.gameChanger ||
-      (card as any).IsGamechanger ||
-      (card as any).is_game_changer ||
-      (card as any).game_changer ||
-      (card as any).gameChanger ||
-      (card as any).GameChanger ||
-      (card as any).gamechanger
-    );
+    const isGamechanger = isCardGamechanger(card);
 
     if (isGamechanger) {
       seenCardNames.add(cleanName);

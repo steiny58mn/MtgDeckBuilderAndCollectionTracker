@@ -14,6 +14,7 @@ import {
   generateDeckPickListLocal,
   getDeckColorName,
   MTG_COLOR_NAMES,
+  isCardGamechanger,
 } from '../utils/deckUtils';
 
 // ============================================================================
@@ -171,7 +172,8 @@ export function normalizeCard(card: any): DeckCard {
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
-    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? card.game_changer ?? card.gameChanger ?? card.GameChanger ?? false),
+    isGamechanger: isCardGamechanger(card),
+    game_changer: isCardGamechanger(card),
   };
 }
 
