@@ -277,8 +277,12 @@ export default function App() {
     showToast(`Created draft "${newDeck.name}" - click Save when ready!`, 'info');
   };
 
-  const handleUpdateDeck = (updatedDeck: Deck) => {
-    DeckService.updateDeckInMemory(updatedDeck);
+  const handleUpdateDeck = (updatedDeck: Deck, markUnsaved = true) => {
+    if (markUnsaved) {
+      DeckService.updateDeckInMemory(updatedDeck);
+    } else {
+      DeckService.updateDeckMetadataInMemory(updatedDeck);
+    }
     setActiveDeck(updatedDeck);
   };
 

@@ -1859,7 +1859,9 @@ export class DeckService {
       this.inMemoryDecks.unshift({ ...normalized });
     }
     this.lastSavedDecks.set(normalized.id, JSON.parse(JSON.stringify(normalized)));
+    this.unsavedDeckIds.delete(normalized.id);
     this.notifyDecks();
+    this.notifyUnsavedChanges();
   }
 
   /**

@@ -77,7 +77,7 @@ export const getCardUnitPrice = (card: DeckCard): number => {
 interface DeckBuilderProps {
   deck: Deck;
   onBack: () => void;
-  onUpdateDeck: (deck: Deck) => void;
+  onUpdateDeck: (deck: Deck, markUnsaved?: boolean) => void;
   onSaveDeck?: (deckToSave: Deck) => Promise<void> | void;
   onDeleteDeck: (deckId: string) => void;
   onOpenSearch: (category?: DeckCategory | 'partner') => void;
@@ -113,8 +113,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showStats, setShowStats] = useState(false);
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
   const [showGamechangersDetails, setShowGamechangersDetails] = useState(false);
-  const gamechangers = useMemo(() => detectGamechangers(deck), [deck]);
-  const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
@@ -293,6 +291,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const isHistoricalView = selectedHistoryId !== 'current';
   const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
+  const gamechangers = useMemo(() => detectGamechangers(activeDeck), [activeDeck]);
+  const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
   const ownershipStats = useMemo(() => {
     let owned = 0;
     let needed = 0;
@@ -343,7 +343,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         if (!isCancelled && enrichedDeck && enrichedDeck !== deck) {
           DeckService.setLastSavedDeck(enrichedDeck);
           setSavedCards(JSON.parse(JSON.stringify(enrichedDeck.cards || [])));
-          onUpdateDeck(enrichedDeck);
+          DeckService.setDeckHasUnsavedChanges(deck.id, false);
+          setHasUnsavedChanges(false);
+          onUpdateDeck(enrichedDeck, false);
         }
       })
       .catch(() => {});
