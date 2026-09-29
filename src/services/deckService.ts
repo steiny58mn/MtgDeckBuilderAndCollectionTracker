@@ -399,7 +399,7 @@ export async function getRemoteDecks(): Promise<Deck[]> {
     return normalizedDecks;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ❌ Network/Fetch error in getRemoteDecks (${durationMs}ms):`, err);
+    console.warn(`[DeckService] ⚠️ Network/Fetch error in getRemoteDecks (${durationMs}ms) - using local fallback:`, err);
     console.groupEnd();
     return [];
   }
@@ -1463,7 +1463,7 @@ export async function getRemoteBinders(): Promise<Binder[]> {
     return normalizedBinders;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ❌ Network/Fetch error in getRemoteBinders (${durationMs}ms):`, err);
+    console.warn(`[DeckService] ⚠️ Network/Fetch error in getRemoteBinders (${durationMs}ms) - using local fallback:`, err);
     console.groupEnd();
     return [];
   }
