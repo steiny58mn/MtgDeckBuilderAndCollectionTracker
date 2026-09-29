@@ -329,7 +329,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         ...deck,
         cards: updatedCards,
       };
-      DeckService.updateDeckInMemory(enrichedDeck);
+      DeckService.updateDeckMetadataInMemory(enrichedDeck);
       return enrichedDeck;
     }
   } catch (err) {
@@ -1845,6 +1845,21 @@ export class DeckService {
     this.unsavedDeckIds.add(normalized.id);
     this.notifyDecks();
     this.notifyUnsavedChanges();
+  }
+
+  /**
+   * Update deck metadata (like card gamechanger flags or types) in-memory without marking unsaved.
+   */
+  static updateDeckMetadataInMemory(deck: Deck): void {
+    const normalized = normalizeDeck(deck);
+    const idx = this.inMemoryDecks.findIndex((d) => d.id === normalized.id);
+    if (idx >= 0) {
+      this.inMemoryDecks[idx] = { ...normalized };
+    } else {
+      this.inMemoryDecks.unshift({ ...normalized });
+    }
+    this.lastSavedDecks.set(normalized.id, JSON.parse(JSON.stringify(normalized)));
+    this.notifyDecks();
   }
 
   /**
