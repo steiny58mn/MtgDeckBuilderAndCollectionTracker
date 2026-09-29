@@ -55,6 +55,7 @@ import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
+import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -94,6 +95,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [format, setFormat] = useState<MTGFormat>(deck.format);
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [priceRefreshMessage, setPriceRefreshMessage] = useState<string | null>(null);
+  const [isNexusSyncing, setIsNexusSyncing] = useState(false);
+  const [nexusSyncToast, setNexusSyncToast] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
@@ -117,10 +120,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     } catch {}
     return 'grid'; // Default the display to a grid
   });
-  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category'>(() => {
+  const [sortCardsBy, setSortCardsBy] = useState<'name' | 'cmc' | 'color' | 'category' | 'price'>(() => {
     try {
       const saved = localStorage.getItem('deck_builder_sort_by');
-      if (saved === 'name' || saved === 'cmc' || saved === 'color' || saved === 'category') return saved;
+      if (saved === 'name' || saved === 'cmc' || saved === 'color' || saved === 'category' || saved === 'price') return saved as any;
     } catch {}
     return 'name';
   });
@@ -723,6 +726,36 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
   };
 
+  const handleSyncMtgNexus = async () => {
+    const targetNexusUrl = nexusUrl.trim() || deck.mtgNexusEditThreadUrl || '';
+    if (!targetNexusUrl) return;
+
+    setIsNexusSyncing(true);
+    try {
+      let textToCopy = '';
+      try {
+        textToCopy = await DeckService.createDeckList(activeDeck);
+      } catch {
+        textToCopy = generateExportContent('bbcode', activeDeck);
+      }
+
+      if (textToCopy) {
+        await navigator.clipboard.writeText(textToCopy);
+      }
+
+      const targetUrl = resolveMtgNexusEditUrl(targetNexusUrl);
+      window.open(targetUrl, '_blank', 'noopener');
+      setNexusSyncToast('BBCode copied to clipboard! Opening MTGNexus...');
+      setTimeout(() => setNexusSyncToast(null), 3500);
+    } catch (err) {
+      console.error('Failed to automated sync with MTGNexus:', err);
+      const targetUrl = resolveMtgNexusEditUrl(targetNexusUrl);
+      window.open(targetUrl, '_blank', 'noopener');
+    } finally {
+      setIsNexusSyncing(false);
+    }
+  };
+
   const stats = calculateDeckStats(activeDeck, statsScope);
 
   // Commander calculations
@@ -1098,9 +1131,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         const catA = getCardCategorySortOrder(a);
         const catB = getCardCategorySortOrder(b);
         if (catA !== catB) return catA - catB;
-        const cmcA = a.cmc || 0;
-        const cmcB = b.cmc || 0;
-        if (cmcA !== cmcB) return cmcA - cmcB;
+        // When sorting by category, sort them by name within the category
+        return a.name.localeCompare(b.name);
+      }
+      if (sortCardsBy === 'price') {
+        const priceA = getCardUnitPrice(a);
+        const priceB = getCardUnitPrice(b);
+        if (priceA !== priceB) return priceB - priceA; // Highest price first
         return a.name.localeCompare(b.name);
       }
       if (sortCardsBy === 'cmc') {
@@ -1144,7 +1181,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const sideCards = rawSideCards.filter(matchesCardFilter);
   const maybeCards = rawMaybeCards.filter(matchesCardFilter);
 
-  // Subgroup mainboard cards by Type
+  // Subgroup mainboard cards by Type (with cards sorted alphabetically by name within each category)
   const groupCardsByType = (cards: DeckCard[]) => {
     const groups: Record<string, DeckCard[]> = {
       'Creatures': [],
@@ -1163,6 +1200,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       else if (t.includes('planeswalker')) groups['Planeswalkers'].push(c);
       else if (t.includes('land')) groups['Lands'].push(c);
       else groups['Other'].push(c);
+    });
+
+    // Ensure all cards within each type category are sorted by name
+    Object.keys(groups).forEach((key) => {
+      groups[key].sort((a, b) => a.name.localeCompare(b.name));
     });
 
     return groups;
@@ -1670,15 +1712,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     />
                   </div>
                   {nexusUrl && (
-                    <a
-                      href={nexusUrl.startsWith('http') ? nexusUrl : `https://${nexusUrl}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors shrink-0"
-                      title="Open MTGNexus URL in new tab"
+                    <button
+                      type="button"
+                      onClick={handleSyncMtgNexus}
+                      disabled={isNexusSyncing}
+                      className="px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-500/50 text-emerald-300 hover:text-emerald-200 transition-all shrink-0 cursor-pointer flex items-center gap-1.5 text-xs font-bold shadow-xs disabled:opacity-50"
+                      title="Automated Sync: Copy BBCode & Open MTGNexus in new tab"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                      {isNexusSyncing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      <span className="hidden sm:inline">{isNexusSyncing ? 'Syncing...' : 'Sync'}</span>
+                      <ExternalLink className="w-3 h-3 text-emerald-400/80" />
+                    </button>
                   )}
                 </div>
 
@@ -1815,8 +1863,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Toast feedback */}
           {priceRefreshMessage && (
-            <div className="py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs text-center font-medium">
+            <div className="py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs text-center font-medium animate-in fade-in duration-150">
               {priceRefreshMessage}
+            </div>
+          )}
+          {nexusSyncToast && (
+            <div className="py-1 px-2.5 rounded-lg bg-emerald-950/90 border border-emerald-500/80 text-emerald-200 text-xs text-center font-bold flex items-center justify-center gap-1.5 shadow-lg animate-in fade-in duration-150">
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{nexusSyncToast}</span>
             </div>
           )}
         </div>
@@ -1991,11 +2045,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Sort By */}
           <select
             value={sortCardsBy}
-            onChange={(e) => setSortCardsBy(e.target.value as 'name' | 'cmc' | 'color' | 'category')}
-            className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2 py-1.5 text-slate-300 focus:outline-none"
+            onChange={(e) => setSortCardsBy(e.target.value as 'name' | 'cmc' | 'color' | 'category' | 'price')}
+            className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2 py-1.5 text-slate-300 focus:outline-none cursor-pointer"
           >
-            <option value="name">A-Z</option>
+            <option value="name">Name (A-Z)</option>
             <option value="category">Category (Lands at bottom)</option>
+            <option value="price">Price ($ High to Low)</option>
             <option value="cmc">Mana Value</option>
             <option value="color">Color</option>
           </select>
@@ -2150,7 +2205,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               {renderCommanderPanel()}
               {viewMode === 'piles' ? (
                 renderPilesView(mainCards)
-              ) : (
+              ) : sortCardsBy === 'category' ? (
                 Object.entries(groupedMain).map(([groupTitle, cardsInGroup]) => {
                   if (cardsInGroup.length === 0) return null;
                   const groupTotalQty = cardsInGroup.reduce((a, b) => a + b.quantity, 0);
@@ -2166,6 +2221,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     </div>
                   );
                 })
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-400 border-b border-slate-800 pb-1">
+                    <span>
+                      {sortCardsBy === 'name'
+                        ? 'All Cards (Alphabetical A-Z)'
+                        : sortCardsBy === 'price'
+                        ? 'All Cards (Sorted by Price High to Low)'
+                        : sortCardsBy === 'cmc'
+                        ? 'All Cards (Sorted by Mana Value)'
+                        : 'All Cards (Sorted by Color)'}
+                    </span>
+                    <span className="text-violet-400 font-mono">
+                      ({mainCards.reduce((s, c) => s + (c.quantity || 1), 0)} cards)
+                    </span>
+                  </div>
+
+                  {renderCardListOrGrid(mainCards)}
+                </div>
               )}
 
               {mainCards.length === 0 && (
@@ -2645,8 +2719,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     totalPrice: number;
   }
 
-  function groupCardsIntoPiles(cards: DeckCard[], sortBy: 'category' | 'cmc' | 'color' | 'name'): PileGroup[] {
+  function groupCardsIntoPiles(cards: DeckCard[], sortBy: 'category' | 'cmc' | 'color' | 'name' | 'price'): PileGroup[] {
     if (cards.length === 0) return [];
+
+    if (sortBy === 'price') {
+      const priceBrackets = [
+        { key: 'p50', title: '$50+', min: 50, max: Infinity },
+        { key: 'p20', title: '$20 - $50', min: 20, max: 50 },
+        { key: 'p10', title: '$10 - $20', min: 10, max: 20 },
+        { key: 'p5', title: '$5 - $10', min: 5, max: 10 },
+        { key: 'p2', title: '$2 - $5', min: 2, max: 5 },
+        { key: 'p1', title: '$1 - $2', min: 1, max: 2 },
+        { key: 'p0', title: 'Under $1', min: 0, max: 1 },
+      ];
+
+      const priceMap = new Map<string, DeckCard[]>();
+      priceBrackets.forEach((b) => priceMap.set(b.key, []));
+
+      cards.forEach((c) => {
+        const price = getCardUnitPrice(c);
+        const bracket = priceBrackets.find((b) => price >= b.min && price < b.max) || priceBrackets[priceBrackets.length - 1];
+        priceMap.get(bracket.key)!.push(c);
+      });
+
+      const piles: PileGroup[] = [];
+      priceBrackets.forEach((b) => {
+        const pileCards = priceMap.get(b.key) || [];
+        if (pileCards.length > 0) {
+          pileCards.sort((a, b) => getCardUnitPrice(b) - getCardUnitPrice(a) || a.name.localeCompare(b.name));
+          piles.push({
+            id: `price-${b.key}`,
+            title: b.title,
+            cards: pileCards,
+            totalQuantity: pileCards.reduce((s, c) => s + (c.quantity || 1), 0),
+            totalPrice: pileCards.reduce((s, c) => s + (Number(getCardUnitPrice(c)) || 0) * (c.quantity || 1), 0),
+          });
+        }
+      });
+      return piles;
+    }
 
     if (sortBy === 'cmc') {
       const cmcMap = new Map<string, DeckCard[]>();
@@ -2763,7 +2874,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       catOrder.forEach((title) => {
         const pileCards = catMap.get(title) || [];
         if (pileCards.length > 0) {
-          pileCards.sort((a, b) => (a.cmc || 0) - (b.cmc || 0) || a.name.localeCompare(b.name));
+          // When sorting by category, sort cards alphabetically by name within each category pile
+          pileCards.sort((a, b) => a.name.localeCompare(b.name));
           piles.push({
             id: `cat-${title}`,
             title,

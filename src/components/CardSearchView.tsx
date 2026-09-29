@@ -754,7 +754,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       
       let processedData = res.data;
       
-      // Client-side sorting for Category (Lands at bottom)
+      // Client-side sorting for Category (Lands at bottom, sorted by name within category)
       if (sortBy === 'category') {
         processedData.sort((a, b) => {
           const priorityA = getCardCategorySortOrder(a);
@@ -762,9 +762,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           if (priorityA !== priorityB) {
             return sortDir === 'desc' ? priorityB - priorityA : priorityA - priorityB;
           }
-          const cmcA = a.cmc || 0;
-          const cmcB = b.cmc || 0;
-          if (cmcA !== cmcB) return cmcA - cmcB;
           return a.name.localeCompare(b.name);
         });
       }

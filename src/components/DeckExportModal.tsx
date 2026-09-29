@@ -92,7 +92,7 @@ interface DeckExportModalProps {
   onImportOverwriteDeck?: (overwrittenDeck: Deck, originalDeck: Deck) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
   onUpdateNexusUrl?: (url: string) => void;
-  initialTab?: 'export' | 'import';
+  initialTab?: 'export' | 'import' | 'proxy' | 'nexus';
 }
 
 export const DeckExportModal: React.FC<DeckExportModalProps> = ({
@@ -116,7 +116,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
   const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
   const [targetDeckToOverwrite, setTargetDeckToOverwrite] = useState<Deck | null>(deck || (existingDecks.length > 0 ? existingDecks[0] : null));
-  const [activeTab, setActiveTab] = useState<'export' | 'import' | 'proxy'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'export' | 'import' | 'proxy' | 'nexus'>(initialTab);
   
   // Proxy Printing State
   const [proxyScope, setProxyScope] = useState<'main' | 'all'>('main');
@@ -470,13 +470,16 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '  <style>',
       '    @page {',
       '      size: letter portrait;',
-      '      margin: 0mm;',
+      '      margin: 0 !important;',
       '    }',
       '    @page :left {',
-      '      margin: 0mm;',
+      '      margin: 0 !important;',
       '    }',
       '    @page :right {',
-      '      margin: 0mm;',
+      '      margin: 0 !important;',
+      '    }',
+      '    @page :first {',
+      '      margin: 0 !important;',
       '    }',
       '    *, *:before, *:after {',
       '      box-sizing: border-box;',
@@ -484,10 +487,11 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '      print-color-adjust: exact !important;',
       '    }',
       '    html, body {',
-      '      margin: 0;',
-      '      padding: 0;',
+      '      margin: 0 !important;',
+      '      padding: 0 !important;',
       '      background: #0f172a;',
       '      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
+      '      -webkit-font-smoothing: antialiased;',
       '    }',
       '    .floating-print-bar {',
       '      position: fixed;',
@@ -538,23 +542,25 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '      justify-content: center;',
       '      box-shadow: 0 8px 30px rgba(0,0,0,0.4);',
       '      position: relative;',
+      '      page-break-inside: avoid;',
+      '      break-inside: avoid;',
       '    }',
       '    .grid {',
       '      display: grid;',
       '      grid-template-columns: repeat(3, 63mm);',
-      '      grid-template-rows: repeat(3, 88mm);',
+      '      grid-template-rows: repeat(3, 87.5mm);',
       '      width: 189mm;',
-      '      height: 264mm;',
+      '      height: 262.5mm;',
       '      gap: 0;',
       '      margin: auto;',
-      '      border: 0.25mm solid #cbd5e1;',
+      '      border: 0.2mm solid #cbd5e1;',
       '      background: white;',
       '    }',
       '    .card-slot {',
       '      width: 63mm;',
-      '      height: 88mm;',
+      '      height: 87.5mm;',
       '      box-sizing: border-box;',
-      '      border: 0.25mm dashed #cbd5e1;',
+      '      border: 0.2mm dashed #cbd5e1;',
       '      overflow: hidden;',
       '      display: flex;',
       '      align-items: center;',
@@ -568,7 +574,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '      object-fit: fill;',
       '      display: block;',
       '    }',
-      '    .empty-slot { background: #ffffff; border: 0.25mm dashed #e2e8f0; }',
+      '    .empty-slot { background: #ffffff; border: 0.2mm dashed #e2e8f0; }',
       '    .card-placeholder {',
       '      padding: 10px;',
       '      text-align: center;',
@@ -585,9 +591,13 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '    .ph-type { font-size: 10px; color: #64748b; }',
       '    .ph-mana { font-size: 10px; font-family: monospace; color: #7c3aed; font-weight: 700; }',
       '    @media print {',
+      '      @page {',
+      '        size: letter portrait;',
+      '        margin: 0 !important;',
+      '      }',
       '      html, body {',
-      '        width: 8.5in !important;',
-      '        height: 11.0in !important;',
+      '        width: 100% !important;',
+      '        height: 100% !important;',
       '        background: white !important;',
       '        margin: 0 !important;',
       '        padding: 0 !important;',
@@ -595,12 +605,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '      .floating-print-bar { display: none !important; }',
       '      .sheets-container { padding: 0 !important; gap: 0 !important; }',
       '      .sheet {',
-      '        width: 8.5in !important;',
-      '        height: 11.0in !important;',
-      '        max-height: 11.0in !important;',
+      '        width: 100vw !important;',
+      '        height: 100vh !important;',
+      '        min-height: 100vh !important;',
+      '        max-height: 100vh !important;',
       '        box-shadow: none !important;',
-      '        margin: 0 auto !important;',
+      '        margin: 0 !important;',
       '        padding: 0 !important;',
+      '        page-break-before: always !important;',
+      '        break-before: page !important;',
       '        page-break-after: always !important;',
       '        break-after: page !important;',
       '        page-break-inside: avoid !important;',
@@ -608,6 +621,10 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '        display: flex !important;',
       '        align-items: center !important;',
       '        justify-content: center !important;',
+      '      }',
+      '      .sheet:first-child {',
+      '        page-break-before: auto !important;',
+      '        break-before: auto !important;',
       '      }',
       '      .sheet.last-sheet {',
       '        page-break-after: auto !important;',
@@ -619,7 +636,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '</head>',
       '<body>',
       '  <div class="floating-print-bar">',
-      '    <div class="print-hint"><b>' + cardsToPrint.length + ' cards</b> (' + totalPages + ' sheet' + (totalPages === 1 ? '' : 's') + ') • In print dialog, set <i>Margins: None</i></div>',
+      '    <div class="print-hint"><b>' + cardsToPrint.length + ' cards</b> (' + totalPages + ' sheet' + (totalPages === 1 ? '' : 's') + ') • Set <i>Margins: None</i> and uncheck <i>Headers and footers</i> in print dialog</div>',
       '    <button class="print-btn" onclick="window.print();">🖨️ Print Now</button>',
       '  </div>',
       '  <div class="sheets-container">',
@@ -1267,11 +1284,27 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
         <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/20 flex items-center justify-center text-fuchsia-400 font-bold shrink-0">
-              {activeTab === 'export' ? <Download className="w-5 h-5" /> : <Upload className="w-5 h-5" />}
+              {activeTab === 'export' ? (
+                <Download className="w-5 h-5" />
+              ) : activeTab === 'proxy' ? (
+                <Printer className="w-5 h-5 text-violet-400" />
+              ) : activeTab === 'nexus' ? (
+                <Zap className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <Upload className="w-5 h-5" />
+              )}
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span>{activeTab === 'export' ? 'Export Deck' : 'Import Deck'}</span>
+                <span>
+                  {activeTab === 'export'
+                    ? 'Export Deck'
+                    : activeTab === 'proxy'
+                    ? 'Print Proxies'
+                    : activeTab === 'nexus'
+                    ? 'MTGNexus Automated Sync'
+                    : 'Import Deck'}
+                </span>
                 {deck && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-fuchsia-400 border border-slate-700 font-normal truncate max-w-[200px]">
                     {deck.name}
@@ -1281,6 +1314,10 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               <p className="text-xs text-slate-400">
                 {activeTab === 'export'
                   ? 'Export in 9 formats including live MTGNexus BBCode, physical picklist, MTGO, and Excel.'
+                  : activeTab === 'proxy'
+                  ? 'Generates true-to-scale 63mm × 88mm MTG proxy sheets in a clean 3×3 grid.'
+                  : activeTab === 'nexus'
+                  ? '1-click automated forum sync. Copies your formatted BBCode decklist and opens your thread or edit form.'
                   : 'Import single or multiple deck files (.txt, .dek, .csv, .tsv) or paste text.'}
               </p>
             </div>
@@ -1295,8 +1332,8 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Toggle: Export vs Import */}
-        <div className="px-5 pt-2.5 pb-2 border-b border-slate-800 flex items-center gap-2 bg-slate-900">
+        {/* Tab Toggle: Export vs Import vs Proxies vs MTGNexus */}
+        <div className="px-5 pt-2.5 pb-2 border-b border-slate-800 flex items-center gap-2 bg-slate-900 flex-wrap">
           {deck && (
             <button
               onClick={() => setActiveTab('export')}
@@ -1333,12 +1370,26 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               onClick={() => setActiveTab('proxy')}
               className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'proxy'
-                  ? 'bg-fuchsia-500 text-slate-950 shadow-md'
+                  ? 'bg-violet-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Printer className="w-3.5 h-3.5" />
               <span>Print Proxies</span>
+            </button>
+          )}
+
+          {deck && (
+            <button
+              onClick={() => setActiveTab('nexus')}
+              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'nexus'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>MTGNexus Sync</span>
             </button>
           )}
         </div>
@@ -1687,65 +1738,19 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
               </div>
 
               {selectedExportFormat === 'bbcode' && (
-                <div className="my-3 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900 to-sky-950/70 border border-emerald-500/40 shadow-lg space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        <Zap className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                          <span>MTGNexus Automated Sync</span>
-                          <span className="px-1.5 py-0.2 rounded-md bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
-                            Userscript
-                          </span>
-                        </h4>
-                        <p className="text-[11px] text-slate-400">
-                          Automatically find and replace <code className="text-emerald-300 font-mono">[deck]...[/deck]</code> in your first thread post.
-                          {' '}<span className="text-slate-500">(Requires free <a href="https://www.tampermonkey.net" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline inline-flex items-center gap-0.5">Tampermonkey <ExternalLink className="w-2.5 h-2.5" /></a> extension)</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <a
-                        href="/scripts/mtgnexus-deck-sync.user.js"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-semibold border border-emerald-600/40 cursor-pointer transition-colors"
-                        title="Install directly into Tampermonkey / Violentmonkey"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Install Userscript</span>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={handleCopyUserscript}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer transition-colors"
-                      >
-                        {copiedUserscriptToast ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        <span>{copiedUserscriptToast ? 'Script Copied!' : 'Copy Script'}</span>
-                      </button>
-                    </div>
+                <div className="my-2.5 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-emerald-300">
+                    <Zap className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Looking for 1-click automated forum sync with Tampermonkey?</span>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80">
-                    <input
-                      type="url"
-                      value={nexusThreadUrl}
-                      onChange={(e) => handleSaveNexusUrl(e.target.value)}
-                      placeholder="Your MTGNexus Thread / Edit URL (e.g. https://www.mtgnexus.com/viewtopic.php?t=...)"
-                      className="flex-1 min-w-[240px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCopyAndOpenNexus}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
-                    >
-                      <Zap className="w-3.5 h-3.5" />
-                      <span>Copy &amp; Open {nexusThreadUrl.includes('posting.php') || nexusThreadUrl.includes('mode=edit') || nexusThreadUrl.includes('p=') ? 'Edit Page' : 'Thread'}</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('nexus')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 hover:bg-emerald-400 text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Go to MTGNexus Sync Tab</span>
+                  </button>
                 </div>
               )}
 
@@ -1861,6 +1866,178 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                     className="flex-1 w-full min-h-[220px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-300 focus:outline-none select-all resize-none"
                   />
                 </div>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'nexus' && deck ? (
+          /* =================== MTGNEXUS SYNC TAB =================== */
+          <div className="flex-1 min-h-0 flex flex-col p-4 sm:p-5 bg-slate-900 overflow-y-auto space-y-4">
+            {/* Top Overview & Instructions */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-950/90 to-sky-950/80 border border-emerald-500/40 shadow-lg space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>MTGNexus Automated 1-Click Forum Sync</span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                        Userscript Ready
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      Sync your formatted decklist directly into MTGNexus forum primers and threads in one click.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a
+                    href="/scripts/mtgnexus-deck-sync.user.js"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+                    title="Install directly into Tampermonkey / Violentmonkey"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Install Userscript</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopyUserscript}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer transition-colors shrink-0"
+                  >
+                    {copiedUserscriptToast ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedUserscriptToast ? 'Script Copied!' : 'Copy Script Code'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* How it works 3-step banner */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800/80 text-xs">
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
+                  <div className="text-slate-300">
+                    <strong className="text-white block font-semibold">Install Userscript</strong>
+                    Install the script once in <a href="https://www.tampermonkey.net" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Tampermonkey</a>.
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
+                  <div className="text-slate-300">
+                    <strong className="text-white block font-semibold">Set Thread URL</strong>
+                    Paste your MTGNexus thread or edit URL below.
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-[11px]">3</span>
+                  <div className="text-slate-300">
+                    <strong className="text-white block font-semibold">1-Click Sync</strong>
+                    Click Sync: BBCode is copied &amp; auto-updated on page load!
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Target URL & Sync Actions Card */}
+            <div className="p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>MTGNexus Thread or Direct Edit URL</span>
+                </label>
+                {nexusThreadUrl && (
+                  <span className="text-[11px] font-mono text-emerald-400">
+                    Target: {resolveMtgNexusEditUrl(nexusThreadUrl).includes('mode=edit') ? 'Direct Edit Form' : 'Thread Post'}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="url"
+                  value={nexusThreadUrl}
+                  onChange={(e) => handleSaveNexusUrl(e.target.value)}
+                  placeholder="https://www.mtgnexus.com/viewtopic.php?t=... or posting.php?mode=edit..."
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 focus:border-emerald-500 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleCopyAndOpenNexus}
+                  disabled={!nexusThreadUrl.trim() || isApiLoading}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 text-xs font-extrabold transition-all shadow-md cursor-pointer shrink-0"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>
+                    {copied
+                      ? 'BBCode Copied & Opening...'
+                      : `Copy BBCode & Open ${nexusThreadUrl.includes('posting.php') || nexusThreadUrl.includes('mode=edit') || nexusThreadUrl.includes('p=') ? 'Edit Form' : 'Thread'}`}
+                  </span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                <span>URL is automatically saved and linked to this deck across sessions.</span>
+                {nexusThreadUrl && (
+                  <a
+                    href={resolveMtgNexusEditUrl(nexusThreadUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    <span>Test opening target URL</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Live BBCode Output Preview Section */}
+            <div className="flex-1 min-h-[220px] flex flex-col space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <Code className="w-4 h-4 text-fuchsia-400" />
+                  <span className="font-semibold text-slate-200">Active MTGNexus BBCode Output</span>
+                  <span className="text-slate-500">({deck.cards.reduce((s, c) => s + c.quantity, 0)} cards)</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRetryApiTrigger((prev) => prev + 1)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors cursor-pointer"
+                    title="Regenerate BBCode from API"
+                  >
+                    <RefreshCw className="w-3 h-3 text-slate-400" />
+                    <span>Refresh</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyExport(exportedContent || generateExportContent('bbcode', deck))}
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+                  >
+                    {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                    <span>{copied ? 'Copied!' : 'Copy BBCode Only'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 relative flex flex-col min-h-[180px]">
+                {isApiLoading && (
+                  <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-xs rounded-xl flex flex-col items-center justify-center gap-2 text-slate-300 text-xs z-10 border border-slate-800">
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                    <span>Generating MTGNexus BBCode from API...</span>
+                  </div>
+                )}
+                <textarea
+                  readOnly
+                  value={exportedContent || generateExportContent('bbcode', deck)}
+                  placeholder="Generating MTGNexus BBCode..."
+                  className="flex-1 w-full min-h-[180px] bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-300 focus:outline-none select-all resize-none"
+                />
               </div>
             </div>
           </div>
