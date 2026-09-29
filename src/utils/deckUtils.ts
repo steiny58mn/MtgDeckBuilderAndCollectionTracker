@@ -1779,117 +1779,8 @@ export interface GamechangerCardInfo {
   tier: 'S+' | 'S' | 'A';
 }
 
-interface GamechangerDefinition {
-  category: GamechangerCategory;
-  categoryLabel: string;
-  badgeBg: string;
-  badgeBorder: string;
-  badgeText: string;
-  icon: string;
-  impactReason: string;
-  tier: 'S+' | 'S' | 'A';
-}
-
-const GAMECHANGER_REGISTRY: Record<string, GamechangerDefinition> = {
-  // Fast Mana & Explosive Ramp
-  'Mana Crypt': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Zero-mana artifact providing +2 colorless mana each turn', tier: 'S+' },
-  'Jeweled Lotus': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Zero-mana burst casting commanders up to 3 turns ahead of curve', tier: 'S+' },
-  'Sol Ring': { category: 'fast_mana', categoryLabel: 'Fast Mana Staple', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Format-defining positive mana acceleration', tier: 'S' },
-  'Mana Vault': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'High explosive tempo mana (+3 mana on turn 1)', tier: 'S' },
-  'Dockside Extortionist': { category: 'fast_mana', categoryLabel: 'Explosive Treasure Ramp', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Explosive Treasure generation scaling with all opponents', tier: 'S+' },
-  'Mox Diamond': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Zero-mana colored acceleration', tier: 'S' },
-  'Chrome Mox': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Zero-mana colored ramp exiled card imprint', tier: 'S' },
-  'Mox Opal': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Zero-mana metalcraft colored mana generator', tier: 'A' },
-  'Mox Amber': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: '0-mana legendary ramp', tier: 'A' },
-  'Lotus Petal': { category: 'fast_mana', categoryLabel: 'Fast Mana Ramp', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: '0-mana one-shot storm and combo acceleration', tier: 'A' },
-  'Grim Monolith': { category: 'fast_mana', categoryLabel: 'Fast Mana Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Burst mana engine and infinite mana enabler with Power Artifact', tier: 'S' },
-  'Ancient Tomb': { category: 'fast_mana', categoryLabel: 'Fast Mana Land', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Unconditional +2 colorless land on turn 1', tier: 'S' },
-  'Gaea\'s Cradle': { category: 'fast_mana', categoryLabel: 'Massive Mana Land', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Produces massive green mana scaling with your battlefield', tier: 'S+' },
-  'Cabal Coffers': { category: 'fast_mana', categoryLabel: 'Massive Mana Land', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Exponential black mana generation with Swamps / Urborg', tier: 'A' },
-  'Jeska\'s Will': { category: 'fast_mana', categoryLabel: 'Explosive Advantage', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Massive red burst mana + pseudo-draw impulse engine', tier: 'S' },
-  'Smothering Tithe': { category: 'fast_mana', categoryLabel: 'Treasure Tax Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Relentless treasure generation off opponent card draws', tier: 'S' },
-  'Nyxbloom Ancient': { category: 'fast_mana', categoryLabel: 'Mana Tripler', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Triples mana output from all permanents you control', tier: 'A' },
-  'Seedborn Muse': { category: 'fast_mana', categoryLabel: 'Untap Engine', badgeBg: 'bg-amber-950/80', badgeBorder: 'border-amber-500/50', badgeText: 'text-amber-300', icon: '⚡', impactReason: 'Untaps all your permanents on every opponent\'s turn', tier: 'S' },
-
-  // Free Spells & Traps
-  'Fierce Guardianship': { category: 'free_spell', categoryLabel: 'Free Interaction', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free noncreature counterspell while controlling your commander', tier: 'S+' },
-  'Deflecting Swat': { category: 'free_spell', categoryLabel: 'Free Redirect', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free spell and ability retargeting with commander in play', tier: 'S+' },
-  'Deadly Rollick': { category: 'free_spell', categoryLabel: 'Free Exile Removal', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free instant-speed creature exile with commander in play', tier: 'S' },
-  'Force of Will': { category: 'free_spell', categoryLabel: 'Free Counterspell', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Unconditional free counterspell by exiling a blue card', tier: 'S+' },
-  'Force of Negation': { category: 'free_spell', categoryLabel: 'Free Counterspell', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free noncreature counterspell during opponents\' turns', tier: 'S' },
-  'Pact of Negation': { category: 'free_spell', categoryLabel: 'Free Counterspell', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: '0-mana emergency counterspell to protect game-winning turns', tier: 'S' },
-  'Mindbreak Trap': { category: 'free_spell', categoryLabel: 'Free Anti-Storm Trap', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free mass exile of uncounterable spells and storm stacks', tier: 'S' },
-  'Flawless Maneuver': { category: 'free_spell', categoryLabel: 'Free Board Protection', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Free indestructible team protection against damage/destroy wipes', tier: 'A' },
-  'Teferi\'s Protection': { category: 'free_spell', categoryLabel: 'Total Immunity Phase', badgeBg: 'bg-sky-950/80', badgeBorder: 'border-sky-500/50', badgeText: 'text-sky-300', icon: '🛡️', impactReason: 'Complete untargetability and board preservation until next turn', tier: 'S+' },
-
-  // Win Conditions & Game-Ending Finishers
-  'Thassa\'s Oracle': { category: 'win_con', categoryLabel: 'Instant Win Condition', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Compact 2-mana victory with empty library (Tainted Pact / Consultation)', tier: 'S+' },
-  'Craterhoof Behemoth': { category: 'win_con', categoryLabel: 'Lethal Overrun Finisher', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Immediate game-ending massive power boost and trample across the board', tier: 'S' },
-  'Torment of Hailfire': { category: 'win_con', categoryLabel: 'Game-Ending Finisher', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Devastating life drain and board obliteration with high mana', tier: 'S' },
-  'Triumph of the Hordes': { category: 'win_con', categoryLabel: 'Infect Win Finisher', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Grants infect and +1/+1 trample to close out 3 opponents at once', tier: 'A' },
-  'Expropriate': { category: 'win_con', categoryLabel: 'Extra Turns Bomb', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Steals best permanent from opponents or grants multiple consecutive turns', tier: 'S' },
-  'Time Stretch': { category: 'win_con', categoryLabel: 'Consecutive Extra Turns', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Takes two extra turns back-to-back to solidify victory', tier: 'A' },
-  'Nexus of Fate': { category: 'win_con', categoryLabel: 'Instant Extra Turn', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Instant-speed extra turn that shuffles back indefinitely', tier: 'A' },
-  'Finale of Devastation': { category: 'win_con', categoryLabel: 'Tutor + Massive Haste Pump', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Tutors any creature into play; gives +X/+X and haste at X >= 10', tier: 'S' },
-  'Tooth and Nail': { category: 'win_con', categoryLabel: '2-Creature Combo Finisher', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Entwines to tutor and directly cheat 2 game-winning creatures into play', tier: 'S' },
-  'Aetherflux Reservoir': { category: 'win_con', categoryLabel: 'Storm Laser Wincon', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Exponential life gain into 50-damage laser shots to eliminate players', tier: 'A' },
-  'Underworld Breach': { category: 'win_con', categoryLabel: 'Recursive Combo Engine', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Gives all cards escape to enable infinite storm / mana / recursion loops', tier: 'S+' },
-  'Bolas\'s Citadel': { category: 'win_con', categoryLabel: 'Deck-Cast Win Engine', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Cast entire library by paying life; taps to deal 10 to all opponents', tier: 'S+' },
-  'Insurrection': { category: 'win_con', categoryLabel: 'Mass Creature Theft Finisher', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Untaps and steals every creature on board with haste for an alpha strike', tier: 'A' },
-  'Rise of the Dark Realms': { category: 'win_con', categoryLabel: 'Mass Graveyard Reanimation', badgeBg: 'bg-fuchsia-950/80', badgeBorder: 'border-fuchsia-500/50', badgeText: 'text-fuchsia-300', icon: '👑', impactReason: 'Puts all creature cards from all graveyards onto your battlefield', tier: 'A' },
-
-  // Asymmetric Board Wipes & Mass Removals
-  'Cyclonic Rift': { category: 'board_wipe', categoryLabel: 'Asymmetric Board Wipe', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: 'Instant-speed overload bouncing all nonland permanents opponents control', tier: 'S+' },
-  'Farewell': { category: 'board_wipe', categoryLabel: 'Modal Mass Exile', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: 'Modular mass exile bypassing indestructible and death triggers completely', tier: 'S' },
-  'Toxic Deluge': { category: 'board_wipe', categoryLabel: 'Efficient -X/-X Wipe', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: '3-mana board clear bypassing indestructible by paying life', tier: 'S' },
-  'Sunfall': { category: 'board_wipe', categoryLabel: 'Exile Wipe + Incubate', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: 'Exiles all creatures and creates a giant incubator token', tier: 'A' },
-  'Ruinous Ultimatum': { category: 'board_wipe', categoryLabel: 'One-Sided Board Wipe', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: 'Destroys all nonland permanents opponents control without touching yours', tier: 'S' },
-  'Living Death': { category: 'board_wipe', categoryLabel: 'Mass Wipe + Reanimation', badgeBg: 'bg-indigo-950/80', badgeBorder: 'border-indigo-500/50', badgeText: 'text-indigo-300', icon: '🌀', impactReason: 'Simultaneously wipes all boards and reanimates entire graveyards', tier: 'A' },
-
-  // Mass Advantage & Card Engines
-  'The One Ring': { category: 'value_engine', categoryLabel: 'Exponential Card Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Protection from everything + exponential repeatable card draw', tier: 'S+' },
-  'Rhystic Study': { category: 'value_engine', categoryLabel: 'Continuous Tax Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Draws a card on virtually every opponent spell or forces mana taxation', tier: 'S+' },
-  'Mystic Remora': { category: 'value_engine', categoryLabel: 'Early Card Advantage', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: '1-mana cumulative upkeep drawing cards off noncreature spells', tier: 'S' },
-  'Necropotence': { category: 'value_engine', categoryLabel: 'Mass Life-to-Cards Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Converts life total directly into immediate massive card advantage', tier: 'S+' },
-  'Esper Sentinel': { category: 'value_engine', categoryLabel: 'Turn 1 Draw Tax', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: '1-mana creature taxing opponents\' first noncreature spells', tier: 'S' },
-  'Trouble in Pairs': { category: 'value_engine', categoryLabel: 'Multi-Trigger Draw Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Draws on attacks, second spells, extra cards, and extra turns', tier: 'S' },
-  'Sylvan Library': { category: 'value_engine', categoryLabel: 'Topdeck Selection & Draw', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Draws up to 3 cards per draw step with topdeck manipulation', tier: 'S' },
-  'Skullclamp': { category: 'value_engine', categoryLabel: 'Explosive Token Draw', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: '1-mana equipment converting x/1 creatures into 2 cards each', tier: 'S' },
-  'The Great Henge': { category: 'value_engine', categoryLabel: 'Mana + Life + Draw Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Cost reduction, +2 mana ramp, +2 life, and card draw on every creature', tier: 'S' },
-  'Consecrated Sphinx': { category: 'value_engine', categoryLabel: 'Opponent Draw Doubler', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Draws 2 cards whenever ANY opponent draws a card', tier: 'S' },
-  'Orcish Bowmasters': { category: 'value_engine', categoryLabel: 'Draw Punishment Engine', badgeBg: 'bg-emerald-950/80', badgeBorder: 'border-emerald-500/50', badgeText: 'text-emerald-300', icon: '💎', impactReason: 'Pings targets and amasses armies whenever opponents draw extra cards', tier: 'S' },
-
-  // Premium Tutors & Enablers
-  'Demonic Tutor': { category: 'tutor', categoryLabel: 'Unconditional Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '2-mana search for any card in library directly into hand', tier: 'S+' },
-  'Vampiric Tutor': { category: 'tutor', categoryLabel: 'Instant-Speed Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana instant searching any card to top of library', tier: 'S+' },
-  'Imperial Seal': { category: 'tutor', categoryLabel: 'Topdeck Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana sorcery searching any card to top of library', tier: 'S' },
-  'Mystical Tutor': { category: 'tutor', categoryLabel: 'Instant/Sorcery Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana instant searching any instant or sorcery to top of library', tier: 'S' },
-  'Enlightened Tutor': { category: 'tutor', categoryLabel: 'Artifact/Enchantment Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana instant searching any artifact or enchantment to top of library', tier: 'S' },
-  'Worldly Tutor': { category: 'tutor', categoryLabel: 'Creature Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana instant searching any creature to top of library', tier: 'S' },
-  'Gamble': { category: 'tutor', categoryLabel: 'Red Universal Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana search for any card into hand with random discard', tier: 'A' },
-  'Entomb': { category: 'tutor', categoryLabel: 'Graveyard Tutor', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: '1-mana instant placing any reanimation target directly into graveyard', tier: 'S' },
-  'Survival of the Fittest': { category: 'tutor', categoryLabel: 'Repeatable Creature Engine', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: 'Repeatable 1-green mana creature search with discard synergy', tier: 'S' },
-  'Birthing Pod': { category: 'tutor', categoryLabel: 'Pod Chain Enabler', badgeBg: 'bg-violet-950/80', badgeBorder: 'border-violet-500/50', badgeText: 'text-violet-300', icon: '📜', impactReason: 'Sacrifices creatures to chain directly into combo pieces onto battlefield', tier: 'A' },
-
-  // Oppressive Stax & Lock Pieces
-  'Armageddon': { category: 'stax', categoryLabel: 'Mass Land Destruction', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Destroys all lands in play, resetting mana development', tier: 'S+' },
-  'Winter Orb': { category: 'stax', categoryLabel: 'Untap Lock Piece', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Restricts untapping to only 1 land per turn', tier: 'S' },
-  'Static Orb': { category: 'stax', categoryLabel: 'Untap Lock Piece', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Limits untapping to only two permanents each upkeep', tier: 'S' },
-  'Stasis': { category: 'stax', categoryLabel: 'Total Untap Freeze', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Completely skips untap steps for all players', tier: 'S+' },
-  'Drannith Magistrate': { category: 'stax', categoryLabel: 'Commander Lock', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Prevents opponents from casting spells from command zone, exile, or graveyard', tier: 'S' },
-  'Opposition Agent': { category: 'stax', categoryLabel: 'Search Hijack', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Flash stax controlling all opponent searches and stealing searched cards', tier: 'S+' },
-  'Blood Moon': { category: 'stax', categoryLabel: 'Nonbasic Land Denial', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Turns all nonbasic lands into basic Mountains', tier: 'S' },
-  'Back to Basics': { category: 'stax', categoryLabel: 'Nonbasic Land Freeze', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Nonbasic lands do not untap during their controllers\' untap steps', tier: 'S' },
-  'Tergrid, God of Fright': { category: 'stax', categoryLabel: 'Theft & Sac Engine', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Steals all cards opponents sacrifice or discard directly onto your field', tier: 'S' },
-  'Vorinclex, Voice of Hunger': { category: 'stax', categoryLabel: 'Mana Doubler + Lock', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Doubles your mana output while freezing opponents\' tapped lands for a turn', tier: 'S' },
-  'Jin-Gitaxias, Core Augur': { category: 'stax', categoryLabel: 'Hand Discard Lock', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Draws you 7 cards on end step while reducing opponent max hands to 0', tier: 'S' },
-  'Toxrill, the Corrosive': { category: 'stax', categoryLabel: 'Continuous Board Wipe', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Places slime counters on all opponent creatures on every end step', tier: 'S' },
-  'Grand Arbiter Augustin IV': { category: 'stax', categoryLabel: 'Symmetrical Cost Tax', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Reduces your white/blue spells by 1 while taxing opponent spells by 1', tier: 'A' },
-  'Urza, Lord High Artificer': { category: 'stax', categoryLabel: 'Artifact Mana & Cast Engine', badgeBg: 'bg-rose-950/80', badgeBorder: 'border-rose-500/50', badgeText: 'text-rose-300', icon: '🔒', impactReason: 'Taps any artifact for blue mana and casts free spells from top of deck', tier: 'S+' },
-};
-
 /**
- * Detects all gamechangers in a deck (categorized, ranked, and explained).
+ * Detects all gamechangers in a deck strictly from Scryfall / card data flags.
  */
 export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
   if (!deck || !Array.isArray(deck.cards)) return [];
@@ -1903,117 +1794,30 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const cleanName = card.name.split(' // ')[0].trim();
     if (seenCardNames.has(cleanName)) return;
 
-    const isExplicitGamechanger = Boolean(
+    const isGamechanger = Boolean(
       card.isGamechanger || 
       card.is_gamechanger || 
-      (card as any).IsGamechanger
+      (card as any).IsGamechanger ||
+      (card as any).is_game_changer ||
+      (card as any).gamechanger
     );
 
-    // Check registry first
-    const directMatch = GAMECHANGER_REGISTRY[cleanName];
-    if (directMatch || isExplicitGamechanger) {
-      seenCardNames.add(cleanName);
-      if (directMatch) {
-        results.push({
-          card,
-          ...directMatch,
-        });
-      } else {
-        // Card has explicit isGamechanger flag from Scryfall JSON but not in registry
-        results.push({
-          card,
-          category: 'value_engine',
-          categoryLabel: 'Gamechanger Staple',
-          badgeBg: 'bg-amber-950/80',
-          badgeBorder: 'border-amber-500/50',
-          badgeText: 'text-amber-300',
-          icon: '⚡',
-          impactReason: 'High-impact format staple designated as a Gamechanger',
-          tier: 'S',
-        });
-      }
-      return;
-    }
-
-    // Dynamic oracle text heuristics for other high-impact gamechangers
-    const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
-    const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-
-    // Free commander spells pattern
-    if (oracle.includes('if you control a commander, you may cast this spell without paying its mana cost')) {
+    if (isGamechanger) {
       seenCardNames.add(cleanName);
       results.push({
         card,
-        category: 'free_spell',
-        categoryLabel: 'Free Commander Spell',
-        badgeBg: 'bg-sky-950/80',
-        badgeBorder: 'border-sky-500/50',
-        badgeText: 'text-sky-300',
-        icon: '🛡️',
-        impactReason: 'Can be cast for free if you control your commander',
-        tier: 'S',
+        category: (card as any).gamechangerCategory || 'value_engine',
+        categoryLabel: (card as any).gamechangerCategoryLabel || 'Gamechanger Staple',
+        badgeBg: 'bg-amber-950/80',
+        badgeBorder: 'border-amber-500/50',
+        badgeText: 'text-amber-300',
+        icon: (card as any).gamechangerIcon || '⚡',
+        impactReason: (card as any).gamechangerReason || (card as any).impactReason || 'Designated Gamechanger from Scryfall data',
+        tier: (card as any).gamechangerTier || 'S',
       });
-      return;
-    }
-
-    // Extra turn spells pattern
-    if (oracle.includes('take an extra turn') && !isExtraTurnExcluded(cleanName)) {
-      seenCardNames.add(cleanName);
-      results.push({
-        card,
-        category: 'win_con',
-        categoryLabel: 'Extra Turn Spell',
-        badgeBg: 'bg-fuchsia-950/80',
-        badgeBorder: 'border-fuchsia-500/50',
-        badgeText: 'text-fuchsia-300',
-        icon: '👑',
-        impactReason: 'Grants extra turns to push overwhelming board advantage',
-        tier: 'S',
-      });
-      return;
-    }
-
-    // Mass land destruction pattern
-    if ((oracle.includes('destroy all lands') || oracle.includes('exile all lands')) && !isExcludedWipe(cleanName)) {
-      seenCardNames.add(cleanName);
-      results.push({
-        card,
-        category: 'stax',
-        categoryLabel: 'Mass Land Destruction',
-        badgeBg: 'bg-rose-950/80',
-        badgeBorder: 'border-rose-500/50',
-        badgeText: 'text-rose-300',
-        icon: '🔒',
-        impactReason: 'Destroys or exiles all lands on the battlefield',
-        tier: 'S+',
-      });
-      return;
-    }
-
-    // Cheap universal tutor pattern
-    if (
-      oracle.includes('search your library for a card') &&
-      !typeLine.includes('land') &&
-      (card.cmc || 0) <= 2 &&
-      !oracle.includes('basic land')
-    ) {
-      seenCardNames.add(cleanName);
-      results.push({
-        card,
-        category: 'tutor',
-        categoryLabel: 'Efficient Tutor',
-        badgeBg: 'bg-violet-950/80',
-        badgeBorder: 'border-violet-500/50',
-        badgeText: 'text-violet-300',
-        icon: '📜',
-        impactReason: 'Low-cost search directly fetching critical cards from library',
-        tier: 'S',
-      });
-      return;
     }
   });
 
-  // Sort gamechangers by tier (S+ -> S -> A) then category then price
   const tierWeight = { 'S+': 3, 'S': 2, 'A': 1 };
   return results.sort((a, b) => {
     const twA = tierWeight[a.tier] || 0;
@@ -2025,13 +1829,4 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
   });
 }
 
-function isExtraTurnExcluded(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.includes('ugin') || lower.includes('medomai');
-}
-
-function isExcludedWipe(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.includes('fall of the thran');
-}
 
