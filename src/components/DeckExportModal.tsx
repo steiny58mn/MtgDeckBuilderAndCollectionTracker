@@ -1215,6 +1215,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                         </h4>
                         <p className="text-[11px] text-slate-400">
                           Automatically find and replace <code className="text-emerald-300 font-mono">[deck]...[/deck]</code> in your first thread post.
+                          {' '}<span className="text-slate-500">(Requires free <a href="https://www.tampermonkey.net" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline inline-flex items-center gap-0.5">Tampermonkey <ExternalLink className="w-2.5 h-2.5" /></a> extension)</span>
                         </p>
                       </div>
                     </div>
