@@ -209,18 +209,14 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
       illegalCards.push(`Commander decks cannot have more than 2 commanders (Current: ${commanderQty})`);
     }
 
-    if (commanderCards.length === 2 || commanderQty === 2) {
-      if (nonCommanderMainQty !== 98) {
-        illegalCards.push(`Commander decks with 2 commanders (Partner/Background) require exactly 98 other cards in the deck (Current: ${nonCommanderMainQty})`);
-      }
-    } else if (commanderCards.length === 1 && commanderQty === 1) {
-      if (nonCommanderMainQty !== 99) {
-        illegalCards.push(`Commander decks require exactly 99 other cards in the deck (Current: ${nonCommanderMainQty})`);
-      }
-    }
-
     if (mainboardCount !== 100) {
-      illegalCards.push(`Commander decks must have exactly 100 cards total (Current: ${mainboardCount})`);
+      if (commanderCards.length === 2 || commanderQty === 2) {
+        illegalCards.push(`Commander decks with 2 commanders require exactly 100 cards (2 commanders + 98 other cards; Current: ${mainboardCount})`);
+      } else if (commanderCards.length === 1 && commanderQty === 1) {
+        illegalCards.push(`Commander decks must have exactly 100 cards total (1 commander + 99 other cards; Current: ${mainboardCount})`);
+      } else {
+        illegalCards.push(`Commander decks must have exactly 100 cards total (Current: ${mainboardCount})`);
+      }
     }
   } else if (deck.format !== 'casual' && mainboardCount < 60) {
     illegalCards.push(`Constructed decks require at least 60 mainboard cards (Current: ${mainboardCount})`);

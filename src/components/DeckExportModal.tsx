@@ -1788,11 +1788,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                             setShowOverwriteConfirmModal(true);
                           }}
                           disabled={isResolvingCards || !parsedPreview || parsedPreview.cards.length === 0}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 transition-all shadow-md cursor-pointer disabled:opacity-50"
-                          title={deck ? `Replace all cards in "${deck.name}" with imported list` : 'Select an existing deck to overwrite'}
+                          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50 ${
+                            deck
+                              ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold'
+                              : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                          }`}
+                          title={deck ? `Replace all cards in "${deck.name}" with imported list (saves current deck to history first)` : 'Select an existing deck to overwrite'}
                         >
                           <RefreshCw className="w-3.5 h-3.5" />
-                          <span>{deck ? 'Overwrite Deck' : 'Overwrite Existing Deck...'}</span>
+                          <span>{deck ? 'Overwrite Deck (Saves Current First)' : 'Overwrite Existing Deck...'}</span>
                         </button>
                       )}
 
@@ -1868,7 +1872,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                   Overwrite Deck with Imported Cards?
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  This will <strong>replace all existing cards</strong> in the target deck with the {totalParsedCards} imported cards.
+                  This will <strong>save off the current deck to history first</strong>, then replace all cards in the target deck with the {totalParsedCards} imported cards.
                 </p>
               </div>
             </div>

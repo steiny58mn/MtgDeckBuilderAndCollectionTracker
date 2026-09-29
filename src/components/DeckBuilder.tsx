@@ -39,7 +39,9 @@ import {
   BarChart2,
   ArrowLeftRight,
   CheckCircle2,
-  Check
+  Check,
+  Upload,
+  ExternalLink
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
@@ -1424,309 +1426,269 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-              {/* Left: Navigation & Title */}
-              <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap min-w-0">
-                <button
-                  type="button"
-                  onClick={handleBack}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-semibold transition-colors shrink-0 cursor-pointer border border-slate-800 hover:border-slate-700"
-                  title="Return to Decks"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 text-violet-400" />
-                  <span>Decks</span>
-                </button>
-                <div 
-                  onClick={() => setIsEditingTitle(true)}
-                  className="group flex items-center gap-1.5 cursor-pointer min-w-0"
-                  title="Click to edit name & description"
-                >
-                  <h1 className="text-base sm:text-lg font-bold tracking-tight text-white group-hover:text-violet-400 transition-colors truncate max-w-[200px] sm:max-w-xs md:max-w-md">
-                    {deck.name}
-                  </h1>
-                  <Pencil className="w-3 h-3 text-slate-500 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                </div>
+            <div className="flex flex-col gap-2.5">
+              {/* Top line: Navigation & Title & Commander Badge on Left, Save / Restore / Pending on Right */}
+              <div className="flex items-center justify-between gap-2.5 flex-wrap">
+                {/* Left: Navigation, Title & Commander Badges */}
+                <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap min-w-0">
+                  <button
+                    type="button"
+                    onClick={handleBack}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-semibold transition-colors shrink-0 cursor-pointer border border-slate-800 hover:border-slate-700"
+                    title="Return to Decks"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Decks</span>
+                  </button>
+                  <div 
+                    onClick={() => setIsEditingTitle(true)}
+                    className="group flex items-center gap-1.5 cursor-pointer min-w-0"
+                    title="Click to edit name & description"
+                  >
+                    <h1 className="text-base sm:text-lg font-bold tracking-tight text-white group-hover:text-violet-400 transition-colors truncate max-w-[180px] sm:max-w-xs md:max-w-sm">
+                      {deck.name}
+                    </h1>
+                    <Pencil className="w-3 h-3 text-slate-500 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                  </div>
 
-
-              </div>
-
-              {/* Middle: Commander Strip (Top Row between Deck Title and Save button) */}
-              {deck.format === 'commander' && (
-                <div className="flex items-center gap-2 flex-wrap text-xs min-w-0">
-                  <span className="text-[11px] uppercase font-bold text-fuchsia-400 tracking-wider flex items-center gap-1.5 shrink-0">
-                    <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
-                    <span>{commanderCards.length === 2 ? 'Commanders:' : 'Commander:'}</span>
-                  </span>
-
-                  {commanderCards.length > 0 ? (
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  {/* Commander Badges to the right of the Deck Title */}
+                  {deck.format === 'commander' && commanderCards.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       {commanderCards.map((cmdr, cIdx) => (
                         <div
                           key={cmdr.id}
-                          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-fuchsia-500/30 text-xs shadow-xs"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-slate-950/90 border border-fuchsia-500/40 text-xs shadow-xs"
                         >
                           <span className="text-[10px] font-semibold text-fuchsia-400">
                             {cIdx === 0 ? '👑 Commander' : '👑 Partner'}
                           </span>
                           <span
                             onClick={() => onSelectCard(toScryfallCard(cmdr))}
-                            className="font-bold text-white hover:text-fuchsia-300 cursor-pointer truncate max-w-[180px] sm:max-w-[220px]"
+                            className="font-bold text-white hover:text-fuchsia-300 cursor-pointer truncate max-w-[150px] sm:max-w-[200px]"
                             title={cmdr.name}
                           >
                             {cmdr.name}
                           </span>
                           {cmdr.mana_cost && (
-                            <div className="shrink-0 scale-90">
+                            <div className="shrink-0 scale-85">
                               <ManaCostBadge manaCost={cmdr.mana_cost} size="sm" />
                             </div>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => handleChangeCardCategory(cmdr.id, 'main')}
-                            className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
-                            title="Demote to regular deck card"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
                         </div>
                       ))}
-
-
                     </div>
-                  ) : (
-                    <span className="text-[11px] text-slate-500 italic">
-                      No commander assigned yet. Click &quot;Set Commander&quot; on any legendary creature in your deck.
-                    </span>
                   )}
                 </div>
-              )}
 
-              {/* Top Right: Save Deck Button, Restore Version Button, & Pending Changes Button */}
-              <div className="flex items-center gap-2 shrink-0 sm:ml-auto lg:ml-0">
-                {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => setShowPendingChangesModal(true)}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-md shadow-amber-950/40 active:scale-98 transition-all cursor-pointer animate-pulse-subtle"
-                    title="View pending unsaved additions and deletions in modal"
-                  >
-                    <span className="flex h-2 w-2 relative shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                    </span>
-                    <span>Pending</span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-amber-950/80 border border-amber-500/30 text-amber-300 text-[10px] sm:text-xs font-mono font-bold">
-                      {pendingChanges.added.length > 0 && `+${pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
-                      {pendingChanges.added.length > 0 && pendingChanges.deleted.length > 0 && ' '}
-                      {pendingChanges.deleted.length > 0 && `-${pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
-                    </span>
-                  </button>
-                )}
-                {isHistoricalView ? (
-                  <button
-                    type="button"
-                    onClick={handleRestoreHistoricalIteration}
-                    disabled={isSaving}
-                    className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
-                    title="Restore this historical version as your active deck"
-                  >
-                    {isSaving ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    ) : (
-                      <RotateCcw className="w-4 h-4 text-white" />
-                    )}
-                    <span>{isSaving ? 'Restoring...' : 'Restore Version'}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleSave()}
-                    disabled={isSaving}
-                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-98 ${
-                      hasUnsavedChanges
-                        ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600'
-                    }`}
-                    title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
-                  >
-                    {isSaving ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    ) : (
-                      <Save className={`w-4 h-4 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
-                    )}
-                    <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Bottom Row: Actions (Prices, Hand, Compare, Export), Badges (Card count, Price), and Format Dropdown on Far Right below Save */}
-          {!isEditingTitle && (
-            <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80 flex-wrap">
-              {/* Left Side: Buttons + Badges */}
-              <div className="flex items-center gap-2.5 flex-wrap">
-                {/* Left: Prices, Hand, Compare, Export */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleLivePriceRefresh}
-                    disabled={isRefreshingPrices}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-                    title="Update live card market prices via Scryfall"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-violet-400' : ''}`} />
-                    <span>Prices</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowHandSimulator(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="Simulate opening 7-card hand and mulligans"
-                  >
-                    <Play className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Hand</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowCompareModal(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="Compare deck iterations via /mtgtools/comparefiles"
-                  >
-                    <GitCompare className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>{isHistoricalView ? 'Compare with Live' : 'Compare'}</span>
-                    {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
-                        {pendingChanges.added.length > 0 && (
-                          <span className="text-emerald-400">+{pendingChanges.added.reduce((s, i) => s + i.diffQuantity, 0)}</span>
-                        )}
-                        {pendingChanges.deleted.length > 0 && (
-                          <span className="text-rose-400">-{pendingChanges.deleted.reduce((s, i) => s + i.diffQuantity, 0)}</span>
-                        )}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportModalInitialTab('export');
-                      setShowExportModal(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="Export deck to BBCode, TappedOut, Moxfield, MTGO, Excel, etc."
-                  >
-                    <Share2 className="w-3.5 h-3.5 text-violet-400" />
-                    <span>Export</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowStatsModal(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-violet-500/20 text-slate-300 hover:text-violet-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="View Deck Statistics, Mana Curve, and Land Balance"
-                  >
-                    <BarChart2 className="w-3.5 h-3.5 text-violet-400" />
-                    <span>Curve & Stats</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowRecommendationsModal(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="Browse recommended Commander staples and synergy cards"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Recs</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowGameSummaryModal(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
-                    title="Generate Game Summary BBCode (BBCodeType 3 via /mtgtools/getbbcode)"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Game Summary</span>
-                  </button>
-
+                {/* Right: Save / Restore Version / Pending Changes Button - always on the top line */}
+                <div className="flex items-center gap-2 shrink-0 ml-auto">
                   {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
                     <button
                       type="button"
                       onClick={() => setShowPendingChangesModal(true)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-300 text-xs font-semibold transition-colors cursor-pointer"
-                      title="View pending changes in modal"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-md shadow-amber-950/40 active:scale-98 transition-all cursor-pointer animate-pulse-subtle"
+                      title="View pending unsaved additions and deletions in modal"
                     >
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Pending ({pendingChanges.added.reduce((s, i) => s + i.diffQuantity, 0) + pendingChanges.deleted.reduce((s, i) => s + i.diffQuantity, 0)})</span>
+                      <span className="flex h-2 w-2 relative shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                      </span>
+                      <span>Pending</span>
+                      <span className="px-1.5 py-0.5 rounded-full bg-amber-950/80 border border-amber-500/30 text-amber-300 text-[10px] sm:text-xs font-mono font-bold">
+                        {pendingChanges.added.length > 0 && `+${pendingChanges.added.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
+                        {pendingChanges.added.length > 0 && pendingChanges.deleted.length > 0 && ' '}
+                        {pendingChanges.deleted.length > 0 && `-${pendingChanges.deleted.reduce((sum, i) => sum + i.diffQuantity, 0)}`}
+                      </span>
                     </button>
                   )}
-                </div>
-
-                {/* Badges to the right of the buttons */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
-                  <span className="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono text-slate-300 shrink-0">
-                    {stats.mainboardCount}
-                    {deck.format === 'commander' ? '/100' : ''}
-                  </span>
-
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] font-bold text-emerald-400 shrink-0" title="Total deck market value">
-                    ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
-                  </span>
+                  {isHistoricalView ? (
+                    <button
+                      type="button"
+                      onClick={handleRestoreHistoricalIteration}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                      title="Restore this historical version as your active deck"
+                    >
+                      {isSaving ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      ) : (
+                        <RotateCcw className="w-4 h-4 text-white" />
+                      )}
+                      <span>{isSaving ? 'Restoring...' : 'Restore Version'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSave()}
+                      disabled={isSaving}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-98 ${
+                        hasUnsavedChanges
+                          ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600'
+                      }`}
+                      title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      ) : (
+                        <Save className={`w-4 h-4 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
+                      )}
+                      <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Far Right below the Save button: Notice, Historical Dropdown, & Format dropdown */}
-              <div className="flex items-center gap-2 shrink-0 ml-auto flex-wrap">
-                {/* Historical Version Dropdown */}
-                <div
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs shadow-xs transition-colors border ${
-                    isHistoricalView
-                      ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
-                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
-                  }`}
+              {/* Action Buttons: Hand, Compare, Export, Import, Curve & Stats, Recs, Game Summary */}
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setShowHandSimulator(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Simulate opening 7-card hand and mulligans"
                 >
-                  <Clock className={`w-3.5 h-3.5 shrink-0 ${isHistoricalView ? 'text-amber-400' : 'text-slate-400'}`} />
-                  <select
-                    value={selectedHistoryId}
-                    onChange={(e) => setSelectedHistoryId(e.target.value)}
-                    className="bg-transparent text-xs font-semibold outline-none cursor-pointer capitalize pr-1 text-inherit max-w-[200px] sm:max-w-xs truncate"
-                    title="Select historical iteration to view"
-                  >
-                    <option value="current" className="bg-slate-900 text-slate-200">
-                      Current Version {historyList.length === 0 ? '(No History)' : '(Live Draft)'}
-                    </option>
-                    {historyList.map((item, idx) => {
-                      const hId = item.id || item.historyId;
-                      return (
-                        <option key={hId || idx} value={hId} className="bg-slate-900 text-slate-200">
-                          {formatIterationLabel(item, idx)}
-                        </option>
-                      );
-                    })}
-                  </select>
+                  <Play className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Hand</span>
+                </button>
 
-                  {isHistoricalView && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteHistoricalIteration(selectedHistoryId)}
-                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors cursor-pointer shrink-0 ml-0.5"
-                      title="Delete this historical iteration"
+                <button
+                  type="button"
+                  onClick={() => setShowCompareModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Compare deck iterations via /mtgtools/comparefiles"
+                >
+                  <GitCompare className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{isHistoricalView ? 'Compare with Live' : 'Compare'}</span>
+                  {!isHistoricalView && (pendingChanges.added.length > 0 || pendingChanges.deleted.length > 0) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
+                      {pendingChanges.added.length > 0 && (
+                        <span className="text-emerald-400">+{pendingChanges.added.reduce((s, i) => s + i.diffQuantity, 0)}</span>
+                      )}
+                      {pendingChanges.deleted.length > 0 && (
+                        <span className="text-rose-400">-{pendingChanges.deleted.reduce((s, i) => s + i.diffQuantity, 0)}</span>
+                      )}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportModalInitialTab('export');
+                    setShowExportModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Export deck to BBCode, TappedOut, Moxfield, MTGO, Excel, etc."
+                >
+                  <Share2 className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Export</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportModalInitialTab('import');
+                    setShowExportModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-fuchsia-500/20 text-slate-300 hover:text-fuchsia-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Import a decklist to overwrite this deck (saving off the current one first)"
+                >
+                  <Upload className="w-3.5 h-3.5 text-fuchsia-400" />
+                  <span>Import</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowStatsModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-violet-500/20 text-slate-300 hover:text-violet-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="View Deck Statistics, Mana Curve, and Land Balance"
+                >
+                  <BarChart2 className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Curve & Stats</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecommendationsModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Browse recommended Commander staples and synergy cards"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Recs</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowGameSummaryModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Generate Game Summary BBCode (BBCodeType 3 via /mtgtools/getbbcode)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Game Summary</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Row: Badges, MTGNexus URL, Notice Dropdown on Left; Condensed Iteration & Format on Right */}
+          {!isEditingTitle && (
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800/80 flex-wrap">
+              {/* Left Side: Badges + MTGNexus URL + Notice Dropdown */}
+              <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
+                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs font-mono font-semibold text-slate-300 shrink-0">
+                  {stats.mainboardCount}
+                  {deck.format === 'commander' ? '/100 cards' : ' cards'}
+                </span>
+
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs font-bold text-emerald-400 shrink-0" title="Total deck market value">
+                  ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
+                </span>
+
+                {/* MTGNexus URL Text Box */}
+                <div className="flex items-center gap-1.5 w-full sm:w-auto min-w-[200px] md:min-w-[260px] lg:min-w-[300px] shrink-0">
+                  <div className="relative flex-1 flex items-center">
+                    <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 pointer-events-none select-none">
+                      MTGNexus:
+                    </span>
+                    <input
+                      type="url"
+                      value={nexusUrl}
+                      onChange={(e) => {
+                        const newUrl = e.target.value;
+                        setNexusUrl(newUrl);
+                        onUpdateDeck({
+                          ...deck,
+                          mtgNexusEditThreadUrl: newUrl.trim() || undefined,
+                        });
+                        setHasUnsavedChanges(true);
+                        DeckService.setDeckHasUnsavedChanges(deck.id, true);
+                      }}
+                      placeholder="Thread / Edit URL..."
+                      className="w-full bg-slate-950/90 border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-lg pl-22 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+                      title="MTGNexus Thread or Edit URL for 1-click sync"
+                    />
+                  </div>
+                  {nexusUrl && (
+                    <a
+                      href={nexusUrl.startsWith('http') ? nexusUrl : `https://${nexusUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors shrink-0"
+                      title="Open MTGNexus URL in new tab"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                    </button>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
                   )}
                 </div>
-                {/* Format Notice Dropdown */}
+
+                {/* Notice Dropdown right next to MTGNexus URL */}
                 {stats.illegalCards.length > 0 && (
                   <div className="relative shrink-0 z-50">
                     <button
                       type="button"
                       onClick={() => setShowFormatNoticeDetails(!showFormatNoticeDetails)}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-fuchsia-950/90 border border-fuchsia-600/70 text-[11px] font-bold text-fuchsia-300 hover:bg-fuchsia-900/80 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-fuchsia-950/90 border border-fuchsia-600/70 text-[11px] font-bold text-fuchsia-300 hover:bg-fuchsia-900/80 transition-colors cursor-pointer shadow-xs"
                       title="Click to view format legality notices"
                     >
                       <AlertTriangle className="w-3.5 h-3.5 text-violet-400 shrink-0" />
@@ -1741,7 +1703,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                           className="fixed inset-0 z-[60] bg-transparent cursor-default"
                           onClick={() => setShowFormatNoticeDetails(false)}
                         />
-                        <div className="absolute right-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
+                        <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
                           <div className="font-semibold text-fuchsia-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                             <span className="flex items-center gap-1.5 font-bold">
                               <AlertTriangle className="w-4 h-4 text-violet-400 shrink-0" />
@@ -1766,6 +1728,68 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Right Side: Condensed Iteration Dropdown and Format Dropdown */}
+              <div className="flex items-center gap-2 shrink-0 ml-auto flex-wrap">
+                {/* Condensed Historical Version / Iteration Dropdown */}
+                <div
+                  className={`relative flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs shadow-xs transition-colors border cursor-pointer ${
+                    isHistoricalView
+                      ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                  title="Click to select historical iteration snapshot"
+                >
+                  <Clock className={`w-3.5 h-3.5 shrink-0 pointer-events-none ${isHistoricalView ? 'text-amber-400' : 'text-slate-400'}`} />
+                  <span className="font-semibold text-xs pointer-events-none select-none">
+                    {isHistoricalView && selectedHistoryItem ? (
+                      (() => {
+                        const hIdx = historyList.findIndex(h => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId);
+                        const vNum = hIdx !== -1 ? historyList.length - hIdx : '';
+                        return `v#${vNum}`;
+                      })()
+                    ) : (
+                      'Live'
+                    )}
+                  </span>
+                  <ChevronDown className="w-3 h-3 text-slate-500 shrink-0 pointer-events-none" />
+
+                  <select
+                    value={selectedHistoryId}
+                    onChange={(e) => setSelectedHistoryId(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-slate-900"
+                    title="Select historical iteration to view"
+                  >
+                    <option value="current" className="bg-slate-900 text-slate-200 py-1">
+                      Current Version {historyList.length === 0 ? '(No History)' : '(Live Draft)'}
+                    </option>
+                    {historyList.map((item, idx) => {
+                      const hId = item.id || item.historyId;
+                      return (
+                        <option key={hId || idx} value={hId} className="bg-slate-900 text-slate-200 py-1">
+                          {formatIterationLabel(item, idx)}
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {isHistoricalView && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteHistoricalIteration(selectedHistoryId);
+                      }}
+                      className="relative z-10 p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition-colors cursor-pointer shrink-0 ml-0.5"
+                      title="Delete this historical iteration"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Format Dropdown */}
                 <select
                   value={deck.format}
                   onChange={(e) => {
@@ -2095,13 +2119,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {deck.cards.length === 0 && (
             <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
               <Layers className="w-8 h-8 mx-auto text-slate-600" />
-              <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search and add cards from Scryfall.</p>
-              <button
-                onClick={() => onOpenSearch(activeCategoryTab)}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
-              >
-                Search Cards Now
-              </button>
+              <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search or import a complete decklist.</p>
+              <div className="flex items-center justify-center gap-2.5 flex-wrap pt-1">
+                <button
+                  onClick={() => onOpenSearch(activeCategoryTab)}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Search Cards Now
+                </button>
+                <button
+                  onClick={() => {
+                    setExportModalInitialTab('import');
+                    setShowExportModal(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5 text-fuchsia-400" />
+                  <span>Import Deck</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -2138,14 +2174,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <p className="text-xs font-medium">
                     {commanderCards.length > 0
                       ? `Commander is set. Add ${deck.format === 'commander' ? (commanderCards.length === 2 ? 98 : 99) : ''} cards to complete your deck.`
-                      : 'Your deck is empty. Click "+ Add Cards" to search and add cards from Scryfall.'}
+                      : 'Your deck is empty. Click "+ Add Cards" to search or import a complete decklist.'}
                   </p>
-                  <button
-                    onClick={() => onOpenSearch(activeCategoryTab)}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    Search Cards Now
-                  </button>
+                  <div className="flex items-center justify-center gap-2.5 flex-wrap pt-1">
+                    <button
+                      onClick={() => onOpenSearch(activeCategoryTab)}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      Search Cards Now
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExportModalInitialTab('import');
+                        setShowExportModal(true);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-fuchsia-400" />
+                      <span>Import Deck</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

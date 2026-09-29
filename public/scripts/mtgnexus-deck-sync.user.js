@@ -1,7 +1,7 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         MTGNexus Deck Sync Assistant
 // @namespace    https://frostpointlabs.com/
-// @version      1.3
+// @version      1.4
 // @description  Automatically update [deck] tags in your MTGNexus primer and thread posts from the MTG Deck Builder.
 // @author       Andy & Antigravity
 // @match        https://www.mtgnexus.com/*
@@ -117,9 +117,31 @@
     }
   }
 
-  // --- FLOATING ACTION BUTTON ---
-  function injectFloatingSyncButton() {
-    if (document.getElementById('nexus-floating-sync-btn')) return;
+  // --- EDIT MODE CHECK ---
+  function isThreadEditMode() {
+    const isPostingPhp = window.location.pathname.includes('posting.php');
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const hasEditParam = mode === 'edit' || window.location.href.includes('mode=edit');
+    const hasTextarea = !!(document.getElementById('message') || document.querySelector('textarea[name="message"]'));
+
+    return hasEditParam || (isPostingPhp && hasTextarea && mode !== 'reply' && mode !== 'post' && mode !== 'quote');
+  }
+
+  // --- SYNC DECK BUTTON (DISPLAY ONLY IN EDIT MODE) ---
+  function injectSyncDeckButtonInEditMode() {
+    const inEditMode = isThreadEditMode();
+    const existingBtn = document.getElementById('nexus-floating-sync-btn');
+
+    // If NOT in EditMode of a thread, ensure button is not displayed
+    if (!inEditMode) {
+      if (existingBtn) existingBtn.remove();
+      return;
+    }
+
+    // If already injected in EditMode, keep it
+    if (existingBtn) return;
+
     const target = document.body || document.documentElement;
     if (!target) return;
 
@@ -178,78 +200,23 @@
 
       if (textarea) {
         replaceDeckInTextarea(textarea, clipText);
-        return;
+      } else {
+        showToast('No message text area found to update.', true);
       }
-
-      const editLinks = Array.from(document.querySelectorAll('a[href*="mode=edit"]'));
-      if (editLinks.length > 0) {
-        sessionStorage.setItem('mtgnexus_pending_deck_sync', clipText);
-        showToast('Deck verified! Opening edit post page...');
-        const editUrl = new URL(editLinks[0].href, window.location.origin);
-        editUrl.searchParams.set('autoupdate', 'deck');
-        window.location.href = editUrl.toString();
-        return;
-      }
-
-      showToast('No editable post found on this page. Make sure you are logged in!', true);
     });
 
     floatContainer.appendChild(btn);
     target.appendChild(floatContainer);
   }
 
-  // --- IN-THREAD EDIT BUTTONS ---
-  function hookInThreadEditButtons() {
-    const editLinks = document.querySelectorAll('a[href*="mode=edit"]');
-    editLinks.forEach((editLink) => {
-      if (editLink.dataset.nexusSyncHooked) return;
-      editLink.dataset.nexusSyncHooked = 'true';
-
-      const parent = editLink.parentElement;
-      if (!parent) return;
-
-      const inlineBtn = document.createElement('a');
-      inlineBtn.href = 'javascript:void(0);';
-      inlineBtn.className = 'button button-icon-only';
-      inlineBtn.title = 'Sync Deck from Deck Builder';
-      inlineBtn.innerHTML = '<span style="color:#10b981; font-weight:bold; margin-right:3px;">⚡</span><span style="font-weight:bold; font-size:11px;">Sync</span>';
-      inlineBtn.style.marginLeft = '4px';
-      inlineBtn.style.padding = '3px 8px';
-      inlineBtn.style.borderRadius = '5px';
-      inlineBtn.style.backgroundColor = '#1e293b';
-      inlineBtn.style.border = '1px solid #334155';
-      inlineBtn.style.color = '#e2e8f0';
-      inlineBtn.style.textDecoration = 'none';
-      inlineBtn.style.display = 'inline-flex';
-      inlineBtn.style.alignItems = 'center';
-      inlineBtn.style.verticalAlign = 'middle';
-
-      inlineBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          const clipText = await navigator.clipboard.readText();
-          if (!clipText || !DECK_REGEX.test(clipText)) {
-            showToast('Clipboard does not contain a valid [deck] block. Copy from Deck Builder first!', true);
-            return;
-          }
-          sessionStorage.setItem('mtgnexus_pending_deck_sync', clipText);
-          showToast('Deck verified! Opening edit screen...');
-          const editUrl = new URL(editLink.href, window.location.origin);
-          editUrl.searchParams.set('autoupdate', 'deck');
-          window.location.href = editUrl.toString();
-        } catch (err) {
-          showToast('Please grant clipboard permissions or paste manually on the edit screen.', true);
-        }
-      });
-
-      parent.insertBefore(inlineBtn, editLink.nextSibling);
-    });
-  }
-
-  // --- POST EDITING SCREEN ---
+  // --- POST EDITING SCREEN (AUTOMATED SYNC) ---
   function hookPostEditor() {
+    // Clean up any legacy or stale editor sync bar if present
+    const existingBar = document.getElementById('nexus-editor-sync-bar');
+    if (existingBar) existingBar.remove();
+
     const textarea = document.getElementById('message') || document.querySelector('textarea[name="message"]') || document.querySelector('textarea');
-    if (!textarea || document.getElementById('nexus-editor-sync-bar')) return;
+    if (!textarea) return;
 
     const urlParams = new URLSearchParams(window.location.search);
     const pendingDeck = sessionStorage.getItem('mtgnexus_pending_deck_sync');
@@ -271,77 +238,11 @@
         });
       }
     }
-
-    const bar = document.createElement('div');
-    bar.id = 'nexus-editor-sync-bar';
-    Object.assign(bar.style, {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: '#0f172a',
-      border: '1px solid #1e293b',
-      borderRadius: '8px',
-      padding: '8px 14px',
-      marginBottom: '10px',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    });
-
-    bar.innerHTML = `
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:16px;">⚡</span>
-        <span style="font-size:12px; font-weight:700; color:#38bdf8;">MTGNexus Deck Sync Assistant</span>
-        <span style="font-size:11px; color:#94a3b8;">— Replace [deck] tag from Clipboard</span>
-      </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button type="button" id="btn-nexus-copy-edit-url" title="Copy this direct edit URL to paste into MTG Deck Builder" style="background:#1e293b; color:#94a3b8; font-weight:600; border:1px solid #334155; border-radius:6px; padding:6px 12px; font-size:11px; cursor:pointer;">
-          Copy Edit URL
-        </button>
-        <button type="button" id="btn-nexus-sync-clip" style="background:#10b981; color:#022c22; font-weight:700; border:none; border-radius:6px; padding:6px 14px; font-size:11px; cursor:pointer;">
-          Paste &amp; Replace [deck]
-        </button>
-      </div>
-    `;
-
-    textarea.parentElement.insertBefore(bar, textarea);
-
-    const copyUrlBtn = document.getElementById('btn-nexus-copy-edit-url');
-    if (copyUrlBtn) {
-      copyUrlBtn.addEventListener('click', async () => {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('autoupdate');
-        try {
-          await navigator.clipboard.writeText(cleanUrl.toString());
-          showToast('Direct Edit URL copied! Paste it into MTG Deck Builder.');
-        } catch {
-          prompt('Direct Edit URL:', cleanUrl.toString());
-        }
-      });
-    }
-
-    const clipBtn = document.getElementById('btn-nexus-sync-clip');
-    if (clipBtn) {
-      clipBtn.addEventListener('click', async () => {
-        let clip = '';
-        try {
-          clip = await navigator.clipboard.readText();
-        } catch (e) {
-          clip = prompt('Paste your [deck]...[/deck] BBCode here:');
-        }
-
-        if (!clip || !DECK_REGEX.test(clip)) {
-          showToast('Clipboard does not contain a valid [deck] block. Copy from Deck Builder first.', true);
-          return;
-        }
-
-        replaceDeckInTextarea(textarea, clip);
-      });
-    }
   }
 
   function setup() {
     checkAutoRedirectOnThread();
-    injectFloatingSyncButton();
-    hookInThreadEditButtons();
+    injectSyncDeckButtonInEditMode();
     hookPostEditor();
   }
 
