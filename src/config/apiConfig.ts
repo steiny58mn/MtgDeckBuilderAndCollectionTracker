@@ -26,25 +26,31 @@ export function isLocalEnvironment(): boolean {
 
 /**
  * Resolves the active API Base URL in prioritized order:
- * 1. Runtime override in localStorage['mtg_custom_api_base_url']
- * 2. Vite environment variable import.meta.env.VITE_API_BASE_URL (ignoring localhost URLs when running on remote domains)
+ * 1. Runtime override in localStorage['mtg_custom_api_base_url'] (cleans up stale localhost entries when running remotely)
+ * 2. Vite environment variable import.meta.env.VITE_API_BASE_URL
  * 3. Default to production API URL -> https://api.frostpointlabs.com
  */
 export function getApiBaseUrl(): string {
+  const isLocal = isLocalEnvironment();
+
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem(STORAGE_API_BASE_KEY);
     if (saved !== null && saved.trim() !== '') {
-      return saved.trim().replace(/\/+$/, '');
+      const cleanSaved = saved.trim().replace(/\/+$/, '');
+      // If saved URL points to localhost or frontend dev hostname but we're on a remote host, clear it
+      if (!isLocal && (cleanSaved.includes('localhost') || cleanSaved.includes('127.0.0.1') || cleanSaved.includes(window.location.hostname) || cleanSaved.includes('run.app'))) {
+        localStorage.removeItem(STORAGE_API_BASE_KEY);
+      } else if (cleanSaved.startsWith('http://') || cleanSaved.startsWith('https://')) {
+        return cleanSaved;
+      }
     }
   }
 
-  const isLocal = isLocalEnvironment();
   const envUrl = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined)?.trim();
-
   if (envUrl) {
     // Safety guard for remote deployments:
     // If a localhost URL was baked in during a local build, ignore it on remote hostnames.
-    if (!isLocal && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+    if (!isLocal && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1') || envUrl.includes('run.app'))) {
       return DEFAULT_PROD_API_URL;
     }
     return envUrl.replace(/\/+$/, '');
@@ -221,33 +227,60 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
           : (customHeaders as Record<string, string> || {})
       );
 
+  // If sending FormData body, ensure Content-Type header is omitted so browser adds boundary
+  if (fetchInit.body instanceof FormData) {
+    delete (resolvedHeaders as any)['Content-Type'];
+    delete (resolvedHeaders as any)['content-type'];
+  }
+
   const primaryUrl = buildApiUrl(path, query);
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const searchParams = query ? `?${new URLSearchParams(
+    Object.entries(query)
+      .filter(([_, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => [k, String(v)])
+  ).toString()}` : '';
+  const prodUrl = `${DEFAULT_PROD_API_URL}${normalizedPath}${searchParams}`;
 
   try {
-    return await fetch(primaryUrl, {
+    const res = await fetch(primaryUrl, {
       ...fetchInit,
       headers: resolvedHeaders,
     });
-  } catch (err: any) {
-    // If running in local dev and direct call to localhost:5205 failed (e.g. CORS or network issue),
-    // attempt relative Vite dev server proxy as fallback
-    if (isLocalEnvironment() && primaryUrl.startsWith('http')) {
-      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-      const searchParams = query ? `?${new URLSearchParams(
-        Object.entries(query)
-          .filter(([_, v]) => v !== undefined && v !== null)
-          .map(([k, v]) => [k, String(v)])
-      ).toString()}` : '';
-      const fallbackUrl = `${normalizedPath}${searchParams}`;
 
+    if (!res.ok && (res.status === 404 || res.status === 502 || res.status === 504) && primaryUrl !== prodUrl) {
+      console.warn(`[API Config] Primary fetch to ${primaryUrl} returned HTTP ${res.status}; retrying against ${prodUrl}`);
+      const retryRes = await fetch(prodUrl, {
+        ...fetchInit,
+        headers: resolvedHeaders,
+      });
+      if (retryRes.ok) return retryRes;
+    }
+
+    return res;
+  } catch (err: any) {
+    if (primaryUrl !== prodUrl) {
       try {
-        console.warn(`[API Config] Primary fetch to ${primaryUrl} failed; attempting dev proxy fallback to ${fallbackUrl}`);
+        console.warn(`[API Config] Primary fetch to ${primaryUrl} failed (${err?.message}); retrying against ${prodUrl}`);
+        return await fetch(prodUrl, {
+          ...fetchInit,
+          headers: resolvedHeaders,
+        });
+      } catch {
+        // continue to dev proxy fallback if applicable
+      }
+    }
+
+    // If running in local dev, attempt relative Vite dev server proxy as final fallback
+    if (isLocalEnvironment() && primaryUrl.startsWith('http')) {
+      const fallbackUrl = `${normalizedPath}${searchParams}`;
+      try {
+        console.warn(`[API Config] Attempting dev proxy fallback to ${fallbackUrl}`);
         return await fetch(fallbackUrl, {
           ...fetchInit,
           headers: resolvedHeaders,
         });
       } catch {
-        // rethrow original error
         throw err;
       }
     }

@@ -23,9 +23,30 @@ import {
   Loader2,
   Printer,
   ExternalLink,
-  Zap
+  Zap,
+  CheckSquare,
+  Square,
+  CheckCheck,
+  Search,
+  Database,
+  TreePine,
+  SlidersHorizontal
 } from 'lucide-react';
-import { Deck, DeckCard, MTGFormat } from '../types/mtg';
+import { Deck, DeckCard, MTGFormat, CollectionCard } from '../types/mtg';
+
+// Helper to determine whether a card is a Basic Land
+export const isBasicLand = (card: { name?: string; type_line?: string }): boolean => {
+  if (!card) return false;
+  const type = (card.type_line || '').toLowerCase();
+  if (type.includes('basic') && type.includes('land')) return true;
+  const name = (card.name || '').trim().toLowerCase();
+  const basicNames = [
+    'plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
+    'snow-covered plains', 'snow-covered island', 'snow-covered swamp',
+    'snow-covered mountain', 'snow-covered forest', 'snow-covered wastes'
+  ];
+  return basicNames.includes(name);
+};
 import { 
   ExportFormatKey, 
   EXPORT_FORMATS, 
@@ -96,7 +117,125 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   const [showOverwriteConfirmModal, setShowOverwriteConfirmModal] = useState(false);
   const [targetDeckToOverwrite, setTargetDeckToOverwrite] = useState<Deck | null>(deck || (existingDecks.length > 0 ? existingDecks[0] : null));
   const [activeTab, setActiveTab] = useState<'export' | 'import' | 'proxy'>(initialTab);
+  
+  // Proxy Printing State
   const [proxyScope, setProxyScope] = useState<'main' | 'all'>('main');
+  const [onlyNotInCollection, setOnlyNotInCollection] = useState<boolean>(false);
+  const [includeBasicLands, setIncludeBasicLands] = useState<boolean>(false); // Defaulted to off as requested
+  const [proxySearchTerm, setProxySearchTerm] = useState<string>('');
+  const [selectedCardKeys, setSelectedCardKeys] = useState<Set<string>>(new Set());
+  const [collection, setCollection] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+
+  // Subscribe to live collection
+  useEffect(() => {
+    const unsub = DeckService.subscribeCollection((cards) => {
+      setCollection(cards);
+    });
+    return () => unsub();
+  }, []);
+
+  // Map of lowercased card name -> total owned quantity in collection
+  const collectionCardMap = useMemo(() => {
+    const map = new Map<string, number>();
+    collection.forEach((c) => {
+      if (c.name) {
+        const lower = c.name.trim().toLowerCase();
+        map.set(lower, (map.get(lower) || 0) + (c.quantity || 1));
+      }
+    });
+    return map;
+  }, [collection]);
+
+  const getCardUniqueKey = (c: DeckCard, idx: number): string => {
+    return c.id || `${c.name}__${c.category}__${c.set_name || ''}__${idx}`;
+  };
+
+  // Automatically sync selected cards when deck, board scope, collection filter, or basic lands filter changes
+  useEffect(() => {
+    if (!deck?.cards) {
+      setSelectedCardKeys(new Set());
+      return;
+    }
+    const newSelected = new Set<string>();
+    deck.cards.forEach((c, idx) => {
+      const key = getCardUniqueKey(c, idx);
+      const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
+      if (!inScope) return;
+
+      // Basic land filter (defaulted to off)
+      if (!includeBasicLands && isBasicLand(c)) return;
+
+      // Collection filter
+      const lowerName = c.name.trim().toLowerCase();
+      const inCol = collectionCardMap.has(lowerName);
+      if (onlyNotInCollection && inCol) return;
+
+      newSelected.add(key);
+    });
+    setSelectedCardKeys(newSelected);
+  }, [deck?.id, deck?.cards, proxyScope, onlyNotInCollection, includeBasicLands, collectionCardMap]);
+
+  const toggleCardSelection = (key: string) => {
+    setSelectedCardKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = (cardsToSelect: DeckCard[]) => {
+    setSelectedCardKeys((prev) => {
+      const next = new Set(prev);
+      cardsToSelect.forEach((c, idx) => {
+        next.add(getCardUniqueKey(c, idx));
+      });
+      return next;
+    });
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedCardKeys(new Set());
+  };
+
+  const handleSelectOnlyMissing = () => {
+    if (!deck?.cards) return;
+    const next = new Set<string>();
+    deck.cards.forEach((c, idx) => {
+      const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
+      if (!inScope) return;
+      if (!includeBasicLands && isBasicLand(c)) return;
+      const lowerName = c.name.trim().toLowerCase();
+      if (!collectionCardMap.has(lowerName)) {
+        next.add(getCardUniqueKey(c, idx));
+      }
+    });
+    setSelectedCardKeys(next);
+  };
+
+  const eligibleDeckCards = useMemo(() => {
+    if (!deck?.cards) return [];
+    return deck.cards.filter((c) => proxyScope === 'all' || (c.category === 'main' || c.category === 'commander'));
+  }, [deck?.cards, proxyScope]);
+
+  const cardsToPrintList = useMemo(() => {
+    if (!deck?.cards) return [];
+    const list: DeckCard[] = [];
+    deck.cards.forEach((c, idx) => {
+      const key = getCardUniqueKey(c, idx);
+      if (selectedCardKeys.has(key)) {
+        for (let i = 0; i < (c.quantity || 1); i++) {
+          list.push(c);
+        }
+      }
+    });
+    return list;
+  }, [deck?.cards, selectedCardKeys]);
+
+  const totalSheetsCount = Math.ceil(cardsToPrintList.length / 9);
   
   // Export State
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatKey>('bbcode');
@@ -259,14 +398,19 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   const handlePrintProxies = () => {
     if (!deck) return;
     const cardsToPrint: DeckCard[] = [];
-    deck.cards.forEach((c) => {
-      const include = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
-      if (include) {
+    deck.cards.forEach((c, idx) => {
+      const key = getCardUniqueKey(c, idx);
+      if (selectedCardKeys.has(key)) {
         for (let i = 0; i < (c.quantity || 1); i++) {
           cardsToPrint.push(c);
         }
       }
     });
+
+    if (cardsToPrint.length === 0) {
+      alert('Please select at least one card to print proxies.');
+      return;
+    }
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -280,18 +424,40 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
       const pageCards = cardsToPrint.slice(pageIdx * 9, (pageIdx + 1) * 9);
       const isLastPage = pageIdx === totalPages - 1;
-      const cardsHtml = pageCards
-        .map((c) => {
-          const img = c.imageUrl || (c.scryfallId ? 'https://api.scryfall.com/cards/' + c.scryfallId + '?format=image&version=normal' : null);
+      
+      const slotsHtml: string[] = [];
+      for (let slotIdx = 0; slotIdx < 9; slotIdx++) {
+        if (slotIdx < pageCards.length) {
+          const c = pageCards[slotIdx];
+          const img = c.imageUrl || (c.scryfallId ? `https://api.scryfall.com/cards/${c.scryfallId}?format=image&version=large` : null);
           if (img) {
-            return '<div class="card-slot"><img src="' + img + '" alt="' + c.name + '" crossorigin="anonymous" /></div>';
+            slotsHtml.push(
+              `<div class="card-slot">` +
+                `<img src="${img}" alt="${c.name.replace(/"/g, '&quot;')}" crossorigin="anonymous" loading="eager" />` +
+              `</div>`
+            );
+          } else {
+            slotsHtml.push(
+              `<div class="card-slot">` +
+                `<div class="card-placeholder">` +
+                  `<div class="ph-name">${c.name}</div>` +
+                  `<div class="ph-type">${c.type_line || ''}</div>` +
+                  `<div class="ph-mana">${c.mana_cost || ''}</div>` +
+                `</div>` +
+              `</div>`
+            );
           }
-          return '<div class="card-slot"><div class="placeholder">' + c.name + '</div></div>';
-        })
-        .join('');
+        } else {
+          slotsHtml.push(`<div class="card-slot empty-slot"></div>`);
+        }
+      }
 
       pagesHtml.push(
-        '<div class="sheet ' + (isLastPage ? '' : 'page-break') + '">' + cardsHtml + '</div>'
+        `<div class="sheet ${isLastPage ? 'last-sheet' : 'page-break'}">` +
+          `<div class="grid">` +
+            slotsHtml.join('') +
+          `</div>` +
+        `</div>`
       );
     }
 
@@ -300,23 +466,165 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       '<html>',
       '<head>',
       '  <meta charset="utf-8" />',
-      '  <title>Proxies - ' + deck.name + '</title>',
+      '  <title></title>',
       '  <style>',
-      '    @page { size: letter portrait; margin: 0.25in; }',
-      '    @media print {',
-      '      body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
-      '      .page-break { page-break-after: always; break-after: page; }',
+      '    @page {',
+      '      size: letter portrait;',
+      '      margin: 0mm;',
       '    }',
-      '    body { font-family: sans-serif; margin: 0; padding: 0.25in; background: #f1f5f9; color: #0f172a; }',
-      '    .sheet { display: grid; grid-template-columns: repeat(3, 2.5in); grid-template-rows: repeat(3, 3.5in); gap: 0; width: 7.5in; height: 10.5in; margin: 0 auto 0.25in auto; background: white; }',
-      '    @media print { .sheet { box-shadow: none; margin: 0 auto; } }',
-      '    .card-slot { width: 2.5in; height: 3.5in; box-sizing: border-box; border: 0.25px dashed #cbd5e1; overflow: hidden; display: flex; align-items: center; justify-content: center; background: white; }',
-      '    .card-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }',
-      '    .placeholder { padding: 10px; text-align: center; font-size: 12px; font-weight: bold; }',
+      '    @page :left {',
+      '      margin: 0mm;',
+      '    }',
+      '    @page :right {',
+      '      margin: 0mm;',
+      '    }',
+      '    *, *:before, *:after {',
+      '      box-sizing: border-box;',
+      '      -webkit-print-color-adjust: exact !important;',
+      '      print-color-adjust: exact !important;',
+      '    }',
+      '    html, body {',
+      '      margin: 0;',
+      '      padding: 0;',
+      '      background: #0f172a;',
+      '      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
+      '    }',
+      '    .floating-print-bar {',
+      '      position: fixed;',
+      '      top: 16px;',
+      '      right: 16px;',
+      '      z-index: 9999;',
+      '      display: flex;',
+      '      align-items: center;',
+      '      gap: 12px;',
+      '      background: rgba(15, 23, 42, 0.95);',
+      '      backdrop-filter: blur(8px);',
+      '      border: 1px solid #334155;',
+      '      padding: 8px 16px;',
+      '      border-radius: 12px;',
+      '      box-shadow: 0 10px 25px rgba(0,0,0,0.5);',
+      '      color: white;',
+      '    }',
+      '    .print-btn {',
+      '      background: #7c3aed;',
+      '      color: white;',
+      '      border: none;',
+      '      padding: 8px 18px;',
+      '      border-radius: 8px;',
+      '      font-weight: 700;',
+      '      font-size: 13px;',
+      '      cursor: pointer;',
+      '      display: inline-flex;',
+      '      align-items: center;',
+      '      gap: 6px;',
+      '      transition: background 0.15s;',
+      '    }',
+      '    .print-btn:hover { background: #6d28d9; }',
+      '    .print-hint { font-size: 11px; color: #94a3b8; }',
+      '    .sheets-container {',
+      '      padding: 24px 0;',
+      '      display: flex;',
+      '      flex-direction: column;',
+      '      align-items: center;',
+      '      gap: 24px;',
+      '    }',
+      '    .sheet {',
+      '      width: 8.5in;',
+      '      height: 11.0in;',
+      '      background: white;',
+      '      box-sizing: border-box;',
+      '      display: flex;',
+      '      align-items: center;',
+      '      justify-content: center;',
+      '      box-shadow: 0 8px 30px rgba(0,0,0,0.4);',
+      '      position: relative;',
+      '    }',
+      '    .grid {',
+      '      display: grid;',
+      '      grid-template-columns: repeat(3, 63mm);',
+      '      grid-template-rows: repeat(3, 88mm);',
+      '      width: 189mm;',
+      '      height: 264mm;',
+      '      gap: 0;',
+      '      margin: auto;',
+      '      border: 0.25mm solid #cbd5e1;',
+      '      background: white;',
+      '    }',
+      '    .card-slot {',
+      '      width: 63mm;',
+      '      height: 88mm;',
+      '      box-sizing: border-box;',
+      '      border: 0.25mm dashed #cbd5e1;',
+      '      overflow: hidden;',
+      '      display: flex;',
+      '      align-items: center;',
+      '      justify-content: center;',
+      '      background: white;',
+      '      position: relative;',
+      '    }',
+      '    .card-slot img {',
+      '      width: 100%;',
+      '      height: 100%;',
+      '      object-fit: fill;',
+      '      display: block;',
+      '    }',
+      '    .empty-slot { background: #ffffff; border: 0.25mm dashed #e2e8f0; }',
+      '    .card-placeholder {',
+      '      padding: 10px;',
+      '      text-align: center;',
+      '      display: flex;',
+      '      flex-direction: column;',
+      '      align-items: center;',
+      '      justify-content: center;',
+      '      width: 100%;',
+      '      height: 100%;',
+      '      background: #f8fafc;',
+      '      gap: 4px;',
+      '    }',
+      '    .ph-name { font-weight: 700; font-size: 12px; color: #0f172a; line-height: 1.2; }',
+      '    .ph-type { font-size: 10px; color: #64748b; }',
+      '    .ph-mana { font-size: 10px; font-family: monospace; color: #7c3aed; font-weight: 700; }',
+      '    @media print {',
+      '      html, body {',
+      '        width: 8.5in !important;',
+      '        height: 11.0in !important;',
+      '        background: white !important;',
+      '        margin: 0 !important;',
+      '        padding: 0 !important;',
+      '      }',
+      '      .floating-print-bar { display: none !important; }',
+      '      .sheets-container { padding: 0 !important; gap: 0 !important; }',
+      '      .sheet {',
+      '        width: 8.5in !important;',
+      '        height: 11.0in !important;',
+      '        max-height: 11.0in !important;',
+      '        box-shadow: none !important;',
+      '        margin: 0 auto !important;',
+      '        padding: 0 !important;',
+      '        page-break-after: always !important;',
+      '        break-after: page !important;',
+      '        page-break-inside: avoid !important;',
+      '        break-inside: avoid !important;',
+      '        display: flex !important;',
+      '        align-items: center !important;',
+      '        justify-content: center !important;',
+      '      }',
+      '      .sheet.last-sheet {',
+      '        page-break-after: auto !important;',
+      '        break-after: auto !important;',
+      '      }',
+      '      .grid { margin: auto !important; }',
+      '    }',
       '  </style>',
       '</head>',
       '<body>',
-      pagesHtml.join(''),
+      '  <div class="floating-print-bar">',
+      '    <div class="print-hint"><b>' + cardsToPrint.length + ' cards</b> (' + totalPages + ' sheet' + (totalPages === 1 ? '' : 's') + ') • In print dialog, set <i>Margins: None</i></div>',
+      '    <button class="print-btn" onclick="window.print();">🖨️ Print Now</button>',
+      '  </div>',
+      '  <div class="sheets-container">',
+      pagesHtml.join('\n'),
+      '  </div>',
       '  <script>',
       '    window.onload = function() { setTimeout(function() { window.print(); }, 500); };',
       '  </script>',
@@ -1037,87 +1345,254 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
         {/* Modal Body */}
         {activeTab === 'proxy' && deck ? (
-        <div className="flex-1 flex flex-col p-5 bg-slate-900 overflow-y-auto space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Printer className="w-4 h-4 text-violet-400" />
-                <span>Printable Proxy Sheets</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Generates a print-ready 3×3 grid of cards sized to official MTG card dimensions (2.5" × 3.5").
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setProxyScope('main')}
-                  className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
-                    proxyScope === 'main' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Mainboard Only
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setProxyScope('all')}
-                  className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
-                    proxyScope === 'all' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  All Boards
-                </button>
+          <div className="flex-1 min-h-0 flex flex-col p-4 sm:p-5 bg-slate-900 overflow-y-auto space-y-4">
+            {/* Top Control Card */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Printer className="w-4 h-4 text-violet-400" />
+                  <span>Printable Proxy Sheets (3×3 Grid)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Generates true-to-scale 63mm × 88mm MTG proxy sheets. Perfectly centered 3 rows per page across all sheets.
+                </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handlePrintProxies}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Open Print Window</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs text-slate-400 flex items-center justify-between">
-              <span>Card Preview (9 per sheet)</span>
-              <span>
-                Total Sheets: {Math.ceil(
-                  deck.cards.reduce((sum, c) => (proxyScope === 'all' || (c.category === 'main' || c.category === 'commander') ? sum + c.quantity : sum), 0) / 9
-                )}
-              </span>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handlePrintProxies}
+                  disabled={cardsToPrintList.length === 0}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs shadow-md shadow-violet-900/30 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>
+                    Print {cardsToPrintList.length} Prox{cardsToPrintList.length === 1 ? 'y' : 'ies'} ({totalSheetsCount} Sheet{totalSheetsCount === 1 ? '' : 's'})
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2 p-3 bg-slate-950 rounded-2xl border border-slate-800/80">
-              {deck.cards
-                .filter((c) => proxyScope === 'all' || (c.category === 'main' || c.category === 'commander'))
-                .slice(0, 18)
-                .map((c, i) => (
-                  <div key={i} className="aspect-[5/7] rounded-lg overflow-hidden border border-slate-800 bg-slate-900 relative">
-                    <img
-                      src={c.imageUrl || (c.scryfallId ? `https://api.scryfall.com/cards/${c.scryfallId}?format=image&version=small` : '')}
-                      alt={c.name}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                    {c.quantity > 1 && (
-                      <span className="absolute bottom-1 right-1 px-1 rounded bg-black/80 text-[10px] font-mono text-white font-bold">
-                        {c.quantity}x
-                      </span>
-                    )}
-                  </div>
-                ))}
+            {/* Filter & Toggle Controls Toolbar */}
+            <div className="p-3.5 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                {/* Board Scope */}
+                <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setProxyScope('main')}
+                    className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                      proxyScope === 'main' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Mainboard Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProxyScope('all')}
+                    className={`px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                      proxyScope === 'all' ? 'bg-slate-800 text-violet-300' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    All Boards
+                  </button>
+                </div>
+
+                {/* Filter Toggles: Only Missing from Collection & Include Basic Lands */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Toggle: Only Cards NOT in Collection */}
+                  <button
+                    type="button"
+                    onClick={() => setOnlyNotInCollection(!onlyNotInCollection)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                      onlyNotInCollection
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-xs'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                    title="Toggle to proxy only cards you don't already have in your collection binders"
+                  >
+                    <Database className={`w-3.5 h-3.5 ${onlyNotInCollection ? 'text-amber-400' : 'text-slate-500'}`} />
+                    <span>Only Missing from Collection</span>
+                    <span className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded-md ${
+                      onlyNotInCollection ? 'bg-amber-950/80 text-amber-300' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {deck.cards.filter((c) => {
+                        const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
+                        return inScope && !collectionCardMap.has(c.name.trim().toLowerCase());
+                      }).length}
+                    </span>
+                  </button>
+
+                  {/* Toggle: Include Basic Lands (Defaulted to OFF) */}
+                  <button
+                    type="button"
+                    onClick={() => setIncludeBasicLands(!includeBasicLands)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                      includeBasicLands
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow-xs'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                    title="Toggle to include or exclude Basic Lands (Plains, Island, Swamp, Mountain, Forest, Wastes)"
+                  >
+                    <TreePine className={`w-3.5 h-3.5 ${includeBasicLands ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    <span>Include Basic Lands</span>
+                    <span className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded-md ${
+                      includeBasicLands ? 'bg-emerald-950/80 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {deck.cards.filter((c) => {
+                        const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
+                        return inScope && isBasicLand(c);
+                      }).length}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Quick Selection Actions */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllVisible(eligibleDeckCards)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    title="Select all cards in scope"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Select All</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeselectAll}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    title="Clear all selections"
+                  >
+                    <Square className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Deselect All</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectOnlyMissing}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    title="Select only cards not currently in collection"
+                  >
+                    <Database className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Only Missing</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search & Stats Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
+                <div className="relative flex-1 max-w-xs">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    value={proxySearchTerm}
+                    onChange={(e) => setProxySearchTerm(e.target.value)}
+                    placeholder="Search cards to toggle..."
+                    className="w-full pl-8 pr-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span>
+                    Selected: <b className="text-violet-300">{cardsToPrintList.length}</b> / {eligibleDeckCards.reduce((s, c) => s + (c.quantity || 1), 0)} cards
+                  </span>
+                  <span>
+                    Sheets: <b className="text-white">{totalSheetsCount}</b>
+                  </span>
+                </div>
+              </div>
             </div>
-            {deck.cards.length > 18 && (
-              <p className="text-[11px] text-slate-500 text-center">... and {deck.cards.length - 18} more cards will be included in the print job.</p>
-            )}
+
+            {/* Interactive Cards Grid */}
+            <div className="space-y-2">
+              <div className="text-xs text-slate-400 flex items-center justify-between">
+                <span>Click any card or checkbox to include/exclude it from printing:</span>
+                <span>Showing {eligibleDeckCards.length} unique card entries</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2.5 p-3 bg-slate-950 rounded-2xl border border-slate-800/80 max-h-[52vh] overflow-y-auto">
+                {eligibleDeckCards
+                  .filter((c) => !proxySearchTerm.trim() || c.name.toLowerCase().includes(proxySearchTerm.toLowerCase()))
+                  .map((c, idx) => {
+                    const key = getCardUniqueKey(c, idx);
+                    const isSelected = selectedCardKeys.has(key);
+                    const isBasic = isBasicLand(c);
+                    const ownedCount = collectionCardMap.get(c.name.trim().toLowerCase()) || 0;
+                    const inCol = ownedCount > 0;
+
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => toggleCardSelection(key)}
+                        className={`group relative rounded-xl border p-2 flex flex-col gap-1.5 transition-all cursor-pointer select-none ${
+                          isSelected
+                            ? 'bg-slate-900/90 border-violet-500/70 shadow-md shadow-violet-950/50 ring-1 ring-violet-500/40'
+                            : 'bg-slate-950/60 border-slate-800/80 opacity-45 hover:opacity-80'
+                        }`}
+                      >
+                        {/* Card Image with Checkbox Indicator */}
+                        <div className="aspect-[5/7] rounded-lg overflow-hidden border border-slate-800/80 bg-slate-900 relative">
+                          <img
+                            src={c.imageUrl || (c.scryfallId ? `https://api.scryfall.com/cards/${c.scryfallId}?format=image&version=small` : '')}
+                            alt={c.name}
+                            className={`w-full h-full object-cover transition-transform duration-200 group-hover:scale-105 ${
+                              isSelected ? '' : 'grayscale'
+                            }`}
+                            loading="lazy"
+                          />
+
+                          {/* Checkbox Overlay */}
+                          <div className="absolute top-1.5 left-1.5">
+                            <div className={`w-5 h-5 rounded-md flex items-center justify-center transition-colors shadow-md ${
+                              isSelected
+                                ? 'bg-violet-600 text-white'
+                                : 'bg-slate-900/90 border border-slate-700 text-transparent'
+                            }`}>
+                              <Check className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+
+                          {/* Quantity Badge */}
+                          {(c.quantity || 1) > 1 && (
+                            <span className="absolute bottom-1 right-1 px-1.5 py-0.2 rounded bg-black/85 text-[10px] font-mono text-white font-bold border border-white/20">
+                              {c.quantity}x
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Card Details */}
+                        <div className="min-w-0 space-y-1">
+                          <div className="font-bold text-xs text-white truncate group-hover:text-violet-300 transition-colors" title={c.name}>
+                            {c.name}
+                          </div>
+
+                          {/* Collection Status Pill */}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {inCol ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-950/80 border border-emerald-800/60 text-emerald-300">
+                                <Database className="w-2.5 h-2.5" />
+                                <span>Owned ({ownedCount}x)</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-950/80 border border-amber-800/60 text-amber-300">
+                                <span>Missing</span>
+                              </span>
+                            )}
+
+                            {isBasic && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-slate-800 border border-slate-700 text-slate-300">
+                                Basic
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
           </div>
-        </div>
-      ) : activeTab === 'export' && deck ? (
+        ) : activeTab === 'export' && deck ? (
           /* =================== EXPORT TAB =================== */
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
             {/* Format Selector Column */}
