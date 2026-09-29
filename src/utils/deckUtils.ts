@@ -65,6 +65,7 @@ import {
   formatDeckSummaryTextBlock,
   compareDeckFilesApi,
   formatCardsForApiComparison,
+  getCardApiName,
   compareDecks,
   CompareDecks
 } from '../services/deckService';
@@ -1133,107 +1134,11 @@ export function generateDeckPickListLocal(deck: Deck): string {
 }
 
 /**
- * Fallback local BBCode generator
- */
-export function generateBBCodeMTGNexusLocal(deck: Deck): string {
-  const cards = deck.cards || [];
-  const commanderCards = cards.filter((c) => c.category === 'commander');
-  const mainCards = cards.filter((c) => c.category === 'main');
-  const sideCards = cards.filter((c) => c.category === 'sideboard');
-  const maybeCards = cards.filter((c) => c.category === 'maybeboard');
-
-  const commanderInfo = getDeckCommander(deck);
-  const colorStyle = getDeckColorStyle(commanderInfo.colorIdentity);
-
-  const lines: string[] = [];
-  const safeName = (deck.name || 'Deck').replace(/[\]]/g, '');
-  lines.push(`[deck=${safeName} style=${colorStyle}]`);
-
-  if (commanderCards.length > 0) {
-    const count = commanderCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`General (${count})`);
-    commanderCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  const categoryOrder = [
-    'Creature',
-    'Planeswalker',
-    'Instant',
-    'Sorcery',
-    'Artifact',
-    'Enchantment',
-    'Battle',
-    'Land',
-    'Other',
-  ];
-
-  const getCardType = (c: DeckCard): string => {
-    const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
-    if (type.includes('land')) return 'Land';
-    if (type.includes('creature')) return 'Creature';
-    if (type.includes('planeswalker')) return 'Planeswalker';
-    if (type.includes('instant')) return 'Instant';
-    if (type.includes('sorcery')) return 'Sorcery';
-    if (type.includes('artifact')) return 'Artifact';
-    if (type.includes('enchantment')) return 'Enchantment';
-    if (type.includes('battle')) return 'Battle';
-    return 'Other';
-  };
-
-  const groupedMain: Record<string, DeckCard[]> = {};
-  mainCards.forEach((c) => {
-    const cat = getCardType(c);
-    if (!groupedMain[cat]) groupedMain[cat] = [];
-    groupedMain[cat].push(c);
-  });
-
-  categoryOrder.forEach((cat) => {
-    const list = groupedMain[cat];
-    if (list && list.length > 0) {
-      const count = list.reduce((s, c) => s + c.quantity, 0);
-      lines.push(`${cat} (${count})`);
-      list
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-      lines.push('');
-    }
-  });
-
-  if (sideCards.length > 0) {
-    const count = sideCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`Sideboard (${count})`);
-    sideCards
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  if (maybeCards.length > 0) {
-    const count = maybeCards.reduce((s, c) => s + c.quantity, 0);
-    lines.push(`Maybeboard (${count})`);
-    maybeCards
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-    lines.push('');
-  }
-
-  lines.push('[/deck]');
-  return lines.join('\n');
-}
-
-/**
  * Calls remote C# API POST /mtgtools/createdecklist to obtain the BBCode formatted decklist.
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckListApi(deck: Deck): Promise<string> {
-  const cardLines = (deck.cards || [])
-    .filter((c) => c.category !== 'maybeboard')
-    .map((c) => `${c.quantity} ${c.name}`)
-    .join('\n');
+  const cardLines = formatCardsForApiComparison(deck);
 
   const formData = new FormData();
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');
@@ -1319,10 +1224,7 @@ export function resolveMtgNexusEditUrl(rawUrl?: string): string {
  * Throws if the API request fails (no local fallback).
  */
 export async function createDeckPickListApi(deck: Deck): Promise<string> {
-  const cardLines = (deck.cards || [])
-    .filter((c) => c.category !== 'maybeboard')
-    .map((c) => `${c.quantity} ${c.name}`)
-    .join('\n');
+  const cardLines = formatCardsForApiComparison(deck);
 
   const formData = new FormData();
   const safeName = (deck.name || 'deck').replace(/[^a-zA-Z0-9_-]+/g, '_');

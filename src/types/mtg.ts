@@ -41,6 +41,7 @@ export interface ScryfallCardPrices {
 export interface ScryfallCard {
   id: string;
   name: string;
+  layout?: string;
   oracle_id?: string;
   mana_cost?: string;
   cmc: number;
@@ -83,6 +84,7 @@ export interface DeckCard {
   id: string; // unique row id
   scryfallId: string;
   name: string;
+  layout?: string;
   set: string;
   set_name?: string;
   setName?: string;

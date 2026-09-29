@@ -2,7 +2,6 @@ import { Deck, DeckCard } from '../types/mtg';
 import {
   exportDeckToText,
   generateDeckPickListLocal,
-  generateBBCodeMTGNexusLocal,
   createDeckListApi,
   createDeckPickListApi,
   resolveMtgNexusEditUrl,
@@ -106,14 +105,7 @@ export const EXPORT_FORMATS: ExportFormatOption[] = [
 ];
 
 /**
- * 1. BBCode for MTGNexus (matches /mtgtools/createdecklist structure)
- */
-export function generateBBCodeMTGNexus(deck: Deck): string {
-  return generateBBCodeMTGNexusLocal(deck);
-}
-
-/**
- * 2. TappedOut
+ * 1. TappedOut
  */
 export function generateTappedOut(deck: Deck): string {
   const lines: string[] = [];
@@ -628,5 +620,4 @@ export {
   createDeckListApi,
   createDeckPickListApi,
   generateDeckPickListLocal,
-  generateBBCodeMTGNexusLocal,
 };
