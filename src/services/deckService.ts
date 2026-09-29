@@ -171,7 +171,7 @@ export function normalizeCard(card: any): DeckCard {
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
-    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
+    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? card.game_changer ?? card.gameChanger ?? card.GameChanger ?? false),
   };
 }
 

@@ -517,6 +517,7 @@ export default function App() {
         rarity: card.rarity,
         imageUrl: getCardImageUrl(card, 'normal'),
         priceUsd: priceUsd,
+        isGamechanger: Boolean(card.isGamechanger || card.is_gamechanger || card.game_changer || card.gameChanger || (card as any).game_changer),
       };
       currentCards.push(newCard);
     }
@@ -614,6 +615,7 @@ export default function App() {
         rarity: item.rarity,
         imageUrl: item.imageUrl,
         priceUsd: item.currentPriceUsd,
+        isGamechanger: Boolean((item as any).isGamechanger || (item as any).is_gamechanger || (item as any).game_changer || (item as any).gameChanger),
       };
       currentCards.push(newCard);
     }

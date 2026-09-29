@@ -1797,8 +1797,13 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const isGamechanger = Boolean(
       card.isGamechanger || 
       card.is_gamechanger || 
+      card.game_changer ||
+      card.gameChanger ||
       (card as any).IsGamechanger ||
       (card as any).is_game_changer ||
+      (card as any).game_changer ||
+      (card as any).gameChanger ||
+      (card as any).GameChanger ||
       (card as any).gamechanger
     );
 

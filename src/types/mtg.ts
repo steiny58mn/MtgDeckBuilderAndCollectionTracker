@@ -70,6 +70,8 @@ export interface ScryfallCard {
   isGamechanger?: boolean;
   is_gamechanger?: boolean;
   IsGamechanger?: boolean;
+  game_changer?: boolean;
+  gameChanger?: boolean;
   foil?: boolean;
   nonfoil?: boolean;
   finishes?: string[];
@@ -114,6 +116,8 @@ export interface DeckCard {
   isGamechanger?: boolean;
   is_gamechanger?: boolean;
   IsGamechanger?: boolean;
+  game_changer?: boolean;
+  gameChanger?: boolean;
 }
 
 export interface Deck {
