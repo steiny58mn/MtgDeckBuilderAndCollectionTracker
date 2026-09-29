@@ -30,7 +30,10 @@ import {
   Columns3,
   Upload,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  BarChart3,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
@@ -140,6 +143,24 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mtg_summary_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSummaryCollapse = useCallback(() => {
+    setIsSummaryCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('mtg_summary_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
   const [isPending, startTransition] = useTransition();
 
   const { peekCard, setPeekCard, wasChordTriggeredRecently, getCardChordProps } = useCardDualClickPeek();
@@ -276,6 +297,91 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       totalGainLoss: market - acquired,
     };
   }, [binderFilteredCollection, cardPriceMap]);
+
+  // Breakdown of collection cards by rarity (memoized)
+  const rarityStats = useMemo(() => {
+    let mythic = 0;
+    let rare = 0;
+    let uncommon = 0;
+    let common = 0;
+    let other = 0;
+
+    for (const c of binderFilteredCollection) {
+      const r = (c.rarity || '').toLowerCase().trim();
+      const qty = c.quantity || 1;
+      if (r === 'mythic' || r.includes('mythic')) {
+        mythic += qty;
+      } else if (r === 'rare') {
+        rare += qty;
+      } else if (r === 'uncommon') {
+        uncommon += qty;
+      } else if (r === 'common') {
+        common += qty;
+      } else {
+        other += qty;
+      }
+    }
+
+    const total = mythic + rare + uncommon + common + other;
+
+    const items = [
+      {
+        key: 'mythic',
+        label: 'Mythic Rare',
+        shortLabel: 'Mythic',
+        count: mythic,
+        percentage: total > 0 ? (mythic / total) * 100 : 0,
+        color: 'from-orange-500 to-amber-500',
+        textColor: 'text-orange-400',
+        dotColor: 'bg-orange-500',
+      },
+      {
+        key: 'rare',
+        label: 'Rare',
+        shortLabel: 'Rare',
+        count: rare,
+        percentage: total > 0 ? (rare / total) * 100 : 0,
+        color: 'from-yellow-400 to-amber-400',
+        textColor: 'text-yellow-400',
+        dotColor: 'bg-yellow-400',
+      },
+      {
+        key: 'uncommon',
+        label: 'Uncommon',
+        shortLabel: 'Uncommon',
+        count: uncommon,
+        percentage: total > 0 ? (uncommon / total) * 100 : 0,
+        color: 'from-sky-400 to-cyan-400',
+        textColor: 'text-sky-400',
+        dotColor: 'bg-sky-400',
+      },
+      {
+        key: 'common',
+        label: 'Common',
+        shortLabel: 'Common',
+        count: common,
+        percentage: total > 0 ? (common / total) * 100 : 0,
+        color: 'from-slate-400 to-slate-300',
+        textColor: 'text-slate-300',
+        dotColor: 'bg-slate-400',
+      },
+    ];
+
+    if (other > 0) {
+      items.push({
+        key: 'other',
+        label: 'Other',
+        shortLabel: 'Other',
+        count: other,
+        percentage: (other / total) * 100,
+        color: 'from-purple-400 to-indigo-400',
+        textColor: 'text-purple-400',
+        dotColor: 'bg-purple-400',
+      });
+    }
+
+    return { total, items };
+  }, [binderFilteredCollection]);
 
   // Pre-computed available sets (memoized)
   const availableSets = useMemo(() => {
@@ -677,72 +783,244 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
         )}
 
         </div>
-      {/* Portfolio Overview Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
-          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Total Market Value</span>
-          <span className="text-2xl font-extrabold text-emerald-400 mt-1 block">
-            ${totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-          <div className="flex items-center gap-1 text-[11px] mt-1 text-slate-400">
-            <span>Basis: ${(Number(totalAcquiredValue) || 0).toFixed(2)}</span>
-            {totalGainLoss !== 0 && (
-              <span className={`font-semibold flex items-center ${totalGainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                ({totalGainLoss >= 0 ? '+' : ''}${(Number(totalGainLoss) || 0).toFixed(2)})
-              </span>
-            )}
+      {/* Summary Dashboard */}
+      <div className={`bg-slate-900 border border-slate-800 rounded-2xl shadow-xl transition-all duration-200 ${
+        isSummaryCollapsed ? 'p-3 sm:p-4' : 'p-4 sm:p-5 space-y-4'
+      }`}>
+        {/* Dashboard Top Header & Actions */}
+        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          isSummaryCollapsed ? '' : 'pb-3.5 border-b border-slate-800/80'
+        }`}>
+          <div 
+            onClick={toggleSummaryCollapse}
+            className="flex items-center gap-2.5 cursor-pointer group/header select-none flex-1 min-w-0"
+            title={isSummaryCollapsed ? "Click to expand summary dashboard" : "Click to collapse summary dashboard"}
+          >
+            <div className="p-2 rounded-xl bg-slate-800/90 border border-slate-700/80 text-emerald-400 group-hover/header:border-emerald-500/50 group-hover/header:text-emerald-300 transition-colors shrink-0">
+              <BarChart3 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xs font-bold text-slate-200 tracking-wider uppercase group-hover/header:text-white transition-colors">
+                  Collection Summary Dashboard
+                </h2>
+                {isSummaryCollapsed && (
+                  <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+                    (Click to expand)
+                  </span>
+                )}
+              </div>
+              {isSummaryCollapsed ? (
+                /* Compact summary preview when collapsed */
+                <div className="flex items-center gap-2 flex-wrap text-xs font-mono mt-1">
+                  <span className="text-emerald-400 font-bold bg-emerald-950/70 border border-emerald-800/50 px-2 py-0.5 rounded-md text-[11px]">
+                    ${totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-slate-300 bg-slate-950/80 border border-slate-800 px-2 py-0.5 rounded-md text-[11px]">
+                    {totalCardsCount.toLocaleString()} cards
+                  </span>
+                  {totalFoilCount > 0 && (
+                    <span className="text-violet-400 bg-violet-950/60 border border-violet-800/40 px-2 py-0.5 rounded-md text-[11px] flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-violet-400" />
+                      {totalFoilCount} foils
+                    </span>
+                  )}
+                  {rarityStats.total > 0 && (
+                    <span className="text-amber-300 bg-amber-950/50 border border-amber-800/40 px-2 py-0.5 rounded-md text-[11px] hidden md:inline">
+                      {rarityStats.items.find(i => i.key === 'mythic')?.count || 0}M · {rarityStats.items.find(i => i.key === 'rare')?.count || 0}R · {rarityStats.items.find(i => i.key === 'uncommon')?.count || 0}U
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Overview of portfolio valuations, card inventory, and rarity distribution
+                </p>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
-          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Cards Owned</span>
-          <span className="text-2xl font-extrabold text-slate-100 mt-1 block">
-            {totalCardsCount.toLocaleString()}
-          </span>
-          <span className="text-[11px] text-slate-400 mt-1 block">
-            {collection.length} unique entries
-          </span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
-          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Foil Finishes</span>
-          <span className="text-2xl font-extrabold text-violet-400 mt-1 block flex items-center gap-1">
-            <Sparkles className="w-5 h-5 text-violet-400" />
-            {totalFoilCount}
-          </span>
-          <span className="text-[11px] text-slate-400 mt-1 block">
-            {totalCardsCount > 0 ? ((totalFoilCount / totalCardsCount) * 100).toFixed(1) : 0}% of binder
-          </span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl flex flex-col justify-between">
-          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Actions</span>
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <button
               onClick={handleLivePriceRefresh}
               disabled={isRefreshingPrices}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-200 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
               title="Batch query Scryfall API for current market prices"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-violet-400' : ''}`} />
-              <span>{isRefreshingPrices ? 'Syncing...' : 'Live Prices'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline">{isRefreshingPrices ? 'Syncing...' : 'Live Prices'}</span>
             </button>
             <button
               onClick={() => setShowImportModal(true)}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-emerald-400 hover:text-emerald-300 text-xs font-semibold transition-all cursor-pointer shadow-sm"
               title="Import Collection from CSV"
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Import</span>
             </button>
             <button
               onClick={handleExportCsv}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-sm"
               title="Export Collection as CSV"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleSummaryCollapse}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-750 border border-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-sm"
+              title={isSummaryCollapsed ? "Expand summary dashboard" : "Collapse summary dashboard"}
+            >
+              {isSummaryCollapsed ? (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-[11px]">Expand</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-[11px]">Collapse</span>
+                </>
+              )}
             </button>
           </div>
         </div>
+
+        {/* Dashboard Metrics & Rarity Bar Chart Grid (Collapsible) */}
+        {!isSummaryCollapsed && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 items-stretch pt-0.5">
+            {/* Metric 1: Total Card Count */}
+            <div className="lg:col-span-3 p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 flex flex-col justify-between shadow-inner">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                  Total Card Count
+                </span>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-slate-100 font-mono tracking-tight">
+                    {totalCardsCount.toLocaleString()}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">cards</span>
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                <span>{binderFilteredCollection.length} unique titles</span>
+                <span className="flex items-center gap-1 text-violet-400 font-medium">
+                  <Sparkles className="w-3 h-3 text-violet-400" />
+                  {totalFoilCount} foils ({totalCardsCount > 0 ? ((totalFoilCount / totalCardsCount) * 100).toFixed(0) : 0}%)
+                </span>
+              </div>
+            </div>
+
+            {/* Metric 2: Estimated Collection Value */}
+            <div className="lg:col-span-4 p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 flex flex-col justify-between shadow-inner">
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                    Estimated Collection Value
+                  </span>
+                  {totalGainLoss !== 0 && (
+                    <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
+                      totalGainLoss >= 0 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' : 'bg-rose-950 text-rose-400 border border-rose-800/50'
+                    }`}>
+                      {totalGainLoss >= 0 ? '+' : ''}${(Number(totalGainLoss) || 0).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-emerald-400 font-mono tracking-tight">
+                    ${totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">USD</span>
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Basis: ${(Number(totalAcquiredValue) || 0).toFixed(2)}</span>
+                <span className="text-slate-500 font-mono text-[10px]">Scryfall Market</span>
+              </div>
+            </div>
+
+            {/* Metric 3: Rarity Breakdown Simple Bar Chart */}
+            <div className="lg:col-span-5 p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3 shadow-inner">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                    Cards by Rarity
+                  </span>
+                  {selectedRarity !== 'all' && (
+                    <button
+                      onClick={() => updateRarity('all')}
+                      className="text-[10px] text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      (show all)
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {rarityStats.total} cards · click bar to filter
+                </span>
+              </div>
+
+              {/* Composite Stacked Ratio Bar */}
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden flex w-full border border-slate-800">
+                {rarityStats.items.map((item) => (
+                  item.percentage > 0 && (
+                    <div
+                      key={item.key}
+                      style={{ width: `${item.percentage}%` }}
+                      className={`h-full bg-gradient-to-r ${item.color} transition-all duration-300`}
+                      title={`${item.label}: ${item.count} (${item.percentage.toFixed(1)}%)`}
+                    />
+                  )
+                ))}
+              </div>
+
+              {/* Simple Bar Chart Rows */}
+              <div className="space-y-1.5 pt-0.5">
+                {rarityStats.items.map((item) => {
+                  const isSelected = selectedRarity === item.key;
+                  return (
+                    <div
+                      key={item.key}
+                      onClick={() => updateRarity(isSelected ? 'all' : item.key)}
+                      className={`group flex items-center gap-2 px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                        isSelected 
+                          ? 'bg-slate-800/90 ring-1 ring-emerald-500/60' 
+                          : 'hover:bg-slate-900/80'
+                      }`}
+                      title={`Click to filter cards by ${item.label}`}
+                    >
+                      {/* Dot & Label */}
+                      <div className="w-24 shrink-0 flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${item.dotColor} shrink-0`} />
+                        <span className={`text-[11px] font-medium truncate ${isSelected ? 'text-white font-bold' : 'text-slate-300 group-hover:text-white'}`}>
+                          {item.shortLabel}
+                        </span>
+                      </div>
+
+                      {/* Simple Bar */}
+                      <div className="flex-1 h-2.5 rounded bg-slate-900 border border-slate-800 overflow-hidden relative">
+                        <div
+                          style={{ width: `${item.percentage.toFixed(1)}%` }}
+                          className={`h-full bg-gradient-to-r ${item.color} rounded transition-all duration-500`}
+                        />
+                      </div>
+
+                      {/* Numeric Count & Percentage */}
+                      <div className="w-20 text-right shrink-0 font-mono text-[11px]">
+                        <span className={`font-bold ${isSelected ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {item.count}
+                        </span>
+                        <span className="text-slate-500 text-[10px] ml-1">
+                          ({item.percentage.toFixed(0)}%)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {refreshToast && (
