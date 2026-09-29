@@ -167,6 +167,8 @@ export interface CollectionCard {
   imageUrl?: string;
   acquiredPrice?: number;
   currentPriceUsd?: number;
+  medianPriceUsd?: number;
+  isPriceEstimated?: boolean;
   addedAt: number;
   notes?: string;
   isGamechanger?: boolean;

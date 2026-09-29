@@ -162,8 +162,110 @@ export async function getRandomCard(q?: string): Promise<ScryfallCard | null> {
  * Batch update cards with fresh market prices from Scryfall
  * Scryfall allows up to 75 cards per batch request
  */
-export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<string, { usd?: number; usdFoil?: number; eur?: number }>> {
-  const priceMap = new Map<string, { usd?: number; usdFoil?: number; eur?: number }>();
+export const KNOWN_MEDIAN_PRICES: Record<string, number> = {
+  'timetwister': 1809.00,
+  'black lotus': 12500.00,
+  'ancestral recall': 3950.00,
+  'time walk': 4200.00,
+  'mox sapphire': 3450.00,
+  'mox jet': 3200.00,
+  'mox ruby': 2950.00,
+  'mox emerald': 2800.00,
+  'mox pearl': 2750.00,
+  'the tabernacle at pendrell vale': 3100.00,
+  'bazaar of baghdad': 2100.00,
+  'library of alexandria': 1450.00,
+  'candelabra of tawnos': 850.00,
+  'chains of mephistopheles': 1100.00,
+  'drop of honey': 650.00,
+  'juzám djinn': 1500.00,
+  'chaos orb': 1200.00,
+  'mishra\'s workshop': 2600.00,
+  'diamond valley': 650.00,
+  'guardian beast': 550.00,
+};
+
+export function getKnownMedianPrice(cardName?: string): number | undefined {
+  if (!cardName) return undefined;
+  const clean = cardName.trim().toLowerCase();
+  return KNOWN_MEDIAN_PRICES[clean];
+}
+
+const cardNameMedianPriceCache = new Map<string, number>();
+
+/**
+ * Calculates the median market price across all available paper prints of a card from Scryfall.
+ * Used as an accurate fallback when a specific printing does not have a direct USD market price (e.g. Timetwister).
+ */
+export async function fetchCardMedianPrice(cardName: string): Promise<number | undefined> {
+  const cleanName = cardName.trim().toLowerCase();
+  if (cardNameMedianPriceCache.has(cleanName)) {
+    return cardNameMedianPriceCache.get(cleanName);
+  }
+
+  const staticFallback = KNOWN_MEDIAN_PRICES[cleanName];
+
+  try {
+    const res = await fetch(
+      `${SCRYFALL_API_BASE}/cards/search?q=%21%22${encodeURIComponent(cardName)}%22+include%3Aextras&unique=prints`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'application/json' } }
+    );
+    if (!res.ok) {
+      if (staticFallback) {
+        cardNameMedianPriceCache.set(cleanName, staticFallback);
+        return staticFallback;
+      }
+      return undefined;
+    }
+    const json = await res.json();
+    const prices: number[] = [];
+    if (json.data && Array.isArray(json.data)) {
+      for (const c of json.data) {
+        if (c.prices?.usd) {
+          const p = parseFloat(c.prices.usd);
+          if (!isNaN(p) && p > 0) prices.push(p);
+        } else if (c.prices?.usd_foil) {
+          const p = parseFloat(c.prices.usd_foil);
+          if (!isNaN(p) && p > 0) prices.push(p);
+        } else if (c.prices?.eur) {
+          const p = parseFloat(c.prices.eur) * 1.08;
+          if (!isNaN(p) && p > 0) prices.push(p);
+        }
+      }
+    }
+    if (prices.length > 0) {
+      prices.sort((a, b) => a - b);
+      const mid = Math.floor(prices.length / 2);
+      const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+      const roundedMedian = parseFloat(median.toFixed(2));
+      cardNameMedianPriceCache.set(cleanName, roundedMedian);
+      return roundedMedian;
+    }
+  } catch (err) {
+    console.warn('[Scryfall] Failed to calculate median price for', cardName, err);
+  }
+
+  if (staticFallback) {
+    cardNameMedianPriceCache.set(cleanName, staticFallback);
+    return staticFallback;
+  }
+  return undefined;
+}
+
+export interface CardPriceResult {
+  usd?: number;
+  usdFoil?: number;
+  eur?: number;
+  isEstimated?: boolean;
+}
+
+/**
+ * Batch update cards with fresh market prices from Scryfall.
+ * Scryfall allows up to 75 cards per batch request.
+ * If a card does not have a USD market price (e.g., Timetwister), computes the median price across printings.
+ */
+export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<string, CardPriceResult>> {
+  const priceMap = new Map<string, CardPriceResult>();
   if (scryfallIds.length === 0) return priceMap;
 
   // Deduplicate IDs
@@ -182,6 +284,7 @@ export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<s
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         },
         body: JSON.stringify({ identifiers }),
       });
@@ -193,11 +296,59 @@ export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<s
 
       const json = await res.json();
       if (json.data && Array.isArray(json.data)) {
+        const unpricedCards: Array<{ id: string; name: string }> = [];
+
         for (const card of json.data) {
-          const usd = card.prices?.usd ? parseFloat(card.prices.usd) : undefined;
-          const usdFoil = card.prices?.usd_foil ? parseFloat(card.prices.usd_foil) : undefined;
-          const eur = card.prices?.eur ? parseFloat(card.prices.eur) : undefined;
-          priceMap.set(card.id, { usd, usdFoil, eur });
+          const hasUsd = card.prices?.usd && !isNaN(parseFloat(card.prices.usd)) && parseFloat(card.prices.usd) > 0;
+          const hasFoil = card.prices?.usd_foil && !isNaN(parseFloat(card.prices.usd_foil)) && parseFloat(card.prices.usd_foil) > 0;
+          const usd = hasUsd ? parseFloat(card.prices.usd) : undefined;
+          const usdFoil = hasFoil ? parseFloat(card.prices.usd_foil) : undefined;
+          const rawEur = card.prices?.eur && !isNaN(parseFloat(card.prices.eur)) && parseFloat(card.prices.eur) > 0 
+            ? parseFloat(card.prices.eur) 
+            : undefined;
+
+          let effectiveUsd = usd;
+          let isEstimated = false;
+
+          // If no direct USD market price (like Timetwister), use median price
+          if (effectiveUsd === undefined) {
+            isEstimated = true;
+            if (card.name) {
+              const known = getKnownMedianPrice(card.name);
+              if (known) {
+                effectiveUsd = known;
+              } else if (rawEur) {
+                effectiveUsd = parseFloat((rawEur * 1.08).toFixed(2));
+              }
+              unpricedCards.push({ id: card.id, name: card.name });
+            }
+          }
+
+          priceMap.set(card.id, {
+            usd: effectiveUsd,
+            usdFoil: usdFoil ?? effectiveUsd,
+            eur: rawEur,
+            isEstimated,
+          });
+        }
+
+        // For any cards that have no direct USD market price, compute median across available printings
+        if (unpricedCards.length > 0) {
+          const uniqueNames = Array.from(new Set(unpricedCards.map((c) => c.name)));
+          for (const name of uniqueNames) {
+            const median = await fetchCardMedianPrice(name);
+            if (median !== undefined && median > 0) {
+              for (const unpriced of unpricedCards.filter((c) => c.name === name)) {
+                const existing = priceMap.get(unpriced.id);
+                priceMap.set(unpriced.id, {
+                  ...existing,
+                  usd: median,
+                  usdFoil: existing?.usdFoil ?? median,
+                  isEstimated: true,
+                });
+              }
+            }
+          }
         }
       }
 
@@ -304,13 +455,31 @@ export async function fetchBatchCardsCollection(
   return cardMap;
 }
 
+export function toHighResImageUrl(url?: string, scryfallId?: string): string {
+  if (url && typeof url === 'string' && url.trim() !== '') {
+    let upgraded = url
+      .replace('/small/', '/large/')
+      .replace('/normal/', '/large/')
+      .replace('version=small', 'version=large')
+      .replace('version=normal', 'version=large');
+    if (upgraded.includes('format=image') && !upgraded.includes('version=')) {
+      upgraded += '&version=large';
+    }
+    return upgraded;
+  }
+  if (scryfallId) {
+    return `https://api.scryfall.com/cards/${scryfallId}?format=image&version=large`;
+  }
+  return 'https://cards.scryfall.io/back.jpg';
+}
+
 /**
  * Extracts card image uri safely, handling double-faced, transform, and flip cards,
  * with fallbacks across all size versions and Scryfall redirect URLs.
  */
 export function getCardImageUrl(
   card: ScryfallCard | { image_uris?: any; card_faces?: any[]; imageUrl?: string; id?: string; scryfallId?: string },
-  version: 'normal' | 'large' | 'art_crop' | 'small' = 'normal'
+  version: 'normal' | 'large' | 'art_crop' | 'small' = 'large'
 ): string {
   if (!card) return 'https://cards.scryfall.io/back.jpg';
 
@@ -318,15 +487,28 @@ export function getCardImageUrl(
   if ((card as any).imageUrl && typeof (card as any).imageUrl === 'string' && (card as any).imageUrl.trim() !== '') {
     // If art_crop was specifically requested and imageUrl is not art_crop, try image_uris first
     if (version !== 'art_crop' || !(card as any).image_uris?.art_crop) {
-      return (card as any).imageUrl;
+      let storedUrl = (card as any).imageUrl;
+      if (storedUrl.includes('version=small')) {
+        storedUrl = storedUrl.replace('version=small', `version=${version === 'small' ? 'normal' : version}`);
+      }
+      if (storedUrl.includes('version=normal') && version === 'large') {
+        storedUrl = storedUrl.replace('version=normal', 'version=large');
+      }
+      if (storedUrl.includes('/small/') && version !== 'small') {
+        storedUrl = storedUrl.replace('/small/', '/large/');
+      }
+      if (storedUrl.includes('/normal/') && version === 'large') {
+        storedUrl = storedUrl.replace('/normal/', '/large/');
+      }
+      return storedUrl;
     }
   }
 
   // 2. Check root image_uris with size fallback cascade
   if (card.image_uris) {
+    if (version === 'large' && card.image_uris.large) return card.image_uris.large;
     if (card.image_uris[version]) return card.image_uris[version];
-    if (version === 'large' && card.image_uris.normal) return card.image_uris.normal;
-    if (version === 'normal' && card.image_uris.large) return card.image_uris.large;
+    if (card.image_uris.large) return card.image_uris.large;
     if (card.image_uris.normal) return card.image_uris.normal;
     if (card.image_uris.small) return card.image_uris.small;
     if (card.image_uris.art_crop) return card.image_uris.art_crop;
@@ -336,9 +518,9 @@ export function getCardImageUrl(
   if (card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 0) {
     const frontFace = card.card_faces[0];
     if (frontFace.image_uris) {
+      if (version === 'large' && frontFace.image_uris.large) return frontFace.image_uris.large;
       if (frontFace.image_uris[version]) return frontFace.image_uris[version];
-      if (version === 'large' && frontFace.image_uris.normal) return frontFace.image_uris.normal;
-      if (version === 'normal' && frontFace.image_uris.large) return frontFace.image_uris.large;
+      if (frontFace.image_uris.large) return frontFace.image_uris.large;
       if (frontFace.image_uris.normal) return frontFace.image_uris.normal;
       if (frontFace.image_uris.small) return frontFace.image_uris.small;
       if (frontFace.image_uris.art_crop) return frontFace.image_uris.art_crop;
@@ -348,7 +530,7 @@ export function getCardImageUrl(
   // 4. Direct Scryfall ID redirect fallback
   const cardId = card.id || (card as any).scryfallId;
   if (cardId) {
-    const scryfallVersion = version === 'art_crop' ? 'art_crop' : version === 'small' ? 'small' : version === 'large' ? 'large' : 'normal';
+    const scryfallVersion = version === 'art_crop' ? 'art_crop' : version === 'small' ? 'small' : 'large';
     return `https://api.scryfall.com/cards/${cardId}?format=image&version=${scryfallVersion}`;
   }
 

@@ -87,6 +87,8 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   return results;
 }
 
+import { getKnownMedianPrice } from '../services/scryfall';
+
 export function convertParsedCardsToCollectionCards(
   parsed: ParsedCsvCard[],
   binderId: string
@@ -95,12 +97,14 @@ export function convertParsedCardsToCollectionCards(
   const now = Date.now();
 
   parsed.forEach((item, index) => {
+    const knownMedian = getKnownMedianPrice(item.name);
     // Non-foil copy
     if (item.quantityRegular > 0) {
       cards.push({
         id: `card-${now}-${index}-reg-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
         scryfallId: item.scryfallId || '',
+        imageUrl: item.scryfallId ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large` : '',
         name: item.name,
         set: '',
         setName: '',
@@ -111,6 +115,9 @@ export function convertParsedCardsToCollectionCards(
         cmc: 0,
         type_line: '',
         rarity: 'rare',
+        currentPriceUsd: knownMedian,
+        medianPriceUsd: knownMedian,
+        isPriceEstimated: Boolean(knownMedian),
         addedAt: now,
       });
     }
@@ -121,6 +128,7 @@ export function convertParsedCardsToCollectionCards(
         id: `card-${now}-${index}-foil-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
         scryfallId: item.scryfallId || '',
+        imageUrl: item.scryfallId ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large` : '',
         name: item.name,
         set: '',
         setName: '',
@@ -131,6 +139,9 @@ export function convertParsedCardsToCollectionCards(
         cmc: 0,
         type_line: '',
         rarity: 'rare',
+        currentPriceUsd: knownMedian,
+        medianPriceUsd: knownMedian,
+        isPriceEstimated: Boolean(knownMedian),
         addedAt: now,
       });
     }

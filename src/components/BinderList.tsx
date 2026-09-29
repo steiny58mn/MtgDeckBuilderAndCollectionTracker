@@ -1,5 +1,5 @@
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ConfirmModal } from './ConfirmModal';
 import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink, Upload } from 'lucide-react';
 import { Binder } from '../types/mtg';
@@ -26,9 +26,12 @@ export const BinderList: React.FC<BinderListProps> = ({
   const [newBinderDesc, setNewBinderDesc] = useState('');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
 
-  const filteredBinders = binders
-    .filter((b) => !searchQuery.trim() || b.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+  const filteredBinders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return binders
+      .filter((b) => !q || b.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+  }, [binders, searchQuery]);
 
   useEffect(() => {
     console.log(`[BinderList] 📁 State check: ${binders.length} total binder(s), ${filteredBinders.length} matching filter.`, {

@@ -223,16 +223,38 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
               <FileText className="w-3.5 h-3.5 text-emerald-400" />
               <span>CSV File / Content</span>
             </label>
-            <label className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-bold cursor-pointer">
-              <Upload className="w-3.5 h-3.5" />
-              <span>Upload .csv File</span>
-              <input
-                type="file"
-                accept=".csv,.txt"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-            </label>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/sample-collection.csv');
+                    if (res.ok) {
+                      const txt = await res.text();
+                      handleTextChange(txt);
+                      setNewBinderName('Vintage Collection & Staples');
+                    }
+                  } catch (err) {
+                    console.error('Failed to load sample CSV:', err);
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 font-semibold cursor-pointer"
+                title="Load sample collection containing Timetwister, Taiga, and foils"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Load Sample CSV</span>
+              </button>
+              <label className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-bold cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload .csv File</span>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
           </div>
 
           <textarea

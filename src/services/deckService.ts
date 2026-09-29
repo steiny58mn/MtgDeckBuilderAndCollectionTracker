@@ -5,7 +5,7 @@
  */
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
-import { fetchBatchCardPrices, fetchBatchCardsCollection } from './scryfall';
+import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice } from './scryfall';
 import { AuthService } from './authService';
 import {
   createDeckListApi,
@@ -262,7 +262,7 @@ export function normalizeBinderCard(card: any): CollectionCard {
     color_identity: colorIdentity,
     colorIdentity,
     rarity: card.rarity || card.Rarity || 'common',
-    imageUrl: card.imageUrl || card.ImageUrl,
+    imageUrl: (card.imageUrl || card.ImageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : ''))?.replace('version=small', 'version=normal'),
     acquiredPrice: card.acquiredPrice ?? card.AcquiredPrice,
     currentPriceUsd: card.currentPriceUsd ?? card.CurrentPriceUsd ?? card.priceUsd,
     addedAt: parseTimestamp(card.addedAt ?? card.AddedAt),
@@ -2099,11 +2099,31 @@ export class DeckService {
       const updatedCards = binder.cards.map((item) => {
         const fresh = priceMap.get(item.scryfallId);
         if (fresh) {
-          hasChanges = true;
-          return {
-            ...item,
-            currentPriceUsd: fresh.usd !== undefined ? fresh.usd : item.currentPriceUsd,
-          };
+          const freshPrice = item.isFoil
+            ? (fresh.usdFoil !== undefined ? fresh.usdFoil : fresh.usd)
+            : (fresh.usd !== undefined ? fresh.usd : fresh.usdFoil);
+          if (freshPrice !== undefined && freshPrice > 0) {
+            if (freshPrice !== item.currentPriceUsd || fresh.isEstimated !== item.isPriceEstimated) {
+              hasChanges = true;
+              return {
+                ...item,
+                currentPriceUsd: freshPrice,
+                medianPriceUsd: fresh.isEstimated ? freshPrice : item.medianPriceUsd,
+                isPriceEstimated: fresh.isEstimated,
+              };
+            }
+          }
+        } else if (!item.currentPriceUsd || item.currentPriceUsd === 0) {
+          const knownMedian = getKnownMedianPrice(item.name);
+          if (knownMedian && knownMedian > 0) {
+            hasChanges = true;
+            return {
+              ...item,
+              currentPriceUsd: knownMedian,
+              medianPriceUsd: knownMedian,
+              isPriceEstimated: true,
+            };
+          }
         }
         return item;
       });

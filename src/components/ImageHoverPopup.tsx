@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export interface ImageHoverInfo {
   imageUrl: string;
@@ -13,7 +13,7 @@ export interface ActiveHoverPreview extends ImageHoverInfo {
   y: number;
 }
 
-export function useImageHoverPreview(delay: number = 500) {
+export function useImageHoverPreview(delay: number = 150) {
   const [activePreview, setActivePreview] = useState<ActiveHoverPreview | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingRef = useRef<ActiveHoverPreview | null>(null);
