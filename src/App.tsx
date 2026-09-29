@@ -436,6 +436,15 @@ export default function App() {
     // Get latest state to prevent race conditions
     const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
+    // Check format legality & ban list
+    if (card.legalities && card.legalities[latestActiveDeck.format] === 'banned') {
+      showToast(
+        `Banned Card: "${card.name}" is banned in ${latestActiveDeck.format} format and cannot be added!`,
+        'info'
+      );
+      return;
+    }
+
     // Check Commander rules
     if (latestActiveDeck.format === 'commander') {
       const commanderInfo = getDeckCommander(latestActiveDeck);

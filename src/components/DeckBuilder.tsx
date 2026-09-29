@@ -53,13 +53,13 @@ import {
   getCardCategorySortOrder,
   getCardEffectiveColors,
   getCardColorCategoryRank,
-  getCardColorGroup
+  getCardColorGroup,
+  detectGamechangers
 } from '../utils/deckUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { DeckStatsModal } from './DeckStatsModal';
-import { GamechangersPanel } from './GamechangersPanel';
 import { CommanderRecommendationsModal } from './CommanderRecommendationsModal';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
@@ -111,6 +111,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [dragOverCategory, setDragOverCategory] = useState<DeckCategory | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
+  const [showGamechangersDetails, setShowGamechangersDetails] = useState(false);
+  const gamechangers = useMemo(() => detectGamechangers(deck), [deck]);
+  const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
@@ -1810,6 +1813,78 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Gamechangers Dropdown Badge */}
+                {gamechangers.length > 0 && (
+                  <div className="relative shrink-0 z-50">
+                    <button
+                      type="button"
+                      onClick={() => setShowGamechangersDetails(!showGamechangersDetails)}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-500/70 text-[11px] font-bold text-amber-300 hover:bg-amber-900/80 transition-colors cursor-pointer shadow-xs"
+                      title="Click to view deck Gamechangers"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-amber-400" />
+                      <span>Gamechangers ({gamechangers.length})</span>
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showGamechangersDetails ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showGamechangersDetails && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-[60] bg-transparent cursor-default"
+                          onClick={() => setShowGamechangersDetails(false)}
+                        />
+                        <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-amber-500 shadow-2xl ring-1 ring-amber-500/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
+                          <div className="font-semibold text-amber-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
+                            <span className="flex items-center gap-1.5 font-bold">
+                              <Zap className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400" />
+                              Gamechangers ({gamechangers.length} Unique, {totalGamechangerCards} Cards):
+                            </span>
+                            <button 
+                              type="button"
+                              onClick={() => setShowGamechangersDetails(false)}
+                              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Close"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            {gamechangers.map((gc, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  if (onSelectCard && gc.card) {
+                                    onSelectCard(gc.card as any);
+                                  }
+                                  setShowGamechangersDetails(false);
+                                }}
+                                className="flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 cursor-pointer transition-colors group"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {gc.card.imageUrl && (
+                                    <img src={gc.card.imageUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
+                                      {gc.card.name}
+                                    </div>
+                                    <div className="text-[10px] text-amber-400/90 font-medium truncate">
+                                      {gc.icon} {gc.categoryLabel} · {gc.impactReason}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className="text-[11px] font-mono font-bold text-slate-400 shrink-0 ml-2">
+                                  ×{gc.card.quantity || 1}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Right Side: Condensed Iteration Dropdown and Format Dropdown */}
@@ -2146,9 +2221,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Easy-to-view, collapsible Gamechangers Panel */}
-      <GamechangersPanel deck={activeDeck} onSelectCard={onSelectCard} />
 
       {/* Category Grid View */}
       {viewMode === 'category-grid' ? (

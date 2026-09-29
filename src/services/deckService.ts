@@ -171,6 +171,7 @@ export function normalizeCard(card: any): DeckCard {
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
+    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
   };
 }
 
@@ -264,6 +265,7 @@ export function normalizeBinderCard(card: any): CollectionCard {
     currentPriceUsd: card.currentPriceUsd ?? card.CurrentPriceUsd ?? card.priceUsd,
     addedAt: parseTimestamp(card.addedAt ?? card.AddedAt),
     notes: card.notes ?? card.Notes,
+    isGamechanger: Boolean(card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
   };
 }
 
@@ -610,7 +612,7 @@ export async function getRemoteDeckHistory(
     return normalized;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ❌ Error in getRemoteDeckHistory (${durationMs}ms):`, err);
+    console.debug(`[DeckService] ℹ️ getRemoteDeckHistory offline/unreachable (${durationMs}ms):`, (err as any)?.message || err);
     console.groupEnd();
     return [];
   }
@@ -647,7 +649,7 @@ export async function getRemoteDeckHistorySnapshot(
     return normalized;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ❌ Error in getRemoteDeckHistorySnapshot (${durationMs}ms):`, err);
+    console.debug(`[DeckService] ℹ️ getRemoteDeckHistorySnapshot offline/unreachable (${durationMs}ms):`, (err as any)?.message || err);
     console.groupEnd();
     return null;
   }

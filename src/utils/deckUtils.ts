@@ -1903,14 +1903,35 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const cleanName = card.name.split(' // ')[0].trim();
     if (seenCardNames.has(cleanName)) return;
 
+    const isExplicitGamechanger = Boolean(
+      card.isGamechanger || 
+      card.is_gamechanger || 
+      (card as any).IsGamechanger
+    );
+
     // Check registry first
     const directMatch = GAMECHANGER_REGISTRY[cleanName];
-    if (directMatch) {
+    if (directMatch || isExplicitGamechanger) {
       seenCardNames.add(cleanName);
-      results.push({
-        card,
-        ...directMatch,
-      });
+      if (directMatch) {
+        results.push({
+          card,
+          ...directMatch,
+        });
+      } else {
+        // Card has explicit isGamechanger flag from Scryfall JSON but not in registry
+        results.push({
+          card,
+          category: 'value_engine',
+          categoryLabel: 'Gamechanger Staple',
+          badgeBg: 'bg-amber-950/80',
+          badgeBorder: 'border-amber-500/50',
+          badgeText: 'text-amber-300',
+          icon: '⚡',
+          impactReason: 'High-impact format staple designated as a Gamechanger',
+          tier: 'S',
+        });
+      }
       return;
     }
 

@@ -542,9 +542,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFormat, setSelectedFormat] = useState<string>(activeDeck?.format || '');
 
-  // Filter results based on format limit
+  // Filter results based on format limit and banned list
+  const [hideBannedCards, setHideBannedCards] = useState<boolean>(true);
+
   const displayedCards = results.filter((card) => {
+    const formatToCheck = activeDeck?.format || selectedFormat;
+    if (hideBannedCards && formatToCheck && card.legalities && card.legalities[formatToCheck] === 'banned') {
+      return false;
+    }
     if (!isDeckContext || !activeDeck || showCardsAtLimit) return true;
     const copies = getDeckCopies(card);
     const limit = getDeckLimit(card);
@@ -567,7 +574,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [cmcMax, setCmcMax] = useState<string>('');
   const [specificManaCost, setSpecificManaCost] = useState<string>('');
   const [selectedRarity, setSelectedRarity] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<string>(activeDeck?.format || '');
   const [scopeBySearchTerm, setScopeBySearchTerm] = useState<boolean>(false);
   const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState<boolean>(false);
   const [copiedQuery, setCopiedQuery] = useState<boolean>(false);
@@ -994,7 +1000,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-28">
       {/* Context & Navigation Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-md">
         {/* Left: Mode Switcher & Target info */}
@@ -1532,6 +1538,17 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               )}
               {isAdvancedFiltersOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
+
+            {/* Hide Banned Cards Toggle */}
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-300 cursor-pointer hover:border-slate-700 transition-colors">
+              <input
+                type="checkbox"
+                checked={hideBannedCards}
+                onChange={(e) => setHideBannedCards(e.target.checked)}
+                className="rounded border-slate-700 text-fuchsia-600 focus:ring-fuchsia-500 bg-slate-900 w-3.5 h-3.5 cursor-pointer"
+              />
+              <span>Hide Banned ({activeDeck?.format || selectedFormat || 'Commander'})</span>
+            </label>
           </div>
         </div>
 

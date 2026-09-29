@@ -24,9 +24,9 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('deck_builder_gamechangers_collapsed');
-      return saved ? JSON.parse(saved) : false;
+      return saved ? JSON.parse(saved) : true;
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -72,7 +72,7 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-black tracking-wide text-white flex items-center gap-1.5">
-                <span>Deck Gamechangers</span>
+                <span>Gamechangers</span>
               </h3>
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
                 gamechangers.length > 0 
