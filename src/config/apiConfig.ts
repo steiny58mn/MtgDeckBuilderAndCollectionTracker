@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Centralized API & Backend Configuration
  * Single source of truth for API base URLs, tenant headers, and fetch handling.
  */
@@ -28,8 +28,7 @@ export function isLocalEnvironment(): boolean {
  * Resolves the active API Base URL in prioritized order:
  * 1. Runtime override in localStorage['mtg_custom_api_base_url']
  * 2. Vite environment variable import.meta.env.VITE_API_BASE_URL (ignoring localhost URLs when running on remote domains)
- * 3. Localhost browser detection -> http://localhost:5205
- * 4. Production Cloudflare deployment -> '' (relative same-origin proxy via worker.ts) or DEFAULT_PROD_API_URL
+ * 3. Default to production API URL -> https://api.frostpointlabs.com
  */
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
@@ -43,21 +42,15 @@ export function getApiBaseUrl(): string {
   const envUrl = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined)?.trim();
 
   if (envUrl) {
-    // Safety guard for Cloudflare / remote deployments:
+    // Safety guard for remote deployments:
     // If a localhost URL was baked in during a local build, ignore it on remote hostnames.
     if (!isLocal && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
-      return '';
+      return DEFAULT_PROD_API_URL;
     }
     return envUrl.replace(/\/+$/, '');
   }
 
-  if (isLocal) {
-    return DEFAULT_LOCAL_API_URL;
-  }
-
-  // In Cloudflare production, relative same-origin '' is handled directly by the
-  // Cloudflare Worker edge proxy (worker.ts -> api.frostpointlabs.com)
-  return '';
+  return DEFAULT_PROD_API_URL;
 }
 
 /**

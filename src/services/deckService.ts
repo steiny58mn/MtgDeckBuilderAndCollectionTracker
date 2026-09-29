@@ -472,17 +472,12 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
  * Delete deck from remote C# API (DELETE /deckbuilder/decks/{id})
  */
 export async function deleteRemoteDeck(deckId: string): Promise<boolean> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/decks/${deckId}` : `/deckbuilder/decks/${deckId}`;
-  const headers = getAuthHeaders();
   const start = performance.now();
-
-  console.log(`[DeckService] 🗑️ Deleting deck ${deckId} via ${targetUrl}...`);
+  console.log(`[DeckService] 🗑️ Deleting deck ${deckId}...`);
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await apiFetch(`/deckbuilder/decks/${encodeURIComponent(deckId)}`, {
       method: 'DELETE',
-      headers,
     });
     const durationMs = Math.round(performance.now() - start);
 
@@ -583,45 +578,39 @@ export async function getRemoteDeckHistory(
   deckId: string,
   useAliasRoute: boolean = false
 ): Promise<DeckHistoryItem[]> {
-  const baseUrl = getApiBaseUrl();
   const routePath = useAliasRoute
     ? `/deckbuilder/decks/history/${encodeURIComponent(deckId)}`
     : `/deckbuilder/decks/${encodeURIComponent(deckId)}/history`;
-  const targetUrl = baseUrl ? `${baseUrl}${routePath}` : routePath;
-  const headers = getAuthHeaders();
   const start = performance.now();
 
-  console.groupCollapsed(`[DeckService] ?? Fetching deck history from ${targetUrl}`);
+  console.groupCollapsed(`[DeckService] 📜 Fetching deck history for deck ${deckId}`);
   console.log('[DeckService] Deck ID:', deckId, 'Use Alias:', useAliasRoute);
 
   try {
-    const res = await fetch(targetUrl, {
-      method: 'GET',
-      headers,
-    });
+    const res = await apiFetch(routePath);
     const durationMs = Math.round(performance.now() - start);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[DeckService] ?? getRemoteDeckHistory returned HTTP ${res.status}:`, errText);
+      console.warn(`[DeckService] ⚠️ getRemoteDeckHistory returned HTTP ${res.status}:`, errText);
       console.groupEnd();
       return [];
     }
 
     const data = await res.json();
     if (!Array.isArray(data)) {
-      console.warn('[DeckService] ?? getRemoteDeckHistory returned non-array:', data);
+      console.warn('[DeckService] ⚠️ getRemoteDeckHistory returned non-array:', data);
       console.groupEnd();
       return [];
     }
 
     const normalized = data.map(normalizeHistoryItem);
-    console.log(`[DeckService] ? Loaded ${normalized.length} history snapshot(s) (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Loaded ${normalized.length} history snapshot(s) (${durationMs}ms)`);
     console.groupEnd();
     return normalized;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ? Error in getRemoteDeckHistory (${durationMs}ms):`, err);
+    console.error(`[DeckService] ❌ Error in getRemoteDeckHistory (${durationMs}ms):`, err);
     console.groupEnd();
     return [];
   }
@@ -635,36 +624,30 @@ export async function getRemoteDeckHistorySnapshot(
   deckId: string,
   historyId: string
 ): Promise<DeckHistoryItem | null> {
-  const baseUrl = getApiBaseUrl();
   const routePath = `/deckbuilder/decks/${encodeURIComponent(deckId)}/history/${encodeURIComponent(historyId)}`;
-  const targetUrl = baseUrl ? `${baseUrl}${routePath}` : routePath;
-  const headers = getAuthHeaders();
   const start = performance.now();
 
-  console.groupCollapsed(`[DeckService] ?? Fetching history snapshot ${historyId} for deck ${deckId}`);
+  console.groupCollapsed(`[DeckService] 📜 Fetching history snapshot ${historyId} for deck ${deckId}`);
 
   try {
-    const res = await fetch(targetUrl, {
-      method: 'GET',
-      headers,
-    });
+    const res = await apiFetch(routePath);
     const durationMs = Math.round(performance.now() - start);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[DeckService] ?? getRemoteDeckHistorySnapshot returned HTTP ${res.status}:`, errText);
+      console.warn(`[DeckService] ⚠️ getRemoteDeckHistorySnapshot returned HTTP ${res.status}:`, errText);
       console.groupEnd();
       return null;
     }
 
     const data = await res.json();
     const normalized = normalizeHistoryItem(data);
-    console.log(`[DeckService] ? Loaded snapshot ${historyId} (${durationMs}ms)`);
+    console.log(`[DeckService] ✅ Loaded snapshot ${historyId} (${durationMs}ms)`);
     console.groupEnd();
     return normalized;
   } catch (err) {
     const durationMs = Math.round(performance.now() - start);
-    console.error(`[DeckService] ? Error in getRemoteDeckHistorySnapshot (${durationMs}ms):`, err);
+    console.error(`[DeckService] ❌ Error in getRemoteDeckHistorySnapshot (${durationMs}ms):`, err);
     console.groupEnd();
     return null;
   }
@@ -1409,20 +1392,11 @@ export const compareDecks = compareDeckIterationsWithApi;
 export const CompareDecks = compareDeckIterationsWithApi;
 
 export async function getRemoteBinders(): Promise<Binder[]> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
-  const headers = getAuthHeaders();
-  const vaultId = headers['X-Vault-Id'];
   const start = performance.now();
-
-  console.groupCollapsed(`[DeckService] 📡 Fetching binders from ${targetUrl} [Vault: ${vaultId}]`);
-  console.log('[DeckService] Request URL:', targetUrl);
-  console.log('[DeckService] Request Headers:', headers);
+  console.groupCollapsed(`[DeckService] 📡 Fetching binders`);
 
   try {
-    const res = await fetch(targetUrl, {
-      headers,
-    });
+    const res = await apiFetch('/deckbuilder/binders');
     const durationMs = Math.round(performance.now() - start);
 
     console.log(`[DeckService] Response status: ${res.status} ${res.statusText} (${durationMs}ms)`);
@@ -1469,10 +1443,6 @@ export async function getRemoteBinders(): Promise<Binder[]> {
       userId: (b as any).userId ?? '(none/null)',
     })));
 
-    if (normalizedBinders.length === 0) {
-      console.warn(`[DeckService] ℹ️ 0 binders returned for Vault ID "${vaultId}". Note: If binders in the database were created with a different Vault ID or with NULL Vault ID, backend tenant filtering will exclude them.`);
-    }
-
     console.groupEnd();
     return normalizedBinders;
   } catch (err) {
@@ -1487,11 +1457,6 @@ export async function getRemoteBinders(): Promise<Binder[]> {
  * Save/upsert binder to remote C# API (POST /deckbuilder/binders)
  */
 export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders` : '/deckbuilder/binders';
-  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
-  const start = performance.now();
-
   const preparedCards = (binder.cards || []).map((c) => {
     const typeLine = c.type_line || (c as any).typeLine || (c as any).TypeLine || '';
     const manaCost = c.mana_cost || (c as any).manaCost || (c as any).ManaCost || '';
@@ -1518,17 +1483,17 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
     cards: preparedCards,
   };
 
-  console.log(`[DeckService] 💾 Saving binder "${binder.name}" (${binder.id}) to ${targetUrl}...`, {
+  const start = performance.now();
+  console.log(`[DeckService] 💾 Saving binder "${binder.name}" (${binder.id})...`, {
     binderId: binder.id,
     name: binder.name,
     cardCount: preparedCards.reduce((sum, c) => sum + (c.quantity || 1), 0),
-    vaultId: headers['X-Vault-Id'],
   });
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await apiFetch('/deckbuilder/binders', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(preparedBinder),
     });
     const durationMs = Math.round(performance.now() - start);
@@ -1553,17 +1518,12 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
  * Delete binder from remote C# API (DELETE /deckbuilder/binders/{id})
  */
 export async function deleteRemoteBinder(binderId: string): Promise<boolean> {
-  const baseUrl = getApiBaseUrl();
-  const targetUrl = baseUrl ? `${baseUrl}/deckbuilder/binders/${binderId}` : `/deckbuilder/binders/${binderId}`;
-  const headers = getAuthHeaders();
   const start = performance.now();
-
-  console.log(`[DeckService] 🗑️ Deleting binder ${binderId} via ${targetUrl}...`);
+  console.log(`[DeckService] 🗑️ Deleting binder ${binderId}...`);
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await apiFetch(`/deckbuilder/binders/${encodeURIComponent(binderId)}`, {
       method: 'DELETE',
-      headers,
     });
     const durationMs = Math.round(performance.now() - start);
 
