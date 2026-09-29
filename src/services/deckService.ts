@@ -275,7 +275,7 @@ export function normalizeBinderCard(card: any): CollectionCard {
  */
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
-  const missing = deck.cards.filter((c) => (!c.type_line && !(c as any).typeLine) && Boolean(c.name));
+  const missing = deck.cards.filter((c) => ((!c.type_line && !(c as any).typeLine) || (c.isGamechanger === undefined && c.game_changer === undefined)) && Boolean(c.name));
   if (missing.length === 0) return deck;
 
   try {
@@ -284,28 +284,34 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
 
     let changed = false;
     const updatedCards = deck.cards.map((c) => {
-      if (c.type_line || (c as any).typeLine) return c;
       const exact = (c.name || '').toLowerCase().trim();
       const front = exact.split(' // ')[0].trim();
       const matched = scryfallMap.get(exact) || scryfallMap.get(front);
       if (matched) {
-        changed = true;
-        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || '';
+        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        return {
-          ...c,
-          type_line: typeLine,
-          typeLine,
-          mana_cost: manaCost,
-          manaCost,
-          cmc: matched.cmc ?? c.cmc,
-          imageUrl: img,
-          colors: matched.colors || c.colors,
-          color_identity: matched.color_identity || c.color_identity,
-          rarity: matched.rarity || c.rarity,
-          set_name: matched.set_name || c.set_name,
-        };
+        const isGc = Boolean(matched.game_changer || matched.gameChanger || matched.isGamechanger || matched.is_gamechanger);
+        
+        const needsUpdate = !c.type_line || (c.isGamechanger === undefined && c.game_changer === undefined);
+        if (needsUpdate || isGc !== Boolean(c.isGamechanger || c.game_changer)) {
+          changed = true;
+          return {
+            ...c,
+            type_line: typeLine,
+            typeLine: typeLine || c.typeLine,
+            mana_cost: manaCost,
+            manaCost: manaCost || c.manaCost,
+            cmc: matched.cmc ?? c.cmc,
+            imageUrl: img || c.imageUrl,
+            colors: matched.colors || c.colors,
+            color_identity: matched.color_identity || c.color_identity,
+            rarity: matched.rarity || c.rarity,
+            set_name: matched.set_name || c.set_name,
+            isGamechanger: isGc || Boolean(c.isGamechanger || c.game_changer),
+            game_changer: isGc || Boolean(c.isGamechanger || c.game_changer),
+          };
+        }
       }
       return c;
     });

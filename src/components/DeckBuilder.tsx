@@ -336,6 +336,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   // Keep saved baseline synced when switching to a different deck
   useEffect(() => {
+    DeckService.enrichDeckCards(deck).catch(() => {});
     const fromService = DeckService.getLastSavedDeck(deck.id);
     if (fromService && fromService.cards) {
       setSavedCards(JSON.parse(JSON.stringify(fromService.cards)));
