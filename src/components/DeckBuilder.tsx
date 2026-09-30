@@ -2,7 +2,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   ArrowLeft,
   GitCompare,
@@ -39,6 +39,7 @@ import {
   BarChart2,
   ArrowLeftRight,
   CheckCircle2,
+  AlertCircle,
   Check,
   Upload,
   ExternalLink
@@ -55,6 +56,7 @@ import {
   getCardColorCategoryRank,
   getCardColorGroup,
   detectGamechangers,
+  isCardGamechanger,
   sortWUBRG
 } from '../utils/deckUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
@@ -166,8 +168,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [cardFilterQuery, setCardFilterQuery] = useState<string>('');
   const [statsScope, setStatsScope] = useState<'main' | 'all'>('main');
   const [cardToSwap, setCardToSwap] = useState<DeckCard | null>(null);
-  const [showOwnership, setShowOwnership] = useState<boolean>(false);
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'owned' | 'unowned'>('all');
   const [missingCardsCopied, setMissingCardsCopied] = useState<boolean>(false);
+
+  const cycleOwnershipFilter = () => {
+    setOwnershipFilter((prev) => {
+      if (prev === 'all') return 'owned';
+      if (prev === 'owned') return 'unowned';
+      return 'all';
+    });
+  };
 
   // Collection tracking
   const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
@@ -178,11 +188,34 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const collectionCountMap = useMemo(() => {
     const map = new Map<string, number>();
     collectionCards.forEach((c) => {
-      const name = c.name.toLowerCase().trim();
-      map.set(name, (map.get(name) || 0) + (c.quantity || 1));
+      const name = (c.name || '').toLowerCase().trim();
+      if (!name) return;
+      const qty = c.quantity || 1;
+      map.set(name, (map.get(name) || 0) + qty);
+      const cleanFront = name.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+      if (cleanFront && cleanFront !== name) {
+        map.set(cleanFront, (map.get(cleanFront) || 0) + qty);
+      }
+      const normalizedQuotes = name.replace(/['’`"]/g, "'");
+      if (normalizedQuotes !== name) {
+        map.set(normalizedQuotes, (map.get(normalizedQuotes) || 0) + qty);
+      }
     });
     return map;
   }, [collectionCards]);
+
+  const getCardOwnedQuantity = useCallback((cardName: string): number => {
+    if (!cardName) return 0;
+    const name = cardName.toLowerCase().trim();
+    if (collectionCountMap.has(name)) return collectionCountMap.get(name)!;
+    const cleanFront = name.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    if (collectionCountMap.has(cleanFront)) return collectionCountMap.get(cleanFront)!;
+    const normalizedQuotes = name.replace(/['’`"]/g, "'");
+    if (collectionCountMap.has(normalizedQuotes)) return collectionCountMap.get(normalizedQuotes)!;
+    const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
+    if (collectionCountMap.has(cleanFrontNoQuotes)) return collectionCountMap.get(cleanFrontNoQuotes)!;
+    return 0;
+  }, [collectionCountMap]);
 
 
   const handleExportMissingCards = async () => {
@@ -300,11 +333,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const missingList: { card: DeckCard; missingQty: number }[] = [];
 
     activeDeck.cards.forEach((c) => {
-      const isMainOrCmdr = c.category === 'main' || c.category === 'commander';
-      if (!isMainOrCmdr) return;
+      const cat = (c.category || 'main').toLowerCase();
+      if (cat === 'sideboard' || cat === 'maybeboard') return;
       const qty = c.quantity || 1;
       needed += qty;
-      const inCol = collectionCountMap.get(c.name.toLowerCase().trim()) || 0;
+      const inCol = getCardOwnedQuantity(c.name);
       const ownedCopies = Math.min(qty, inCol);
       owned += ownedCopies;
       if (ownedCopies < qty) {
@@ -316,7 +349,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
 
     return { owned, needed, missingPrice, missingList };
-  }, [activeDeck.cards, collectionCountMap]);
+  }, [activeDeck.cards, getCardOwnedQuantity]);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -1239,13 +1272,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   const matchesCardFilter = (c: DeckCard) => {
-    if (!cardFilterQuery.trim()) return true;
-    const q = cardFilterQuery.toLowerCase().trim();
-    return (
-      c.name.toLowerCase().includes(q) ||
-      (c.type_line || (c as any).typeLine || '').toLowerCase().includes(q) ||
-      (c.oracle_text || '').toLowerCase().includes(q)
-    );
+    if (cardFilterQuery.trim()) {
+      const q = cardFilterQuery.toLowerCase().trim();
+      const textMatch = (
+        c.name.toLowerCase().includes(q) ||
+        (c.type_line || (c as any).typeLine || '').toLowerCase().includes(q) ||
+        (c.oracle_text || '').toLowerCase().includes(q)
+      );
+      if (!textMatch) return false;
+    }
+
+    if (ownershipFilter === 'owned') {
+      const inCol = getCardOwnedQuantity(c.name);
+      return inCol > 0;
+    }
+
+    if (ownershipFilter === 'unowned') {
+      const inCol = getCardOwnedQuantity(c.name);
+      return inCol < (c.quantity || 1);
+    }
+
+    return true;
   };
 
   // Main cards include all mainboard cards; commanders are kept separate in their own panel at the top
@@ -1455,15 +1502,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
 
         {commanderCards.length > 0 ? (
-          viewMode === 'grid' ? (
-            <div className="p-4 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {commanderCards.map((card) => renderCardGridItem(card))}
-            </div>
-          ) : (
-            <div className="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {commanderCards.map((card) => renderCardRow(card))}
-            </div>
-          )
+          (() => {
+            const visibleCommanders = commanderCards.filter(matchesCardFilter);
+            if (visibleCommanders.length === 0 && (ownershipFilter !== 'all' || cardFilterQuery.trim())) {
+              return (
+                <div className="p-3.5 text-center text-xs text-slate-400 bg-slate-950/40 border-t border-slate-800/60">
+                  <span>Commander ({commanderCards.map(c => c.name).join(', ')}) is hidden by active {ownershipFilter !== 'all' ? `${ownershipFilter} ownership` : 'search'} filter.</span>
+                </div>
+              );
+            }
+            return viewMode === 'grid' ? (
+              <div className="p-4 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {visibleCommanders.map((card) => renderCardGridItem(card))}
+              </div>
+            ) : (
+              <div className="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {visibleCommanders.map((card) => renderCardRow(card))}
+              </div>
+            );
+          })()
         ) : (
           <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2">
             <Crown className="w-6 h-6 text-slate-600 animate-pulse" />
@@ -1789,56 +1846,142 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
 
-                {/* MTGNexus URL Text Box */}
-                <div className="flex items-center gap-1.5 w-full sm:w-auto min-w-[200px] md:min-w-[260px] lg:min-w-[300px] shrink-0">
-                  <div className="relative flex-1 flex items-center">
-                    <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 pointer-events-none select-none">
-                      MTGNexus:
-                    </span>
-                    <input
-                      type="url"
-                      value={nexusUrl}
-                      onChange={(e) => {
-                        const newUrl = e.target.value;
-                        setNexusUrl(newUrl);
-                        onUpdateDeck({
-                          ...deck,
-                          mtgNexusEditThreadUrl: newUrl.trim() || undefined,
-                        });
-                        setHasUnsavedChanges(true);
-                        DeckService.setDeckHasUnsavedChanges(deck.id, true);
-                      }}
-                      placeholder="Thread / Edit URL..."
-                      className="w-full bg-slate-950/90 border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-lg pl-22 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
-                      title="MTGNexus Thread or Edit URL for 1-click sync"
-                    />
-                  </div>
-                  {nexusUrl && (
-                    <button
-                      type="button"
-                      onClick={handleSyncMtgNexus}
-                      disabled={isNexusSyncing}
-                      className="px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-500/50 text-emerald-300 hover:text-emerald-200 transition-all shrink-0 cursor-pointer flex items-center gap-1.5 text-xs font-bold shadow-xs disabled:opacity-50"
-                      title="Automated Sync: Copy BBCode & Open MTGNexus in new tab"
-                    >
-                      {isNexusSyncing ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                      ) : (
-                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                      )}
-                      <span className="hidden sm:inline">{isNexusSyncing ? 'Syncing...' : 'Sync'}</span>
-                      <ExternalLink className="w-3 h-3 text-emerald-400/80" />
-                    </button>
+                {/* Collection Ownership Interactive Toggle Badge in Top Header */}
+                <button
+                  type="button"
+                  onClick={cycleOwnershipFilter}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0 ${
+                    ownershipFilter === 'owned'
+                      ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 ring-1 ring-emerald-500/40'
+                      : ownershipFilter === 'unowned'
+                      ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-500/40'
+                      : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
+                  }`}
+                  title={
+                    ownershipFilter === 'all'
+                      ? `Ownership Filter: Showing All cards (${ownershipStats.owned}/${ownershipStats.needed} owned). Click to show Owned only.`
+                      : ownershipFilter === 'owned'
+                      ? `Ownership Filter: Showing Owned cards only (${ownershipStats.owned} owned). Click to show Unowned / Missing only.`
+                      : `Ownership Filter: Showing Unowned / Missing cards only (${ownershipStats.needed - ownershipStats.owned} missing). Click to show All cards.`
+                  }
+                >
+                  {ownershipFilter === 'owned' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  ) : ownershipFilter === 'unowned' ? (
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  )}
+                  <span>Owned:</span>
+                  <span className="font-mono font-bold">{ownershipStats.owned}/{ownershipStats.needed}</span>
+                  <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded ${
+                    ownershipFilter === 'owned'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : ownershipFilter === 'unowned'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'bg-slate-700/60 text-slate-300 border border-slate-600/60'
+                  }`}>
+                    {ownershipFilter === 'all' ? 'All' : ownershipFilter === 'owned' ? 'Owned' : 'Missing'}
+                  </span>
+                </button>
+
+                {/* Gamechangers Dropdown Badge */}
+                <div className="relative shrink-0 z-50">
+                  <button
+                    type="button"
+                    onClick={() => setShowGamechangersDetails(!showGamechangersDetails)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs border ${
+                      gamechangers.length > 0
+                        ? 'bg-amber-950/90 border-amber-500/70 text-amber-300 hover:bg-amber-900/80 ring-1 ring-amber-500/30'
+                        : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title={
+                      gamechangers.length > 0
+                        ? `Click to view ${gamechangers.length} deck Gamechangers`
+                        : 'Click to view Gamechangers analysis (0 detected)'
+                    }
+                  >
+                    <Zap className={`w-3.5 h-3.5 shrink-0 ${gamechangers.length > 0 ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}`} />
+                    <span>Gamechangers ({gamechangers.length})</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform ${showGamechangersDetails ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showGamechangersDetails && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[60] bg-transparent cursor-default"
+                        onClick={() => setShowGamechangersDetails(false)}
+                      />
+                      <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-amber-500 shadow-2xl ring-1 ring-amber-500/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
+                        <div className="font-semibold text-amber-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
+                          <span className="flex items-center gap-1.5 font-bold">
+                            <Zap className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400" />
+                            Gamechangers ({gamechangers.length} Unique, {totalGamechangerCards} Cards):
+                          </span>
+                          <button 
+                            type="button"
+                            onClick={() => setShowGamechangersDetails(false)}
+                            className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
+                            title="Close"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {gamechangers.length === 0 ? (
+                          <div className="p-4 text-center bg-slate-950/70 rounded-lg border border-slate-800 text-slate-400 space-y-1.5">
+                            <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-400">
+                              <Sparkles className="w-4 h-4 text-emerald-400" />
+                              <span>No Notorious Gamechangers</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">
+                              This deck contains no notorious high-salt or game-warping staples (like fast mana, free counterspells, or instant 2-card combos). Well-suited for casual Commander pods!
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            {gamechangers.map((gc, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  if (onSelectCard && gc.card) {
+                                    onSelectCard(gc.card as any);
+                                  }
+                                  setShowGamechangersDetails(false);
+                                }}
+                                className="flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 cursor-pointer transition-colors group"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {gc.card.imageUrl && (
+                                    <img src={gc.card.imageUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
+                                      {gc.card.name}
+                                    </div>
+                                    <div className="text-[10px] text-amber-400/90 font-medium truncate">
+                                      {gc.icon} {gc.categoryLabel} · {gc.impactReason}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className="text-[11px] font-mono font-bold text-slate-400 shrink-0 ml-2">
+                                  ×{gc.card.quantity || 1}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
 
-                {/* Notice Dropdown right next to MTGNexus URL */}
+                {/* Notice Dropdown right next to Gamechangers */}
                 {stats.illegalCards.length > 0 && (
                   <div className="relative shrink-0 z-50">
                     <button
                       type="button"
                       onClick={() => setShowFormatNoticeDetails(!showFormatNoticeDetails)}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-fuchsia-950/90 border border-fuchsia-600/70 text-[11px] font-bold text-fuchsia-300 hover:bg-fuchsia-900/80 transition-colors cursor-pointer shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-fuchsia-950/90 border border-fuchsia-600/70 text-xs font-bold text-fuchsia-300 hover:bg-fuchsia-900/80 transition-colors cursor-pointer shadow-xs"
                       title="Click to view format legality notices"
                     >
                       <AlertTriangle className="w-3.5 h-3.5 text-violet-400 shrink-0" />
@@ -1879,77 +2022,48 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </div>
                 )}
 
-                {/* Gamechangers Dropdown Badge */}
-                {gamechangers.length > 0 && (
-                  <div className="relative shrink-0 z-50">
+                {/* MTGNexus URL Text Box */}
+                <div className="flex items-center gap-1.5 w-full sm:w-auto min-w-[200px] md:min-w-[240px] shrink-0">
+                  <div className="relative flex-1 flex items-center">
+                    <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 pointer-events-none select-none">
+                      MTGNexus:
+                    </span>
+                    <input
+                      type="url"
+                      value={nexusUrl}
+                      onChange={(e) => {
+                        const newUrl = e.target.value;
+                        setNexusUrl(newUrl);
+                        onUpdateDeck({
+                          ...deck,
+                          mtgNexusEditThreadUrl: newUrl.trim() || undefined,
+                        });
+                        setHasUnsavedChanges(true);
+                        DeckService.setDeckHasUnsavedChanges(deck.id, true);
+                      }}
+                      placeholder="Thread / Edit URL..."
+                      className="w-full bg-slate-950/90 border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-lg pl-22 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+                      title="MTGNexus Thread or Edit URL for 1-click sync"
+                    />
+                  </div>
+                  {nexusUrl && (
                     <button
                       type="button"
-                      onClick={() => setShowGamechangersDetails(!showGamechangersDetails)}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-500/70 text-[11px] font-bold text-amber-300 hover:bg-amber-900/80 transition-colors cursor-pointer shadow-xs"
-                      title="Click to view deck Gamechangers"
+                      onClick={handleSyncMtgNexus}
+                      disabled={isNexusSyncing}
+                      className="px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-500/50 text-emerald-300 hover:text-emerald-200 transition-all shrink-0 cursor-pointer flex items-center gap-1.5 text-xs font-bold shadow-xs disabled:opacity-50"
+                      title="Automated Sync: Copy BBCode & Open MTGNexus in new tab"
                     >
-                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-amber-400" />
-                      <span>Gamechangers ({gamechangers.length})</span>
-                      <ChevronDown className={`w-3 h-3 transition-transform ${showGamechangersDetails ? 'rotate-180' : ''}`} />
+                      {isNexusSyncing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      <span className="hidden sm:inline">{isNexusSyncing ? 'Syncing...' : 'Sync'}</span>
+                      <ExternalLink className="w-3 h-3 text-emerald-400/80" />
                     </button>
-
-                    {showGamechangersDetails && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-[60] bg-transparent cursor-default"
-                          onClick={() => setShowGamechangersDetails(false)}
-                        />
-                        <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-amber-500 shadow-2xl ring-1 ring-amber-500/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
-                          <div className="font-semibold text-amber-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
-                            <span className="flex items-center gap-1.5 font-bold">
-                              <Zap className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400" />
-                              Gamechangers ({gamechangers.length} Unique, {totalGamechangerCards} Cards):
-                            </span>
-                            <button 
-                              type="button"
-                              onClick={() => setShowGamechangersDetails(false)}
-                              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
-                              title="Close"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                            {gamechangers.map((gc, i) => (
-                              <div
-                                key={i}
-                                onClick={() => {
-                                  if (onSelectCard && gc.card) {
-                                    onSelectCard(gc.card as any);
-                                  }
-                                  setShowGamechangersDetails(false);
-                                }}
-                                className="flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 cursor-pointer transition-colors group"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {gc.card.imageUrl && (
-                                    <img src={gc.card.imageUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
-                                  )}
-                                  <div className="min-w-0">
-                                    <div className="font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
-                                      {gc.card.name}
-                                    </div>
-                                    <div className="text-[10px] text-amber-400/90 font-medium truncate">
-                                      {gc.icon} {gc.categoryLabel} · {gc.impactReason}
-                                    </div>
-                                  </div>
-                                </div>
-                                <span className="text-[11px] font-mono font-bold text-slate-400 shrink-0 ml-2">
-                                  ×{gc.card.quantity || 1}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* Right Side: Condensed Iteration Dropdown and Format Dropdown */}
@@ -2178,20 +2292,43 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         {/* View Mode Switcher and Add Cards Button */}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {/* Collection Ownership Toggle */}
+          {/* Collection Ownership Toggle Badge */}
           <button
             type="button"
-            onClick={() => setShowOwnership(!showOwnership)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-              showOwnership
-                ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300'
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            onClick={cycleOwnershipFilter}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+              ownershipFilter === 'owned'
+                ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 ring-1 ring-emerald-500/30'
+                : ownershipFilter === 'unowned'
+                ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 ring-1 ring-amber-500/30'
+                : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
             }`}
-            title="Toggle collection ownership badges and missing cards"
+            title={
+              ownershipFilter === 'all'
+                ? `Ownership Filter: Showing All cards (${ownershipStats.owned}/${ownershipStats.needed} owned). Click to show Owned only.`
+                : ownershipFilter === 'owned'
+                ? `Ownership Filter: Showing Owned cards only (${ownershipStats.owned} owned). Click to show Unowned / Missing only.`
+                : `Ownership Filter: Showing Unowned / Missing cards only (${ownershipStats.needed - ownershipStats.owned} missing). Click to show All cards.`
+            }
           >
-            <CheckCircle2 className="w-3.5 h-3.5" />
+            {ownershipFilter === 'owned' ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            ) : ownershipFilter === 'unowned' ? (
+              <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
+            )}
             <span className="hidden sm:inline">Owned:</span>
-            <span className="font-mono">{ownershipStats.owned}/{ownershipStats.needed}</span>
+            <span className="font-mono font-bold">{ownershipStats.owned}/{ownershipStats.needed}</span>
+            <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded ${
+              ownershipFilter === 'owned'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : ownershipFilter === 'unowned'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : 'bg-slate-800 text-slate-400 border border-slate-700/60'
+            }`}>
+              {ownershipFilter === 'all' ? 'All' : ownershipFilter === 'owned' ? 'Owned' : 'Missing'}
+            </span>
           </button>
 
           {/* Quick Search / Filter Input */}
@@ -2286,6 +2423,52 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Active Ownership Filter Banner */}
+      {ownershipFilter !== 'all' && (
+        <div className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 rounded-xl border text-xs shadow-sm animate-in fade-in duration-150 ${
+          ownershipFilter === 'owned'
+            ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+            : 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+        }`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            {ownershipFilter === 'owned' ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  Filtering deck: Showing <strong className="text-emerald-300">Owned cards only</strong> ({ownershipStats.owned} of {ownershipStats.needed} copies in your collection).
+                </span>
+              </>
+            ) : (
+              <>
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Filtering deck: Showing <strong className="text-amber-300">Unowned / Missing cards only</strong> ({ownershipStats.needed - ownershipStats.owned} copies needed · est. ${(Number(ownershipStats.missingPrice) || 0).toFixed(2)}).
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {ownershipFilter === 'unowned' && ownershipStats.missingList.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportMissingCards}
+                className="px-2.5 py-1 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 border border-amber-500/40 text-[11px] font-semibold text-amber-300 transition-colors cursor-pointer"
+                title="Copy missing cards list to clipboard"
+              >
+                {missingCardsCopied ? 'Copied to Clipboard!' : 'Copy Missing List'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOwnershipFilter('all')}
+              className="text-xs text-violet-400 hover:text-violet-300 underline font-semibold cursor-pointer"
+            >
+              Show All Cards
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Category Grid View */}
       {viewMode === 'category-grid' ? (
@@ -3186,16 +3369,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   function renderPilesView(cards: DeckCard[]) {
     if (cards.length === 0) {
-      if (cardFilterQuery.trim()) {
+      if (cardFilterQuery.trim() || ownershipFilter !== 'all') {
         return (
-          <div className="text-center py-12 text-slate-400 text-sm bg-slate-900/40 rounded-2xl border border-slate-800/60 my-4">
-            No cards match "<span className="text-violet-300 font-semibold">{cardFilterQuery}</span>".
+          <div className="text-center py-12 text-slate-400 text-sm bg-slate-900/40 rounded-2xl border border-slate-800/60 my-4 space-y-2">
+            <div>
+              No {ownershipFilter !== 'all' ? (ownershipFilter === 'owned' ? 'owned' : 'unowned / missing') : ''} cards match {cardFilterQuery ? `"${cardFilterQuery}"` : 'current filter criteria'}.
+            </div>
             <button
               type="button"
-              onClick={() => setCardFilterQuery('')}
-              className="ml-2 text-violet-400 hover:text-violet-300 underline cursor-pointer"
+              onClick={() => { setCardFilterQuery(''); setOwnershipFilter('all'); }}
+              className="text-xs text-violet-400 hover:text-violet-300 underline font-semibold cursor-pointer"
             >
-              Clear filter
+              Reset filters to show all cards
             </button>
           </div>
         );
@@ -3440,16 +3625,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   function renderCardListOrGrid(cards: DeckCard[]) {
     if (cards.length === 0) {
-      if (cardFilterQuery.trim()) {
+      if (cardFilterQuery.trim() || ownershipFilter !== 'all') {
         return (
-          <div className="text-center py-8 text-slate-400 text-sm bg-slate-900/40 rounded-xl border border-slate-800/60 my-2">
-            No cards match "<span className="text-violet-300 font-semibold">{cardFilterQuery}</span>".
+          <div className="text-center py-8 text-slate-400 text-sm bg-slate-900/40 rounded-xl border border-slate-800/60 my-2 space-y-2">
+            <div>
+              No {ownershipFilter !== 'all' ? (ownershipFilter === 'owned' ? 'owned' : 'unowned / missing') : ''} cards match {cardFilterQuery ? `"${cardFilterQuery}"` : 'current filter criteria'}.
+            </div>
             <button
               type="button"
-              onClick={() => setCardFilterQuery('')}
-              className="ml-2 text-violet-400 hover:text-violet-300 underline cursor-pointer"
+              onClick={() => { setCardFilterQuery(''); setOwnershipFilter('all'); }}
+              className="text-xs text-violet-400 hover:text-violet-300 underline font-semibold cursor-pointer"
             >
-              Clear filter
+              Reset filters to show all cards
             </button>
           </div>
         );
@@ -3558,11 +3745,41 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               </div>
             </div>
             
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-1.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
               <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner">
                 {card.set}
               </span>
-              <span className="truncate">{card.type_line}</span>
+              <span className="truncate max-w-[140px] sm:max-w-none">{card.type_line}</span>
+              {isCardGamechanger(card) && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 font-bold text-[10px]" title="Commander Gamechanger">
+                  <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                  <span>Gamechanger</span>
+                </span>
+              )}
+              {(() => {
+                const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
+                if (inCol >= card.quantity) {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono font-semibold" title={`Owned in collection (${inCol} copies)`}>
+                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                      <span>Owned ({inCol})</span>
+                    </span>
+                  );
+                }
+                if (inCol > 0) {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-500/40 text-amber-300 text-[10px] font-mono font-semibold" title={`Partially owned (${inCol} of ${card.quantity})`}>
+                      <AlertCircle className="w-2.5 h-2.5 text-amber-400" />
+                      <span>Have {inCol}/{card.quantity}</span>
+                    </span>
+                  );
+                }
+                return (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-950/70 border border-slate-800 text-slate-400 text-[10px] font-mono" title="Not owned in collection">
+                    <span>Unowned</span>
+                  </span>
+                );
+              })()}
             </div>
           </div>
 
@@ -3746,18 +3963,50 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             }}
           />
           {isThisCommander && (
-            <div className="absolute top-1.5 left-1.5 bg-fuchsia-950/95 border border-fuchsia-500/60 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-1 shadow-md">
+            <div className="absolute top-1.5 left-1.5 bg-fuchsia-950/95 border border-fuchsia-500/60 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-1 shadow-md z-10">
               <Crown className="w-2.5 h-2.5 text-fuchsia-400" />
               {commanderCards.length > 1 && commanderCards[1]?.id === card.id ? 'Partner' : 'Commander'}
             </div>
           )}
+          {isCardGamechanger(card) && (
+            <div className={`absolute top-1.5 ${isThisCommander ? 'left-24' : 'left-1.5'} bg-amber-950/95 border border-amber-500/70 rounded-md px-1.5 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-md z-10`} title="Commander Gamechanger">
+              <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> GC
+            </div>
+          )}
           {card.isFoil && (
-            <div className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-700/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md">
+            <div className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-700/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md z-10">
               <Sparkles className="w-2.5 h-2.5" /> Foil
             </div>
           )}
-          <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400">
+          <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400 z-10">
             ${lineTotal}
+          </div>
+          {/* Ownership Badge in Grid Card */}
+          <div className="absolute bottom-1.5 right-1.5 z-10">
+            {(() => {
+              const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
+              if (inCol >= card.quantity) {
+                return (
+                  <span className="bg-emerald-950/90 border border-emerald-500/60 rounded px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 flex items-center gap-0.5 shadow-xs backdrop-blur-xs" title={`Owned in collection (${inCol} copies)`}>
+                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>Owned</span>
+                  </span>
+                );
+              }
+              if (inCol > 0) {
+                return (
+                  <span className="bg-amber-950/90 border border-amber-500/60 rounded px-1.5 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-xs backdrop-blur-xs" title={`Partially owned: ${inCol} of ${card.quantity}`}>
+                    <AlertCircle className="w-2.5 h-2.5 text-amber-400" />
+                    <span>{inCol}/{card.quantity}</span>
+                  </span>
+                );
+              }
+              return (
+                <span className="bg-slate-950/90 border border-slate-800 rounded px-1.5 py-0.5 text-[9px] font-bold text-slate-400 flex items-center gap-0.5 shadow-xs backdrop-blur-xs" title="Unowned in collection">
+                  <span>Unowned</span>
+                </span>
+              );
+            })()}
           </div>
         </div>
 

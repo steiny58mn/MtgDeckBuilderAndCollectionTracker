@@ -267,8 +267,8 @@ export function normalizeBinderCard(card: any): CollectionCard {
     currentPriceUsd: card.currentPriceUsd ?? card.CurrentPriceUsd ?? card.priceUsd,
     addedAt: parseTimestamp(card.addedAt ?? card.AddedAt),
     notes: card.notes ?? card.Notes,
-    isGamechanger: Boolean(card.game_changer ?? card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
-    game_changer: Boolean(card.game_changer ?? card.isGamechanger ?? card.is_gamechanger ?? card.IsGamechanger ?? false),
+    isGamechanger: isCardGamechanger(card),
+    game_changer: isCardGamechanger(card),
   };
 }
 
@@ -295,10 +295,10 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Strictly from Scryfall data
-        const isGc = Boolean(matched.game_changer);
+        // Check gamechanger from Scryfall data or known registry
+        const isGc = Boolean(matched.game_changer) || isCardGamechanger(c) || isCardGamechanger(matched);
         
-        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
+        const gcMismatch = !c.isGamechanger && isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
 
