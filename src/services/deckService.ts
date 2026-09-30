@@ -295,8 +295,8 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Check gamechanger from Scryfall JSON data (preserving existing if undefined in batch response)
-        const isGc = matched.game_changer !== undefined ? Boolean(matched.game_changer) : Boolean(c.isGamechanger || c.game_changer);
+        // Check gamechanger from Scryfall JSON data, preserving existing true state to prevent flashing to 0
+        const isGc = Boolean(matched.game_changer) || Boolean(c.isGamechanger || c.game_changer);
         const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
