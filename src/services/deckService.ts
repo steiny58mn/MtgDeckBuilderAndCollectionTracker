@@ -145,6 +145,9 @@ export function normalizeCard(card: any): DeckCard {
   const quantity = typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1);
   const category = (card.category || card.Category || 'main').toLowerCase();
 
+  const existingGc = Boolean(card.game_changer || card.is_game_changer || card.isGamechanger || card.gameChanger);
+  const isGc = existingGc || isCardGamechanger(card);
+
   return {
     ...card,
     id: card.id || card.Id || card.cardId || card.CardId || `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -173,9 +176,9 @@ export function normalizeCard(card: any): DeckCard {
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
-    isGamechanger: isCardGamechanger(card),
-    game_changer: isCardGamechanger(card),
-    is_game_changer: isCardGamechanger(card),
+    isGamechanger: isGc,
+    game_changer: isGc,
+    is_game_changer: isGc,
   };
 }
 
@@ -281,6 +284,14 @@ export function normalizeBinderCard(card: any): CollectionCard {
  */
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
+
+  // If all cards already have image URLs, type lines, and gamechanger flags populated, return immediately to eliminate flicker
+  const needsEnrichment = deck.cards.some(
+    (c) => !c.imageUrl || !c.type_line || !c.typeLine || (c.game_changer === undefined && c.isGamechanger === undefined && c.is_game_changer === undefined)
+  );
+  if (!needsEnrichment) {
+    return deck;
+  }
 
   try {
     const validCards = deck.cards.filter((c) => Boolean(c.name));
@@ -1758,11 +1769,6 @@ export class DeckService {
    * Fetch all decks and binders from the remote API
    */
   public static async syncWithRemote(): Promise<void> {
-    if (!AuthService.isLoggedIn()) {
-      console.log('[DeckService] User is not logged in. Operating in local guest mode.');
-      this.setStatus('synced');
-      return;
-    }
     console.log('[DeckService] 🔄 Starting syncWithRemote()...');
     this.setStatus('syncing');
 

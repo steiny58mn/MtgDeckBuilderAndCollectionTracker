@@ -588,16 +588,15 @@ export async function fetchBatchCardsCollection(
 
       if (res.ok) {
         const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          for (const raw of json.data) {
-            // Check that card actually has metadata (not null placeholder)
-            if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
-              const card = normalizeFrostpointCard(raw);
-              const exactLower = card.name.toLowerCase().trim();
-              cardMap.set(exactLower, card);
-              const frontName = exactLower.split(' // ')[0].trim();
-              cardMap.set(frontName, card);
-            }
+        const list = Array.isArray(json) ? json : (json.data && Array.isArray(json.data) ? json.data : (json.items && Array.isArray(json.items) ? json.items : []));
+        for (const raw of list) {
+          // Check that card actually has metadata (not null placeholder)
+          if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
+            const card = normalizeFrostpointCard(raw);
+            const exactLower = card.name.toLowerCase().trim();
+            cardMap.set(exactLower, card);
+            const frontName = exactLower.split(' // ')[0].trim();
+            cardMap.set(frontName, card);
           }
         }
       }

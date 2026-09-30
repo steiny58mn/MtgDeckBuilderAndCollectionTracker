@@ -392,7 +392,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return JSON.parse(JSON.stringify(deck.cards || []));
   });
 
-  // Keep saved baseline synced when switching to a different deck & query gamechangers from Frostpointlabs
+  // Keep saved baseline synced when switching to a different deck & query gamechangers from Frostpointlabs once on load
   useEffect(() => {
     scrollToTop();
     let isCancelled = false;
@@ -402,7 +402,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         const enrichedDeck = await DeckService.enrichDeckCards(deck);
         const candidateDeck = enrichedDeck || deck;
         const gcRes = await GamechangerService.syncDeckGamechangers(candidateDeck);
-        const finalDeck = gcRes.hasChanges ? gcRes.deck : (enrichedDeck && enrichedDeck !== deck ? enrichedDeck : null);
+        const finalDeck = gcRes.deck || enrichedDeck || deck;
 
         if (!isCancelled && finalDeck) {
           DeckService.setLastSavedDeck(finalDeck);
@@ -641,25 +641,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         updatedAt: Date.now(),
       };
 
-      // Query Frostpointlabs API on save to ensure exact, verified gamechanger status
-      try {
-        const synced = await GamechangerService.syncDeckGamechangers(currentDeckToSave);
-        currentDeckToSave = synced.deck;
-      } catch (gcErr) {
-        console.warn('[DeckBuilder] Error syncing gamechangers on save:', gcErr);
-      }
-
+      let saveSuccess = true;
       if (onSaveDeck) {
-        await onSaveDeck(currentDeckToSave);
+        const res = await onSaveDeck(currentDeckToSave);
+        if (res === false) saveSuccess = false;
       } else {
-        await DeckService.saveDeck(currentDeckToSave);
+        const res = await DeckService.saveDeck(currentDeckToSave);
+        if (res === false) saveSuccess = false;
       }
       DeckService.setLastSavedDeck(currentDeckToSave);
       setSavedCards(JSON.parse(JSON.stringify(currentDeckToSave.cards || [])));
       setHasUnsavedChanges(false);
       DeckService.setDeckHasUnsavedChanges(deck.id, false);
-      await refreshHistory();
-      setPriceRefreshMessage('Deck saved & iteration snapshot created!');
+      refreshHistory().catch(() => {});
+      if (saveSuccess) {
+        setPriceRefreshMessage('Deck saved & iteration snapshot created!');
+      } else {
+        setPriceRefreshMessage('Saved locally (offline mode - remote sync failed)');
+      }
       setTimeout(() => setPriceRefreshMessage(null), 3000);
     } catch (e: any) {
       setPriceRefreshMessage('Failed to save deck: ' + (e.message || 'Error'));
