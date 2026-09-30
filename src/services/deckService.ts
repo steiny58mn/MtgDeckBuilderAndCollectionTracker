@@ -295,14 +295,14 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Check gamechanger from Scryfall data or known registry
-        const isGc = Boolean(matched.game_changer) || isCardGamechanger(c) || isCardGamechanger(matched);
-        
-        const gcMismatch = !c.isGamechanger && isGc;
+        // Check gamechanger strictly from Scryfall JSON data
+        const isGc = Boolean(matched.game_changer);
+        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
+        const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
 
-        if (gcMismatch || typeMismatch || colorMismatch) {
+        if (gcMismatch || typeMismatch || colorMismatch || oracleMismatch) {
           changed = true;
           return {
             ...c,
@@ -310,6 +310,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
             typeLine: typeLine || c.typeLine,
             mana_cost: manaCost,
             manaCost: manaCost || c.manaCost,
+            oracle_text: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
             cmc: matched.cmc ?? c.cmc,
             imageUrl: img || c.imageUrl,
             colors: matched.colors || c.colors,

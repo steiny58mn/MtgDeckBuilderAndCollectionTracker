@@ -1787,161 +1787,128 @@ export interface GamechangerDefinition {
   tier: 'S+' | 'S' | 'A';
 }
 
-export const GAMECHANGER_REGISTRY: Record<string, GamechangerDefinition> = {
-  // Fast Mana & Ramp Acceleration
-  'Sol Ring': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Format staple +2 mana ramp on turn 1', icon: '⚡', tier: 'S' },
-  'Mana Crypt': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-mana +2 colourless acceleration', icon: '⚡', tier: 'S+' },
-  'Mana Vault': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Burst fast mana (+3 for 1 mana)', icon: '⚡', tier: 'S' },
-  'Mox Diamond': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost permanent rainbow mana', icon: '⚡', tier: 'S+' },
-  'Chrome Mox': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost coloured mana imprint', icon: '⚡', tier: 'S' },
-  'Mox Opal': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost metalcraft rainbow mana', icon: '⚡', tier: 'S' },
-  'Jeweled Lotus': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost +3 Commander-specific mana', icon: '⚡', tier: 'S+' },
-  'Lotus Petal': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost single-use fast mana burst', icon: '⚡', tier: 'A' },
-  'Dockside Extortionist': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Explosive Treasure generation scaling with opponents', icon: '⚡', tier: 'S+' },
-  'Grim Monolith': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Fast mana and key infinite mana combo piece', icon: '⚡', tier: 'S' },
-  "Lion's Eye Diamond": { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Zero-cost +3 mana combo enabler', icon: '⚡', tier: 'S+' },
-  'Ancient Tomb': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Land that taps for 2 mana immediately', icon: '⚡', tier: 'S' },
-  'Treasonous Ogre': { category: 'fast_mana', categoryLabel: 'Fast Mana', impactReason: 'Converts life total directly into red mana', icon: '⚡', tier: 'A' },
-  'Seedborn Muse': { category: 'fast_mana', categoryLabel: 'Untap Engine', impactReason: 'Untaps all permanents on every player\'s untap step', icon: '⚡', tier: 'S' },
-  'Nyxbloom Ancient': { category: 'fast_mana', categoryLabel: 'Mana Multiplier', impactReason: 'Permanents produce triple mana', icon: '⚡', tier: 'A' },
+/**
+ * Derives UI category presentation for a gamechanger card dynamically from Scryfall card data
+ * (such as oracle text, type line, and CMC) without any hardcoded card name lists.
+ */
+export function getScryfallGamechangerDetails(card: DeckCard): GamechangerDefinition {
+  const typeLine = (card.type_line || card.typeLine || '').toLowerCase();
+  const oracleText = (card.oracle_text || '').toLowerCase();
+  const cmc = card.cmc ?? 0;
 
-  // Free Spells & Top Interaction
-  'Fierce Guardianship': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Free noncreature counterspell with Commander out', icon: '🛡️', tier: 'S+' },
-  'Deflecting Swat': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Free target redirection with Commander out', icon: '🛡️', tier: 'S+' },
-  'Force of Will': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Zero-mana pitch counterspell', icon: '🛡️', tier: 'S+' },
-  'Force of Negation': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Zero-mana exile counterspell on opponents\' turns', icon: '🛡️', tier: 'S' },
-  'Pact of Negation': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Zero-mana unconditional emergency counterspell', icon: '🛡️', tier: 'S' },
-  'Deadly Rollick': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Free creature exile removal with Commander out', icon: '🛡️', tier: 'S' },
-  'Flawless Maneuver': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Free indestructible board protection with Commander out', icon: '🛡️', tier: 'S' },
-  'Mindbreak Trap': { category: 'free_spell', categoryLabel: 'Free Spell', impactReason: 'Zero-mana exile for uncounterable and storm spells', icon: '🛡️', tier: 'A' },
-  "Teferi's Protection": { category: 'free_spell', categoryLabel: 'Board Protection', impactReason: 'Total phase-out and life total protection', icon: '🛡️', tier: 'S' },
-  'Mana Drain': { category: 'free_spell', categoryLabel: 'Counter Ramp', impactReason: 'Hard counterspell that turns into mana on next turn', icon: '🛡️', tier: 'S' },
-
-  // Value Engines & High-Impact Draw
-  'Rhystic Study': { category: 'value_engine', categoryLabel: 'Tax Draw Engine', impactReason: 'Continuous card draw taxing every opponent spell', icon: '💎', tier: 'S+' },
-  'Smothering Tithe': { category: 'value_engine', categoryLabel: 'Tax Mana Engine', impactReason: 'Generates massive Treasure tokens on every opponent draw', icon: '💎', tier: 'S+' },
-  'The One Ring': { category: 'value_engine', categoryLabel: 'Card Engine', impactReason: 'Protection from everything + exponential card draw', icon: '💎', tier: 'S+' },
-  'Mystic Remora': { category: 'value_engine', categoryLabel: 'Tax Draw Engine', impactReason: 'Extreme early game card draw taxing noncreature spells', icon: '💎', tier: 'S' },
-  'Esper Sentinel': { category: 'value_engine', categoryLabel: 'Tax Draw Engine', impactReason: 'Turn 1 creature that taxes opponent first noncreature spell', icon: '💎', tier: 'S' },
-  'Necropotence': { category: 'value_engine', categoryLabel: 'Card Engine', impactReason: 'Trade life directly for massive hand size and card draw', icon: '💎', tier: 'S+' },
-  "Bolas's Citadel": { category: 'value_engine', categoryLabel: 'Storm Engine', impactReason: 'Allows casting spells directly from top of library for life', icon: '💎', tier: 'S' },
-  'Sylvan Library': { category: 'value_engine', categoryLabel: 'Card Selection', impactReason: 'Draws extra cards and filters library every turn', icon: '💎', tier: 'S' },
-  'Trouble in Pairs': { category: 'value_engine', categoryLabel: 'Tax Draw Engine', impactReason: 'Draws on extra turns, extra draws, and attacks', icon: '💎', tier: 'S' },
-  'Black Market Connections': { category: 'value_engine', categoryLabel: 'Modal Engine', impactReason: 'Yields Treasure, cards, and changeling tokens each upkeep', icon: '💎', tier: 'A' },
-  'Consecrated Sphinx': { category: 'value_engine', categoryLabel: 'Draw Engine', impactReason: 'Draws two cards whenever any opponent draws a card', icon: '💎', tier: 'S' },
-
-  // Tutors
-  'Demonic Tutor': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '2-mana unconditional tutor directly to hand', icon: '🔍', tier: 'S+' },
-  'Vampiric Tutor': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana instant-speed topdeck tutor', icon: '🔍', tier: 'S+' },
-  'Imperial Seal': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana sorcery topdeck tutor', icon: '🔍', tier: 'S' },
-  'Mystical Tutor': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana instant-speed instant/sorcery tutor', icon: '🔍', tier: 'S' },
-  'Worldly Tutor': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana instant-speed creature tutor', icon: '🔍', tier: 'S' },
-  'Enlightened Tutor': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana instant-speed artifact/enchantment tutor', icon: '🔍', tier: 'S' },
-  'Gamble': { category: 'tutor', categoryLabel: 'Tutor', impactReason: '1-mana red tutor to hand', icon: '🔍', tier: 'A' },
-  'Finale of Devastation': { category: 'tutor', categoryLabel: 'Tutor Finisher', impactReason: 'Direct-to-battlefield creature tutor and game-ending pump', icon: '🔍', tier: 'S' },
-  "Green Sun's Zenith": { category: 'tutor', categoryLabel: 'Tutor', impactReason: 'X-cost direct-to-battlefield green creature tutor', icon: '🔍', tier: 'A' },
-  'Diabolic Intent': { category: 'tutor', categoryLabel: 'Tutor', impactReason: 'Cheap 2-mana unconditional sacrifice tutor', icon: '🔍', tier: 'A' },
-
-  // Win Conditions & Combos
-  "Thassa's Oracle": { category: 'win_con', categoryLabel: 'Win Condition', impactReason: 'Compact game-winning trigger on empty or near-empty library', icon: '🏆', tier: 'S+' },
-  'Demonic Consultation': { category: 'win_con', categoryLabel: 'Combo Piece', impactReason: 'Instant library exile pairing with Thassa\'s Oracle', icon: '🏆', tier: 'S+' },
-  'Tainted Pact': { category: 'win_con', categoryLabel: 'Combo Piece', impactReason: 'Instant library exile pairing with Thassa\'s Oracle', icon: '🏆', tier: 'S+' },
-  'Underworld Breach': { category: 'win_con', categoryLabel: 'Storm Wincon', impactReason: 'Recursive escape engine enabling storm win combos', icon: '🏆', tier: 'S+' },
-  'Craterhoof Behemoth': { category: 'win_con', categoryLabel: 'Overrun Wincon', impactReason: 'Instant lethal trample overrun when cast', icon: '🏆', tier: 'S' },
-  'Torment of Hailfire': { category: 'win_con', categoryLabel: 'Finisher', impactReason: 'Mass life drain, board wipe, and hand shredder', icon: '🏆', tier: 'S' },
-  'Aetherflux Reservoir': { category: 'win_con', categoryLabel: 'Combo Finisher', impactReason: 'Exponential lifegain into 50-damage laser blasts', icon: '🏆', tier: 'S' },
-  'Exquisite Blood': { category: 'win_con', categoryLabel: 'Combo Piece', impactReason: 'Infinite drain loop with Sanguine Bond or Vito', icon: '🏆', tier: 'S' },
-  'Sanguine Bond': { category: 'win_con', categoryLabel: 'Combo Piece', impactReason: 'Infinite drain loop enabler with Exquisite Blood', icon: '🏆', tier: 'A' },
-  'Heliod, Sun-Crowned': { category: 'win_con', categoryLabel: 'Combo Wincon', impactReason: '2-card infinite damage combo with Walking Ballista', icon: '🏆', tier: 'S' },
-  'Walking Ballista': { category: 'win_con', categoryLabel: 'Combo Outlet', impactReason: 'Infinite mana and infinite counter lethal outlet', icon: '🏆', tier: 'S' },
-  'Food Chain': { category: 'win_con', categoryLabel: 'Combo Engine', impactReason: 'Generates infinite creature mana with cast-from-exile creatures', icon: '🏆', tier: 'S+' },
-  'Protean Hulk': { category: 'win_con', categoryLabel: 'Combo Engine', impactReason: 'Death trigger tutors entire winning creature combos directly to field', icon: '🏆', tier: 'S' },
-
-  // Board Wipes
-  'Cyclonic Rift': { category: 'board_wipe', categoryLabel: 'Asymmetric Wipe', impactReason: 'Instant-speed one-sided bounce of all nonland permanents', icon: '💥', tier: 'S+' },
-  'Farewell': { category: 'board_wipe', categoryLabel: 'Mass Exile Wipe', impactReason: 'Modal exile of creatures, artifacts, enchantments, and graveyards', icon: '💥', tier: 'S' },
-  'Toxic Deluge': { category: 'board_wipe', categoryLabel: 'Efficient Wipe', impactReason: '3-mana life-paid board wipe bypassing indestructible', icon: '💥', tier: 'S' },
-  'Blasphemous Act': { category: 'board_wipe', categoryLabel: 'Efficient Wipe', impactReason: 'Frequently 1-mana 13-damage global creature wipe', icon: '💥', tier: 'A' },
-  'Supreme Verdict': { category: 'board_wipe', categoryLabel: 'Uncounterable Wipe', impactReason: 'Uncounterable 4-mana board wipe', icon: '💥', tier: 'A' },
-
-  // Stax & Oppression
-  'Armageddon': { category: 'stax', categoryLabel: 'Mass Land Destruction', impactReason: 'Destroys all lands, resetting mana development', icon: '⛓️', tier: 'S+' },
-  'Winter Orb': { category: 'stax', categoryLabel: 'Mana Denial', impactReason: 'Locks all players to untapping only 1 land per turn', icon: '⛓️', tier: 'S+' },
-  'Stasis': { category: 'stax', categoryLabel: 'Untap Lock', impactReason: 'Completely skips untap steps for all players', icon: '⛓️', tier: 'S+' },
-  'Static Orb': { category: 'stax', categoryLabel: 'Untap Restriction', impactReason: 'Players may untap only two permanents each turn', icon: '⛓️', tier: 'S' },
-  'Opposition Agent': { category: 'stax', categoryLabel: 'Search Denial', impactReason: 'Flash stax that hijacks opponent searches and steals their cards', icon: '⛓️', tier: 'S+' },
-  'Drannith Magistrate': { category: 'stax', categoryLabel: 'Commander Lock', impactReason: 'Prevents opponents from casting commanders or spells from exile/graveyards', icon: '⛓️', tier: 'S+' },
-  'Blood Moon': { category: 'stax', categoryLabel: 'Nonbasic Land Denial', impactReason: 'Turns all nonbasic lands into basic Mountains', icon: '⛓️', tier: 'S' },
-  'Back to Basics': { category: 'stax', categoryLabel: 'Nonbasic Land Denial', impactReason: 'Nonbasic lands do not untap during untap steps', icon: '⛓️', tier: 'S' },
-  'Tergrid, God of Fright': { category: 'stax', categoryLabel: 'Oppressive Theft', impactReason: 'Steals all opponent sacrificed or discarded permanents', icon: '⛓️', tier: 'S+' },
-  'Vorinclex, Voice of Hunger': { category: 'stax', categoryLabel: 'Mana Doubler Lock', impactReason: 'Doubles own mana while tapping opponent lands for an extra turn', icon: '⛓️', tier: 'S' },
-  'Jin-Gitaxias, Core Augur': { category: 'stax', categoryLabel: 'Hand Denial', impactReason: 'Draws 7 cards while forcing opponents to discard their entire hands', icon: '⛓️', tier: 'S' },
-  'Grand Arbiter Augustin IV': { category: 'stax', categoryLabel: 'Tax Stax', impactReason: 'Reduces own costs while taxing every opponent spell', icon: '⛓️', tier: 'S' },
-  'Toxrill, the Corrosive': { category: 'stax', categoryLabel: 'Creature Suppression', impactReason: 'Shrinks and kills all opponent creatures on each end step', icon: '⛓️', tier: 'S' },
-  'Urza, Lord High Artificer': { category: 'stax', categoryLabel: 'Infinite Mana Engine', impactReason: 'Turns all artifacts into blue mana and enables infinite spin activations', icon: '⛓️', tier: 'S' },
-  'Orcish Bowmasters': { category: 'stax', categoryLabel: 'Draw Punishment', impactReason: 'Pings and amasses an army whenever opponents draw extra cards', icon: '⛓️', tier: 'S' },
-  'Hullbreaker Horror': { category: 'stax', categoryLabel: 'Spell Denial', impactReason: 'Uncounterable flash creature that bounces spells and permanents on every cast', icon: '⛓️', tier: 'S' },
-};
-
-const NORMALIZED_GAMECHANGERS = new Map<string, GamechangerDefinition>();
-Object.entries(GAMECHANGER_REGISTRY).forEach(([name, def]) => {
-  const lower = name.toLowerCase();
-  NORMALIZED_GAMECHANGERS.set(lower, def);
-  NORMALIZED_GAMECHANGERS.set(lower.replace(/['’`"]/g, "'"), def);
-  NORMALIZED_GAMECHANGERS.set(lower.replace(/['’`"]/g, ''), def);
-  NORMALIZED_GAMECHANGERS.set(lower.replace(/[^a-z0-9]/g, ''), def);
-});
-
-export function getGamechangerDefinition(card: any): GamechangerDefinition | null {
-  if (!card) return null;
-  const rawName = typeof card.name === 'string' ? card.name : '';
-  if (!rawName) return null;
-  
-  const cleanName = rawName.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-  if (GAMECHANGER_REGISTRY[cleanName]) {
-    return GAMECHANGER_REGISTRY[cleanName];
+  if (
+    typeLine.includes('land') ||
+    oracleText.includes('add {') ||
+    oracleText.includes('add one mana') ||
+    (typeLine.includes('artifact') && cmc <= 2 && oracleText.includes('add '))
+  ) {
+    return {
+      category: 'fast_mana',
+      categoryLabel: 'Fast Mana / Acceleration',
+      impactReason: 'High-velocity mana acceleration designated Gamechanger by Scryfall',
+      icon: '⚡',
+      tier: cmc <= 1 ? 'S+' : 'S',
+    };
   }
-  const lower = cleanName.toLowerCase();
-  if (NORMALIZED_GAMECHANGERS.has(lower)) {
-    return NORMALIZED_GAMECHANGERS.get(lower)!;
+
+  if (
+    oracleText.includes('without paying its mana cost') ||
+    (oracleText.includes('counter target') && cmc <= 2)
+  ) {
+    return {
+      category: 'free_spell',
+      categoryLabel: 'Interaction',
+      impactReason: 'High-impact interaction designated Gamechanger by Scryfall',
+      icon: '🛡️',
+      tier: 'S',
+    };
   }
-  const withSingleQuote = lower.replace(/['’`"]/g, "'");
-  if (NORMALIZED_GAMECHANGERS.has(withSingleQuote)) {
-    return NORMALIZED_GAMECHANGERS.get(withSingleQuote)!;
+
+  if (oracleText.includes('search your library') || oracleText.includes('tutor')) {
+    return {
+      category: 'tutor',
+      categoryLabel: 'Tutor',
+      impactReason: 'High-impact library search designated Gamechanger by Scryfall',
+      icon: '🔍',
+      tier: cmc <= 2 ? 'S+' : 'S',
+    };
   }
-  const noApostrophe = lower.replace(/['’`"]/g, '');
-  if (NORMALIZED_GAMECHANGERS.has(noApostrophe)) {
-    return NORMALIZED_GAMECHANGERS.get(noApostrophe)!;
+
+  if (
+    oracleText.includes('destroy all') ||
+    oracleText.includes('exile all') ||
+    oracleText.includes('each creature') ||
+    oracleText.includes('all nonland')
+  ) {
+    return {
+      category: 'board_wipe',
+      categoryLabel: 'Board Wipe',
+      impactReason: 'High-impact sweeper designated Gamechanger by Scryfall',
+      icon: '💥',
+      tier: 'S',
+    };
   }
-  const alphaNumeric = lower.replace(/[^a-z0-9]/g, '');
-  if (NORMALIZED_GAMECHANGERS.has(alphaNumeric)) {
-    return NORMALIZED_GAMECHANGERS.get(alphaNumeric)!;
+
+  if (
+    oracleText.includes("can't untap") ||
+    oracleText.includes("doesn't untap") ||
+    oracleText.includes("don't untap") ||
+    oracleText.includes("players can't") ||
+    oracleText.includes('skip') ||
+    oracleText.includes('opponents pay') ||
+    oracleText.includes('spells cost')
+  ) {
+    return {
+      category: 'stax',
+      categoryLabel: 'Stax / Control',
+      impactReason: 'Oppressive resource restriction designated Gamechanger by Scryfall',
+      icon: '⛓️',
+      tier: 'S+',
+    };
   }
-  return null;
+
+  if (
+    oracleText.includes('win the game') ||
+    oracleText.includes('loses the game') ||
+    oracleText.includes('lose life equal') ||
+    oracleText.includes('infinite')
+  ) {
+    return {
+      category: 'win_con',
+      categoryLabel: 'Win Condition',
+      impactReason: 'Decisive win condition designated Gamechanger by Scryfall',
+      icon: '🏆',
+      tier: 'S+',
+    };
+  }
+
+  return {
+    category: 'value_engine',
+    categoryLabel: 'High-Impact Staple',
+    impactReason: 'Designated Commander Gamechanger by Scryfall',
+    icon: '💎',
+    tier: 'S',
+  };
 }
 
 /**
- * Detects whether a card is a Gamechanger from card flags or registry.
+ * Evaluates whether a card is a Gamechanger strictly from Scryfall JSON data.
+ * Does not use any internal registries or hardcoded card name lists.
  */
 export function isCardGamechanger(card: any): boolean {
   if (!card) return false;
-  if (
+  return Boolean(
     card.game_changer === true ||
     card.game_changer === 'true' ||
     card.isGamechanger === true ||
     card.is_gamechanger === true ||
-    card.gameChanger === true ||
-    (card as any).IsGamechanger === true ||
-    (card as any).is_game_changer === true ||
-    (card as any).GameChanger === true ||
-    (card as any).gamechanger === true
-  ) {
-    return true;
-  }
-
-  return Boolean(getGamechangerDefinition(card));
+    card.gameChanger === true
+  );
 }
 
+/**
+ * Detects gamechangers strictly evaluated from Scryfall card data.
+ */
 export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
   if (!deck || !Array.isArray(deck.cards)) return [];
 
@@ -1957,37 +1924,21 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const lowerName = cleanName.toLowerCase();
     if (seenCardNames.has(lowerName)) return;
 
-    const regEntry = getGamechangerDefinition(card);
-    const isExplicit = (
-      card.game_changer === true ||
-      (card.game_changer as any) === 'true' ||
-      card.isGamechanger === true ||
-      card.is_gamechanger === true ||
-      card.gameChanger === true ||
-      (card as any).IsGamechanger === true ||
-      (card as any).is_game_changer === true ||
-      (card as any).GameChanger === true ||
-      (card as any).gamechanger === true
-    );
-
-    if (regEntry || isExplicit) {
+    // Strict Scryfall JSON evaluation only:
+    if (isCardGamechanger(card)) {
       seenCardNames.add(lowerName);
-      const category: GamechangerCategory = regEntry ? regEntry.category : ((card as any).gamechangerCategory || 'value_engine');
-      const categoryLabel = regEntry ? regEntry.categoryLabel : ((card as any).gamechangerCategoryLabel || 'Gamechanger Staple');
-      const icon = regEntry ? regEntry.icon : ((card as any).gamechangerIcon || '⚡');
-      const impactReason = regEntry ? regEntry.impactReason : ((card as any).gamechangerReason || (card as any).impactReason || 'Designated Commander Gamechanger');
-      const tier: 'S+' | 'S' | 'A' = regEntry ? regEntry.tier : ((card as any).gamechangerTier || 'S');
+      const details = getScryfallGamechangerDetails(card);
 
       results.push({
         card,
-        category,
-        categoryLabel,
+        category: details.category,
+        categoryLabel: details.categoryLabel,
         badgeBg: 'bg-amber-950/80',
         badgeBorder: 'border-amber-500/50',
         badgeText: 'text-amber-300',
-        icon,
-        impactReason,
-        tier,
+        icon: details.icon,
+        impactReason: details.impactReason,
+        tier: details.tier,
       });
     }
   });
