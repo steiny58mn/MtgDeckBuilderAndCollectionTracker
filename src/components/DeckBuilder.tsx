@@ -1833,16 +1833,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Bottom Row: Badges, MTGNexus URL, Notice Dropdown on Left; Condensed Iteration & Format on Right */}
           {!isEditingTitle && (
-            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800/80 flex-wrap">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
               {/* Left Side: Badges + MTGNexus URL + Notice Dropdown */}
-              <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
                 {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
-                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs font-mono font-semibold text-slate-300 shrink-0">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs font-mono font-semibold text-slate-300">
                   {stats.mainboardCount}
                   {deck.format === 'commander' ? '/100 cards' : ' cards'}
                 </span>
 
-                <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs font-bold text-emerald-400 shrink-0" title="Total deck market value">
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs font-bold text-emerald-400" title="Total deck market value">
                   ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
 
@@ -1850,7 +1850,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 <button
                   type="button"
                   onClick={cycleOwnershipFilter}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0 ${
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
                     ownershipFilter === 'owned'
                       ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 ring-1 ring-emerald-500/40'
                       : ownershipFilter === 'unowned'
@@ -1886,7 +1886,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </button>
 
                 {/* Gamechangers Dropdown Badge */}
-                <div className="relative shrink-0 z-50">
+                <div className="relative z-50">
                   <button
                     type="button"
                     onClick={() => setShowGamechangersDetails(!showGamechangersDetails)}
