@@ -59,6 +59,8 @@ import {
   isCardGamechanger,
   sortWUBRG
 } from '../utils/deckUtils';
+import { GamechangerService } from '../services/gamechangerService';
+import { scrollToTop } from '../utils/scrollUtils';
 import { DeckService, parseTimestamp } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
@@ -287,6 +289,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const updated = activeDeck.cards.map((c) => (c.id === existing.id ? { ...c, quantity: c.quantity + 1 } : c));
       onUpdateDeck({ ...activeDeck, cards: updated });
     } else {
+      const isGc = GamechangerService.isKnownGamechanger(cardName);
       const newCard: DeckCard = {
         id: `rec-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         scryfallId: `rec-${cardName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -298,8 +301,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         mana_cost: '',
         type_line: '',
         rarity: 'rare',
+        isGamechanger: isGc,
+        game_changer: isGc,
+        is_game_changer: isGc,
       };
       onUpdateDeck({ ...activeDeck, cards: [...activeDeck.cards, newCard] });
+      GamechangerService.queryCardGamechanger(cardName).then((gcStatus) => {
+        if (gcStatus !== isGc) {
+          const syncedCards = activeDeck.cards.map((c) =>
+            c.name.toLowerCase() === cardName.toLowerCase()
+              ? { ...c, isGamechanger: gcStatus, game_changer: gcStatus, is_game_changer: gcStatus }
+              : c
+          );
+          onUpdateDeck({ ...activeDeck, cards: syncedCards });
+        }
+      });
     }
   };
 
@@ -321,10 +337,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
   const [isHistoricalLoading, setIsHistoricalLoading] = useState<boolean>(false);
   const [historicalDeck, setHistoricalDeck] = useState<Deck | null>(null);
+  const [gamechangerTick, setGamechangerTick] = useState(0);
+
+  // Subscribe to Frostpointlabs gamechanger cache updates
+  useEffect(() => {
+    return GamechangerService.subscribe(() => {
+      setGamechangerTick((t) => t + 1);
+    });
+  }, []);
 
   const isHistoricalView = selectedHistoryId !== 'current';
   const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
-  const gamechangers = useMemo(() => detectGamechangers(activeDeck), [activeDeck]);
+  const gamechangers = useMemo(() => detectGamechangers(activeDeck), [activeDeck, gamechangerTick]);
   const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
   const ownershipStats = useMemo(() => {
     let owned = 0;
@@ -368,8 +392,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return JSON.parse(JSON.stringify(deck.cards || []));
   });
 
-  // Keep saved baseline synced when switching to a different deck
+  // Keep saved baseline synced when switching to a different deck & query gamechangers from Frostpointlabs
   useEffect(() => {
+    scrollToTop();
     let isCancelled = false;
     DeckService.enrichDeckCards(deck)
       .then((enrichedDeck) => {
@@ -382,6 +407,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         }
       })
       .catch(() => {});
+
+    // Query Frostpointlabs API for card gamechanger status on load
+    GamechangerService.syncDeckGamechangers(deck)
+      .then((res) => {
+        if (!isCancelled && res.hasChanges) {
+          onUpdateDeck(res.deck, false);
+        }
+      })
+      .catch((err) => {
+        console.warn('[DeckBuilder] Failed to sync gamechangers from Frostpointlabs on load:', err);
+      });
 
     const fromService = DeckService.getLastSavedDeck(deck.id);
     if (fromService && fromService.cards) {
@@ -407,7 +443,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
   }, [hasUnsavedChanges, deck.id]);
 
-  // Compute pending additions and deletions compared to saved baseline
+  // Query Frostpointlabs API when cards are added or removed
+  useEffect(() => {
+    let isCancelled = false;
+    const timer = setTimeout(() => {
+      if (!isCancelled && activeDeck && activeDeck.cards && activeDeck.cards.length > 0) {
+        GamechangerService.syncDeckGamechangers(activeDeck).then((res) => {
+          if (!isCancelled && res.hasChanges) {
+            onUpdateDeck(res.deck, hasUnsavedChanges);
+          }
+        }).catch(() => {});
+      }
+    }, 350);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeDeck.cards?.length, deck.id]);
   const pendingChanges = useMemo(() => {
     if (isHistoricalView) return { added: [], deleted: [] };
 
@@ -581,7 +633,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setIsSaving(true);
     try {
       const baseDeck = deckOverride || deck;
-      const currentDeckToSave: Deck = {
+      let currentDeckToSave: Deck = {
         ...baseDeck,
         name: title.trim() || baseDeck.name,
         description: description.trim(),
@@ -589,6 +641,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         mtgNexusEditThreadUrl: (nexusUrl || baseDeck.mtgNexusEditThreadUrl || '').trim() || undefined,
         updatedAt: Date.now(),
       };
+
+      // Query Frostpointlabs API on save to ensure exact, verified gamechanger status
+      try {
+        const synced = await GamechangerService.syncDeckGamechangers(currentDeckToSave);
+        currentDeckToSave = synced.deck;
+      } catch (gcErr) {
+        console.warn('[DeckBuilder] Error syncing gamechangers on save:', gcErr);
+      }
+
       if (onSaveDeck) {
         await onSaveDeck(currentDeckToSave);
       } else {
@@ -1129,8 +1190,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   const handleAppendCardsToDeck = async (cardsToAdd: DeckCard[]) => {
+    // Determine gamechanger status immediately from cache for instant zero-flash UX
+    const preparedCards = cardsToAdd.map((card) => {
+      const isGc = Boolean(card.game_changer || card.isGamechanger) || GamechangerService.isKnownGamechanger(card.name);
+      return {
+        ...card,
+        isGamechanger: isGc,
+        game_changer: isGc,
+        is_game_changer: isGc,
+      };
+    });
+
     const currentCards = [...deck.cards];
-    for (const card of cardsToAdd) {
+    for (const card of preparedCards) {
       const existingIdx = currentCards.findIndex(
         (c) => c.name.toLowerCase() === card.name.toLowerCase() && c.category === card.category
       );
@@ -1140,14 +1212,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         currentCards.push(card);
       }
     }
-    onUpdateDeck({
+    const updatedDeck = {
       ...deck,
       cards: currentCards,
       updatedAt: Date.now(),
-    });
+    };
+    onUpdateDeck(updatedDeck);
     setHasUnsavedChanges(true);
     setPriceRefreshMessage(`Added ${cardsToAdd.reduce((s, c) => s + c.quantity, 0)} cards to deck`);
     setTimeout(() => setPriceRefreshMessage(null), 3500);
+
+    // Query Frostpointlabs API in background to verify any new card gamechanger statuses
+    const cardNames = cardsToAdd.map((c) => c.name);
+    GamechangerService.queryGamechangersFromApi(cardNames).then(() => {
+      GamechangerService.syncDeckGamechangers(updatedDeck).then((res) => {
+        if (res.hasChanges) {
+          onUpdateDeck(res.deck, true);
+        }
+      });
+    }).catch(() => {});
   };
 
   const handleAddCardFromCompare = (cardName: string, cardData?: DeckCard) => {
@@ -1163,14 +1246,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (existing) {
       handleUpdateCardQuantity(existing.id, 1);
     } else if (cardData) {
+      const isGc = Boolean(cardData.game_changer || cardData.isGamechanger) || GamechangerService.isKnownGamechanger(cardName);
       const newCard: DeckCard = {
         ...cardData,
         id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         quantity: 1,
         category: cardData.category || 'main',
+        isGamechanger: isGc,
+        game_changer: isGc,
+        is_game_changer: isGc,
       };
       handleAppendCardsToDeck([newCard]);
     } else {
+      const isGc = GamechangerService.isKnownGamechanger(cardName);
       const newCard: DeckCard = {
         id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         scryfallId: '',
@@ -1180,6 +1268,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         type_line: 'Card',
         quantity: 1,
         category: 'main',
+        isGamechanger: isGc,
+        game_changer: isGc,
+        is_game_changer: isGc,
       };
       handleAppendCardsToDeck([newCard]);
     }
@@ -1958,8 +2049,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                                     <div className="font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
                                       {gc.card.name}
                                     </div>
-                                    <div className="text-[10px] text-amber-400/90 font-medium truncate">
-                                      {gc.icon} {gc.categoryLabel} · {gc.impactReason}
+                                    <div className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                                      <Zap className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
+                                      <span>Gamechanger</span>
                                     </div>
                                   </div>
                                 </div>

@@ -38,6 +38,7 @@ import {
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
 import { getKnownMedianPrice, toHighResImageUrl } from '../services/scryfall';
+import { scrollToTop } from '../utils/scrollUtils';
 import { getCardColorCategoryRank } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
@@ -126,6 +127,12 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedBinderFilter, setSelectedBinderFilter] = useState<string>(
     activeBinder ? activeBinder.id : 'all'
   );
+
+  // Always scroll back to top of screen when entering or switching a binder
+  useEffect(() => {
+    scrollToTop();
+  }, [activeBinder?.id]);
+
   const [isCreatingBinder, setIsCreatingBinder] = useState(false);
   const [newBinderName, setNewBinderName] = useState('');
   const [newBinderDesc, setNewBinderDesc] = useState('');

@@ -4,6 +4,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink, Upload } from 'lucide-react';
 import { Binder } from '../types/mtg';
 import { BinderImportModal } from './BinderImportModal';
+import { scrollToTop } from '../utils/scrollUtils';
 
 interface BinderListProps {
   binders: Binder[];
@@ -128,6 +129,7 @@ export const BinderList: React.FC<BinderListProps> = ({
                   onClick={(e) => {
                     if (!e.ctrlKey && !e.metaKey && e.button === 0) {
                       e.preventDefault();
+                      scrollToTop();
                       onSelectBinder(binder);
                     }
                   }}

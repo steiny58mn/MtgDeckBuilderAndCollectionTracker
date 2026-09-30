@@ -26,6 +26,8 @@ import { BinderList } from './components/BinderList';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
 import { getCardImageUrl } from './services/scryfall';
+import { GamechangerService } from './services/gamechangerService';
+import { scrollToTop } from './utils/scrollUtils';
 import { getDeckCommander, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
 
 export default function App() {
@@ -230,6 +232,20 @@ export default function App() {
     return false;
   };
 
+  // Always scroll back to the top of the screen when entering a deck
+  useEffect(() => {
+    if (activeDeck) {
+      scrollToTop();
+    }
+  }, [activeDeck?.id]);
+
+  // Always scroll back to the top of the screen when entering a binder
+  useEffect(() => {
+    if (activeBinder) {
+      scrollToTop();
+    }
+  }, [activeBinder?.id]);
+
   /**
    * Post-login / register handler: completes any pending action and syncs library
    */
@@ -291,10 +307,18 @@ export default function App() {
       return;
     }
 
-    await DeckService.saveDeck(deckToSave);
-    DeckService.setLastSavedDeck(deckToSave);
-    setActiveDeck(deckToSave);
-    showToast(`Saved "${deckToSave.name}"!`, 'success');
+    let deckToPersist = deckToSave;
+    try {
+      const synced = await GamechangerService.syncDeckGamechangers(deckToSave);
+      deckToPersist = synced.deck;
+    } catch (err) {
+      console.warn('[App] Error syncing gamechangers before save:', err);
+    }
+
+    await DeckService.saveDeck(deckToPersist);
+    DeckService.setLastSavedDeck(deckToPersist);
+    setActiveDeck(deckToPersist);
+    showToast(`Saved "${deckToPersist.name}"!`, 'success');
   };
 
   const handleImportAsNewDeck = async (newDeck: Deck, shouldSaveCurrentDeck: boolean) => {
@@ -521,10 +545,12 @@ export default function App() {
         rarity: card.rarity,
         imageUrl: getCardImageUrl(card, 'normal'),
         priceUsd: priceUsd,
-        isGamechanger: Boolean(card.game_changer),
-        game_changer: Boolean(card.game_changer),
+        isGamechanger: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
+        game_changer: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
+        is_game_changer: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
       };
       currentCards.push(newCard);
+      GamechangerService.queryCardGamechanger(card.name);
     }
 
     // Auto-update commander metadata if designating a commander
@@ -782,6 +808,7 @@ export default function App() {
         collection={collectionCards}
         activeDeck={activeDeck}
         onSelectActiveDeck={(deck) => {
+          scrollToTop();
           setActiveDeck(deck);
           setActiveTab('decks');
         }}
@@ -836,7 +863,17 @@ export default function App() {
             <DeckList
               decks={decks}
               onSelectDeck={(d) => {
+                scrollToTop();
                 setActiveDeck(d);
+                // Synchronize gamechanger status from Frostpointlabs on deck selection
+                GamechangerService.syncDeckGamechangers(d)
+                  .then((res) => {
+                    if (res.hasChanges) {
+                      setActiveDeck((prev) => (prev?.id === res.deck.id ? res.deck : prev));
+                    }
+                  })
+                  .catch(() => {});
+
                 DeckService.enrichDeckCards(d)
                   .then((enriched) => {
                     if (enriched) {
@@ -863,7 +900,10 @@ export default function App() {
               collection={collectionCards}
               binders={binders}
               activeBinder={activeBinder}
-              onSelectBinder={(b) => setActiveBinder(b)}
+              onSelectBinder={(b) => {
+                scrollToTop();
+                setActiveBinder(b);
+              }}
               onCreateBinder={handleCreateBinder}
               onDeleteBinder={handleDeleteBinder}
               activeDeck={activeDeck}
@@ -885,7 +925,10 @@ export default function App() {
           ) : (
             <BinderList 
               binders={binders}
-              onSelectBinder={(b) => setActiveBinder(b)}
+              onSelectBinder={(b) => {
+                scrollToTop();
+                setActiveBinder(b);
+              }}
               onCreateBinder={handleCreateBinder}
               onDeleteBinder={handleDeleteBinder}
             />

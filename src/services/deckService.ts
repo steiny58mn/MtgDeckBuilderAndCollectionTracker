@@ -174,6 +174,7 @@ export function normalizeCard(card: any): DeckCard {
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
     isGamechanger: isCardGamechanger(card),
     game_changer: isCardGamechanger(card),
+    is_game_changer: isCardGamechanger(card),
   };
 }
 
@@ -269,11 +270,12 @@ export function normalizeBinderCard(card: any): CollectionCard {
     notes: card.notes ?? card.Notes,
     isGamechanger: isCardGamechanger(card),
     game_changer: isCardGamechanger(card),
+    is_game_changer: isCardGamechanger(card),
   };
 }
 
 /**
- * Automatically enriches deck cards that are missing metadata or out of date using Scryfall.
+ * Automatically enriches deck cards that are missing metadata or out of date using Scryfall/Frostpointlabs.
  * Repositions cards from 'Other' to proper type categories and updates game_changer flags strictly from Scryfall.
  */
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
@@ -295,8 +297,8 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Check gamechanger from Scryfall JSON data, preserving existing true state to prevent flashing to 0
-        const isGc = Boolean(matched.game_changer) || Boolean(c.isGamechanger || c.game_changer);
+        // Check gamechanger from Frostpointlabs/Scryfall JSON data, preserving existing true state to prevent flashing to 0
+        const isGc = Boolean(matched.game_changer || matched.is_game_changer) || Boolean(c.isGamechanger || c.game_changer) || isCardGamechanger(c);
         const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
@@ -319,6 +321,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
             set_name: matched.set_name || c.set_name,
             isGamechanger: isGc,
             game_changer: isGc,
+            is_game_changer: isGc,
           };
         }
       }
@@ -436,6 +439,7 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
       const setName = c.set_name || (c as any).setName || (c as any).SetName || '';
       const collectorNumber = c.collector_number || (c as any).collectorNumber || (c as any).CollectorNumber || '';
       const colorIdentity = c.color_identity || (c as any).colorIdentity || (c as any).ColorIdentity || [];
+      const isGc = Boolean(c.game_changer || c.isGamechanger || c.is_gamechanger) || isCardGamechanger(c);
       return {
         ...c,
         type_line: typeLine,
@@ -448,6 +452,9 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
         collectorNumber,
         color_identity: colorIdentity,
         colorIdentity,
+        game_changer: isGc,
+        is_game_changer: isGc,
+        isGamechanger: isGc,
       };
     }),
   };

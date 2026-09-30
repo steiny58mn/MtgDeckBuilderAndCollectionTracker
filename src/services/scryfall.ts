@@ -1,5 +1,6 @@
 import { ScryfallCard } from '../types/mtg';
 import { getApiBaseUrl } from '../config/apiConfig';
+import { GamechangerService } from './gamechangerService';
 
 const SCRYFALL_API_BASE = 'https://api.scryfall.com';
 
@@ -58,7 +59,8 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     c.is_game_changer === 'true' ||
     c.isGamechanger === true ||
     c.is_gamechanger === true ||
-    c.gameChanger === true
+    c.gameChanger === true ||
+    (c.name && GamechangerService.isKnownGamechanger(c.name))
   );
 
   return {

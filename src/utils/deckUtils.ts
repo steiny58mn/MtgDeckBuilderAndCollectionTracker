@@ -57,6 +57,7 @@ export function detectCardManaProduction(card: DeckCard, commanderColors: string
 }
 
 import { apiFetch } from '../config/apiConfig';
+import { GamechangerService } from '../services/gamechangerService';
 import { 
   getApiBaseUrl, 
   getRemoteDeckHistory, 
@@ -1756,16 +1757,9 @@ export function calculateCommanderSaltAndPower(deck: Deck): DeckPowerAndSaltResu
 }
 
 // ==========================================
-// Deck Gamechangers Analysis
+// Deck Gamechangers Analysis (From Frostpointlabs API)
 // ==========================================
-export type GamechangerCategory =
-  | 'fast_mana'
-  | 'free_spell'
-  | 'win_con'
-  | 'board_wipe'
-  | 'value_engine'
-  | 'tutor'
-  | 'stax';
+export type GamechangerCategory = 'gamechanger';
 
 export interface GamechangerCardInfo {
   card: DeckCard;
@@ -1776,7 +1770,7 @@ export interface GamechangerCardInfo {
   badgeText: string;
   icon: string;
   impactReason: string;
-  tier: 'S+' | 'S' | 'A';
+  tier: 'S';
 }
 
 export interface GamechangerDefinition {
@@ -1784,130 +1778,46 @@ export interface GamechangerDefinition {
   categoryLabel: string;
   impactReason: string;
   icon: string;
-  tier: 'S+' | 'S' | 'A';
+  tier: 'S';
 }
 
 /**
- * Derives UI category presentation for a gamechanger card dynamically from Scryfall card data
- * (such as oracle text, type line, and CMC) without any hardcoded card name lists.
+ * Standard presentation for a Gamechanger card.
+ * Gamechangers are unified without dynamic synthetic categories.
  */
-export function getScryfallGamechangerDetails(card: DeckCard): GamechangerDefinition {
-  const typeLine = (card.type_line || card.typeLine || '').toLowerCase();
-  const oracleText = (card.oracle_text || '').toLowerCase();
-  const cmc = card.cmc ?? 0;
-
-  if (
-    typeLine.includes('land') ||
-    oracleText.includes('add {') ||
-    oracleText.includes('add one mana') ||
-    (typeLine.includes('artifact') && cmc <= 2 && oracleText.includes('add '))
-  ) {
-    return {
-      category: 'fast_mana',
-      categoryLabel: 'Fast Mana / Acceleration',
-      impactReason: 'High-velocity mana acceleration designated Gamechanger by Scryfall',
-      icon: '⚡',
-      tier: cmc <= 1 ? 'S+' : 'S',
-    };
-  }
-
-  if (
-    oracleText.includes('without paying its mana cost') ||
-    (oracleText.includes('counter target') && cmc <= 2)
-  ) {
-    return {
-      category: 'free_spell',
-      categoryLabel: 'Interaction',
-      impactReason: 'High-impact interaction designated Gamechanger by Scryfall',
-      icon: '🛡️',
-      tier: 'S',
-    };
-  }
-
-  if (oracleText.includes('search your library') || oracleText.includes('tutor')) {
-    return {
-      category: 'tutor',
-      categoryLabel: 'Tutor',
-      impactReason: 'High-impact library search designated Gamechanger by Scryfall',
-      icon: '🔍',
-      tier: cmc <= 2 ? 'S+' : 'S',
-    };
-  }
-
-  if (
-    oracleText.includes('destroy all') ||
-    oracleText.includes('exile all') ||
-    oracleText.includes('each creature') ||
-    oracleText.includes('all nonland')
-  ) {
-    return {
-      category: 'board_wipe',
-      categoryLabel: 'Board Wipe',
-      impactReason: 'High-impact sweeper designated Gamechanger by Scryfall',
-      icon: '💥',
-      tier: 'S',
-    };
-  }
-
-  if (
-    oracleText.includes("can't untap") ||
-    oracleText.includes("doesn't untap") ||
-    oracleText.includes("don't untap") ||
-    oracleText.includes("players can't") ||
-    oracleText.includes('skip') ||
-    oracleText.includes('opponents pay') ||
-    oracleText.includes('spells cost')
-  ) {
-    return {
-      category: 'stax',
-      categoryLabel: 'Stax / Control',
-      impactReason: 'Oppressive resource restriction designated Gamechanger by Scryfall',
-      icon: '⛓️',
-      tier: 'S+',
-    };
-  }
-
-  if (
-    oracleText.includes('win the game') ||
-    oracleText.includes('loses the game') ||
-    oracleText.includes('lose life equal') ||
-    oracleText.includes('infinite')
-  ) {
-    return {
-      category: 'win_con',
-      categoryLabel: 'Win Condition',
-      impactReason: 'Decisive win condition designated Gamechanger by Scryfall',
-      icon: '🏆',
-      tier: 'S+',
-    };
-  }
-
+export function getScryfallGamechangerDetails(card?: DeckCard): GamechangerDefinition {
   return {
-    category: 'value_engine',
-    categoryLabel: 'High-Impact Staple',
-    impactReason: 'Designated Commander Gamechanger by Scryfall',
-    icon: '💎',
+    category: 'gamechanger',
+    categoryLabel: 'Gamechanger',
+    impactReason: 'High-impact format staple designated Gamechanger',
+    icon: '⚡',
     tier: 'S',
   };
 }
 
 /**
- * Evaluates whether a card is a Gamechanger strictly from Scryfall JSON data.
- * Does not use any internal registries or hardcoded card name lists.
+ * Evaluates whether a card is a Gamechanger strictly from Frostpointlabs API data
+ * and verified in-memory/localStorage gamechanger cache.
  */
 export function isCardGamechanger(card: any): boolean {
   if (!card) return false;
-  return Boolean(
+  if (
     card.game_changer === true ||
     card.game_changer === 'true' ||
+    card.is_game_changer === true ||
+    card.is_game_changer === 'true' ||
     card.isGamechanger === true ||
     card.is_gamechanger === true ||
     card.gameChanger === true
-  );
+  ) {
+    return true;
+  }
+  return GamechangerService.isKnownGamechanger(card);
 }
 
 /**
- * Detects gamechangers strictly evaluated from Scryfall card data.
+ * Detects gamechangers in a deck evaluated from Frostpointlabs API data.
+ * All gamechangers are unified in presentation without dynamic categories.
  */
 export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
   if (!deck || !Array.isArray(deck.cards)) return [];
@@ -1924,34 +1834,29 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const lowerName = cleanName.toLowerCase();
     if (seenCardNames.has(lowerName)) return;
 
-    // Strict Scryfall JSON evaluation only:
     if (isCardGamechanger(card)) {
       seenCardNames.add(lowerName);
-      const details = getScryfallGamechangerDetails(card);
-
       results.push({
         card,
-        category: details.category,
-        categoryLabel: details.categoryLabel,
+        category: 'gamechanger',
+        categoryLabel: 'Gamechanger',
         badgeBg: 'bg-amber-950/80',
         badgeBorder: 'border-amber-500/50',
         badgeText: 'text-amber-300',
-        icon: details.icon,
-        impactReason: details.impactReason,
-        tier: details.tier,
+        icon: '⚡',
+        impactReason: 'High-impact format staple designated Gamechanger',
+        tier: 'S',
       });
     }
   });
 
-  const tierWeight: Record<string, number> = { 'S+': 3, 'S': 2, 'A': 1 };
   return results.sort((a, b) => {
-    const twA = tierWeight[a.tier] || 0;
-    const twB = tierWeight[b.tier] || 0;
-    if (twB !== twA) return twB - twA;
     const priceA = (a.card.isFoil && a.card.priceUsdFoil) ? a.card.priceUsdFoil : (a.card.priceUsd || 0);
     const priceB = (b.card.isFoil && b.card.priceUsdFoil) ? b.card.priceUsdFoil : (b.card.priceUsd || 0);
-    return priceB - priceA;
+    if (priceB !== priceA) return priceB - priceA;
+    return a.card.name.localeCompare(b.card.name);
   });
 }
+
 
 

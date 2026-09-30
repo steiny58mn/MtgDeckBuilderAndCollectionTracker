@@ -15,6 +15,7 @@ import { Deck, MTGFormat, CollectionCard } from '../types/mtg';
 import { calculateDeckStats } from '../utils/deckUtils';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckService } from '../services/deckService';
+import { scrollToTop } from '../utils/scrollUtils';
 
 interface DeckListProps {
   decks: Deck[];
@@ -232,7 +233,10 @@ export const DeckList: React.FC<DeckListProps> = ({
               >
                 {/* Deck Card Banner */}
                 <div
-                  onClick={() => onSelectDeck(deck)}
+                  onClick={() => {
+                    scrollToTop();
+                    onSelectDeck(deck);
+                  }}
                   className="cursor-pointer relative h-36 bg-slate-950 overflow-hidden"
                 >
                   {coverArt ? (
@@ -295,6 +299,7 @@ export const DeckList: React.FC<DeckListProps> = ({
                     onClick={(e) => {
                       if (!e.ctrlKey && !e.metaKey && e.button === 0) {
                         e.preventDefault();
+                        scrollToTop();
                         onSelectDeck(deck);
                       }
                     }}

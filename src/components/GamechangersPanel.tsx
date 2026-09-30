@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Deck, DeckCard, ScryfallCard } from '../types/mtg';
 import { detectGamechangers, GamechangerCardInfo } from '../utils/deckUtils';
+import { GamechangerService } from '../services/gamechangerService';
 import { ManaCostBadge } from './ManaCostBadge';
 
 interface GamechangersPanelProps {
@@ -30,6 +31,15 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
     }
   });
 
+  const [updateTick, setUpdateTick] = useState(0);
+
+  // Subscribe to background gamechanger updates
+  useEffect(() => {
+    return GamechangerService.subscribe(() => {
+      setUpdateTick((t) => t + 1);
+    });
+  }, []);
+
   const toggleCollapse = () => {
     setIsCollapsed((prev) => {
       const next = !prev;
@@ -42,20 +52,7 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
     });
   };
 
-  const gamechangers = React.useMemo(() => detectGamechangers(deck), [deck]);
-
-  // Group summary counts by category
-  const categoryCounts = React.useMemo(() => {
-    const map: Record<string, { count: number; icon: string; label: string }> = {};
-    gamechangers.forEach((g) => {
-      if (!map[g.category]) {
-        map[g.category] = { count: 0, icon: g.icon, label: g.categoryLabel.split(' ')[0] };
-      }
-      map[g.category].count += g.card.quantity || 1;
-    });
-    return Object.values(map);
-  }, [gamechangers]);
-
+  const gamechangers = React.useMemo(() => detectGamechangers(deck), [deck, updateTick]);
   const totalCards = gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0);
 
   return (
@@ -83,32 +80,13 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5 hidden sm:block">
-              High-impact format staples, fast mana, win conditions, and game-warping bombs
+              High-impact format staples and Gamechanger cards
             </p>
           </div>
         </div>
 
-        {/* Category Pills & Expand Chevron */}
+        {/* Expand / Collapse Chevron */}
         <div className="flex items-center gap-2">
-          {categoryCounts.length > 0 && (
-            <div className="hidden md:flex items-center gap-1.5 flex-wrap">
-              {categoryCounts.slice(0, 4).map((cat, idx) => (
-                <span
-                  key={idx}
-                  className="px-2 py-0.5 rounded-md bg-slate-950/70 border border-slate-800 text-[10px] font-semibold text-slate-300 flex items-center gap-1"
-                >
-                  <span>{cat.icon}</span>
-                  <span>{cat.count} {cat.label}</span>
-                </span>
-              ))}
-              {categoryCounts.length > 4 && (
-                <span className="text-[10px] text-slate-500 font-mono">
-                  +{categoryCounts.length - 4} more
-                </span>
-              )}
-            </div>
-          )}
-
           <button
             type="button"
             onClick={(e) => {
@@ -133,7 +111,7 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
                 <span>No Notorious Gamechangers Detected</span>
               </div>
               <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                This deck avoids high-salt game-ending combos and oppressive fast mana, making it well-suited for relaxed, casual Commander pods.
+                This deck contains no designated Gamechangers, making it well-suited for relaxed Commander pods.
               </p>
             </div>
           ) : (
@@ -160,8 +138,8 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">
-                          {gc.icon}
+                        <div className="w-full h-full flex items-center justify-center text-amber-400 text-xs">
+                          <Zap className="w-4 h-4" />
                         </div>
                       )}
                       {card.quantity > 1 && (
@@ -171,7 +149,7 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
                       )}
                     </div>
 
-                    {/* Card details & Gamechanger reasoning */}
+                    {/* Card details & Gamechanger tag */}
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-start justify-between gap-1.5">
                         <button
@@ -189,16 +167,11 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
                         )}
                       </div>
 
-                      {/* Category Tag & Tier Badge */}
+                      {/* Unified Gamechanger Badge & Price */}
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1 ${gc.badgeBg} ${gc.badgeBorder} ${gc.badgeText}`}
-                        >
-                          <span>{gc.icon}</span>
-                          <span>{gc.categoryLabel}</span>
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[9px] font-black text-slate-400">
-                          Tier {gc.tier}
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1 bg-amber-950/80 border-amber-500/50 text-amber-300">
+                          <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                          <span>Gamechanger</span>
                         </span>
                         {unitPrice > 0 && (
                           <span className="text-[10px] font-mono text-emerald-400 font-semibold ml-auto">
@@ -206,11 +179,6 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
                           </span>
                         )}
                       </div>
-
-                      {/* Explanation blurb */}
-                      <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
-                        {gc.impactReason}
-                      </p>
                     </div>
 
                     {/* Quick view button */}
@@ -234,3 +202,4 @@ export const GamechangersPanel: React.FC<GamechangersPanelProps> = ({
     </div>
   );
 };
+
