@@ -140,7 +140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
 
                     <div className="text-xs text-slate-400 pt-2 border-t border-slate-800/80">
-                      <strong className="text-slate-200 font-mono">{stats.mainboardCount}</strong> {deck.format === 'commander' ? '/ 100' : ''} cards
+                      <strong className="text-slate-200 font-mono">{stats.mainboardCount}</strong> cards
                     </div>
                   </div>
                 </div>

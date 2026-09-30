@@ -396,28 +396,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   useEffect(() => {
     scrollToTop();
     let isCancelled = false;
-    DeckService.enrichDeckCards(deck)
-      .then((enrichedDeck) => {
-        if (!isCancelled && enrichedDeck && enrichedDeck !== deck) {
-          DeckService.setLastSavedDeck(enrichedDeck);
-          setSavedCards(JSON.parse(JSON.stringify(enrichedDeck.cards || [])));
+
+    const syncDeck = async () => {
+      try {
+        const enrichedDeck = await DeckService.enrichDeckCards(deck);
+        const candidateDeck = enrichedDeck || deck;
+        const gcRes = await GamechangerService.syncDeckGamechangers(candidateDeck);
+        const finalDeck = gcRes.hasChanges ? gcRes.deck : (enrichedDeck && enrichedDeck !== deck ? enrichedDeck : null);
+
+        if (!isCancelled && finalDeck) {
+          DeckService.setLastSavedDeck(finalDeck);
+          setSavedCards(JSON.parse(JSON.stringify(finalDeck.cards || [])));
           DeckService.setDeckHasUnsavedChanges(deck.id, false);
           setHasUnsavedChanges(false);
-          onUpdateDeck(enrichedDeck, false);
+          onUpdateDeck(finalDeck, false);
         }
-      })
-      .catch(() => {});
+      } catch (err) {
+        console.warn('[DeckBuilder] Failed to sync deck & gamechangers on load:', err);
+      }
+    };
 
-    // Query Frostpointlabs API for card gamechanger status on load
-    GamechangerService.syncDeckGamechangers(deck)
-      .then((res) => {
-        if (!isCancelled && res.hasChanges) {
-          onUpdateDeck(res.deck, false);
-        }
-      })
-      .catch((err) => {
-        console.warn('[DeckBuilder] Failed to sync gamechangers from Frostpointlabs on load:', err);
-      });
+    syncDeck();
 
     const fromService = DeckService.getLastSavedDeck(deck.id);
     if (fromService && fromService.cards) {

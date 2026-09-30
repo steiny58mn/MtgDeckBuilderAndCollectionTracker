@@ -89,6 +89,8 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     isGamechanger: isGc,
     is_gamechanger: isGc,
     game_changer: isGc,
+    is_game_changer: isGc,
+    gameChanger: isGc,
     foil: Boolean(c.foil),
     nonfoil: Boolean(c.nonfoil),
     scryfall_uri: c.related_uris?.gatherer || c.related_uris?.edhrec,

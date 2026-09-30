@@ -7,6 +7,7 @@
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
 import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice } from './scryfall';
 import { AuthService } from './authService';
+import { GamechangerService } from './gamechangerService';
 import {
   createDeckListApi,
   createDeckPickListApi,
@@ -298,8 +299,19 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
         // Check gamechanger from Frostpointlabs/Scryfall JSON data, preserving existing true state to prevent flashing to 0
-        const isGc = Boolean(matched.game_changer || matched.is_game_changer) || Boolean(c.isGamechanger || c.game_changer) || isCardGamechanger(c);
-        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc;
+        const isGc = Boolean(
+          matched.game_changer ||
+          matched.is_game_changer ||
+          matched.isGamechanger ||
+          matched.is_gamechanger ||
+          c.isGamechanger ||
+          c.game_changer ||
+          c.is_game_changer ||
+          isCardGamechanger(matched) ||
+          isCardGamechanger(c) ||
+          (c.name && GamechangerService.isKnownGamechanger(c.name))
+        );
+        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc || Boolean(c.is_game_changer) !== isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
         const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
@@ -1775,6 +1787,14 @@ export class DeckService {
       this.notifyBinders();
       this.setStatus('synced');
       console.log('[DeckService] ✅ syncWithRemote complete. State updated and status set to "synced".');
+
+      // Proactively warm gamechanger cache for all cards across decks in background
+      try {
+        const allCardNames = remoteDecks.flatMap((d) => (d.cards || []).map((c) => c.name)).filter(Boolean);
+        if (allCardNames.length > 0) {
+          GamechangerService.queryGamechangersFromApi(allCardNames).catch(() => {});
+        }
+      } catch {}
     } catch (e: any) {
       console.error('[DeckService] ❌ Error syncing with remote API:', e);
       this.setStatus('offline', e?.message);

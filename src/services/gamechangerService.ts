@@ -266,20 +266,18 @@ export class GamechangerService {
     let hasChanges = false;
     const updatedCards = deck.cards.map((c) => {
       const clean = this.normalizeName(c.name);
-      // Determine Gamechanger: API result preferred, then in-memory cache, then existing card flag
-      const isGc = Boolean(
-        apiResults.get(clean) ??
-        this.cache.get(clean) ??
-        c.game_changer ??
-        c.isGamechanger
-      );
+      const apiVal = apiResults.get(clean);
+      const cacheVal = this.cache.get(clean);
+      const cardVal = Boolean(c.game_changer || c.is_game_changer || c.isGamechanger || c.is_gamechanger);
+      const isGc = apiVal !== undefined ? apiVal : (cacheVal !== undefined ? cacheVal : cardVal);
 
-      const currentGc = Boolean(c.game_changer || c.isGamechanger);
-      if (currentGc !== isGc) {
+      const currentGc = Boolean(c.game_changer || c.isGamechanger || c.is_game_changer);
+      if (currentGc !== isGc || c.game_changer !== isGc || c.isGamechanger !== isGc) {
         hasChanges = true;
         return {
           ...c,
           game_changer: isGc,
+          is_game_changer: isGc,
           isGamechanger: isGc,
           is_gamechanger: isGc,
         };

@@ -318,10 +318,6 @@ export const DeckList: React.FC<DeckListProps> = ({
                   {/* Stats snippet */}
                   <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/80">
                     <div className="flex items-center gap-3">
-                      <span>
-                        <strong className="text-slate-200 font-mono">{stats.mainboardCount}</strong>{' '}
-                        {deck.format === 'commander' ? '/ 100 cards' : 'cards'}
-                      </span>
                       {stats.sideboardCount > 0 && (
                         <span>
                           <strong className="text-slate-300 font-mono">{stats.sideboardCount}</strong> SB
