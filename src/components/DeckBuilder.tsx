@@ -392,7 +392,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return JSON.parse(JSON.stringify(deck.cards || []));
   });
 
-  // Keep saved baseline synced when switching to a different deck & query gamechangers from Frostpointlabs once on load
+  // Keep saved baseline synced when switching to a different deck & enrich cards from Frostpointlabs in a single pass
   useEffect(() => {
     scrollToTop();
     let isCancelled = false;
@@ -400,9 +400,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const syncDeck = async () => {
       try {
         const enrichedDeck = await DeckService.enrichDeckCards(deck);
-        const candidateDeck = enrichedDeck || deck;
-        const gcRes = await GamechangerService.syncDeckGamechangers(candidateDeck);
-        const finalDeck = gcRes.deck || enrichedDeck || deck;
+        const finalDeck = enrichedDeck && enrichedDeck !== deck ? enrichedDeck : null;
 
         if (!isCancelled && finalDeck) {
           DeckService.setLastSavedDeck(finalDeck);
@@ -412,7 +410,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           onUpdateDeck(finalDeck, false);
         }
       } catch (err) {
-        console.warn('[DeckBuilder] Failed to sync deck & gamechangers on load:', err);
+        console.warn('[DeckBuilder] Failed to sync deck & metadata on load:', err);
       }
     };
 
@@ -442,8 +440,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
   }, [hasUnsavedChanges, deck.id]);
 
-  // Query Frostpointlabs API when cards are added or removed
+  // Query Frostpointlabs API only when card count changes after initial mount
+  const lastCheckedCardCountRef = useRef<number>(deck.cards?.length || 0);
   useEffect(() => {
+    if (lastCheckedCardCountRef.current === activeDeck.cards?.length) {
+      return;
+    }
+    lastCheckedCardCountRef.current = activeDeck.cards?.length || 0;
+
     let isCancelled = false;
     const timer = setTimeout(() => {
       if (!isCancelled && activeDeck && activeDeck.cards && activeDeck.cards.length > 0) {
@@ -453,12 +457,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           }
         }).catch(() => {});
       }
-    }, 350);
+    }, 500);
     return () => {
       isCancelled = true;
       clearTimeout(timer);
     };
-  }, [activeDeck.cards?.length, deck.id]);
+  }, [activeDeck.cards?.length]);
   const pendingChanges = useMemo(() => {
     if (isHistoricalView) return { added: [], deleted: [] };
 
@@ -641,24 +645,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         updatedAt: Date.now(),
       };
 
-      let saveSuccess = true;
+      // Query Frostpointlabs API on save to ensure exact, verified gamechanger status
+      try {
+        const synced = await GamechangerService.syncDeckGamechangers(currentDeckToSave);
+        currentDeckToSave = synced.deck;
+      } catch (gcErr) {
+        console.warn('[DeckBuilder] Error syncing gamechangers on save:', gcErr);
+      }
+
       if (onSaveDeck) {
-        const res = await onSaveDeck(currentDeckToSave);
-        if (res === false) saveSuccess = false;
+        await onSaveDeck(currentDeckToSave);
       } else {
-        const res = await DeckService.saveDeck(currentDeckToSave);
-        if (res === false) saveSuccess = false;
+        await DeckService.saveDeck(currentDeckToSave);
       }
       DeckService.setLastSavedDeck(currentDeckToSave);
       setSavedCards(JSON.parse(JSON.stringify(currentDeckToSave.cards || [])));
       setHasUnsavedChanges(false);
       DeckService.setDeckHasUnsavedChanges(deck.id, false);
-      refreshHistory().catch(() => {});
-      if (saveSuccess) {
-        setPriceRefreshMessage('Deck saved & iteration snapshot created!');
-      } else {
-        setPriceRefreshMessage('Saved locally (offline mode - remote sync failed)');
-      }
+      await refreshHistory();
+      setPriceRefreshMessage('Deck saved & iteration snapshot created!');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
     } catch (e: any) {
       setPriceRefreshMessage('Failed to save deck: ' + (e.message || 'Error'));
@@ -1221,13 +1226,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setTimeout(() => setPriceRefreshMessage(null), 3500);
 
     // Query Frostpointlabs API in background to verify any new card gamechanger statuses
-    const cardNames = cardsToAdd.map((c) => c.name);
-    GamechangerService.queryGamechangersFromApi(cardNames).then(() => {
-      GamechangerService.syncDeckGamechangers(updatedDeck).then((res) => {
-        if (res.hasChanges) {
-          onUpdateDeck(res.deck, true);
-        }
-      });
+    GamechangerService.syncDeckGamechangers(updatedDeck).then((res) => {
+      if (res.hasChanges) {
+        onUpdateDeck(res.deck, true);
+      }
     }).catch(() => {});
   };
 

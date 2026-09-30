@@ -865,22 +865,6 @@ export default function App() {
               onSelectDeck={(d) => {
                 scrollToTop();
                 setActiveDeck(d);
-                // Synchronize gamechanger status from Frostpointlabs on deck selection
-                GamechangerService.syncDeckGamechangers(d)
-                  .then((res) => {
-                    if (res.hasChanges) {
-                      setActiveDeck((prev) => (prev?.id === res.deck.id ? res.deck : prev));
-                    }
-                  })
-                  .catch(() => {});
-
-                DeckService.enrichDeckCards(d)
-                  .then((enriched) => {
-                    if (enriched) {
-                      setActiveDeck((prev) => (prev?.id === enriched.id ? enriched : prev));
-                    }
-                  })
-                  .catch(() => {});
               }}
               onCreateDeck={handleCreateDeck}
               onDuplicateDeck={handleDuplicateDeck}

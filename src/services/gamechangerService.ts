@@ -7,7 +7,7 @@
  * badge flickering/flashing to 0 on initial loads or deck switches.
  */
 
-import { getApiBaseUrl, apiFetch } from '../config/apiConfig';
+import { getApiBaseUrl } from '../config/apiConfig';
 import { Deck, DeckCard } from '../types/mtg';
 
 const STORAGE_CACHE_KEY = 'mtg_gamechangers_cache_v2';
@@ -25,6 +25,16 @@ export class GamechangerService {
   private static init() {
     if (this.isInitialized) return;
     this.isInitialized = true;
+
+    // Seed known staple gamechangers verified on Frostpointlabs
+    const seedGamechangers = [
+      'ad nauseam',
+      'cyclonic rift',
+      'smothering tithe',
+    ];
+    for (const name of seedGamechangers) {
+      this.cache.set(name, true);
+    }
 
     if (typeof window !== 'undefined') {
       try {
@@ -126,75 +136,7 @@ export class GamechangerService {
     const clean = this.normalizeName(nameStr || '');
     if (!clean) return false;
 
-    if (this.cache.get(clean) === true) return true;
-
-    const knownStaples = new Set([
-      'gaea s cradle',
-      'gaeas cradle',
-      'teferi s protection',
-      'teferis protection',
-      'gamble',
-      'farewell',
-      'sol ring',
-      'mana crypt',
-      'demonic tutor',
-      'vampiric tutor',
-      'cyclonic rift',
-      'rhystic study',
-      'mystic remora',
-      'force of will',
-      'force of negation',
-      'fierce guardianship',
-      'deflecting swat',
-      'smothering tithe',
-      'ad nauseam',
-      'thassa s oracle',
-      'thassas oracle',
-      'underworld breach',
-      'dockside extortionist',
-      'mana vault',
-      'chrome mox',
-      'mox diamond',
-      'jeweled lotus',
-      'mana drain',
-      'swan song',
-      'jeska s will',
-      'jeskas will',
-      'esper sentinel',
-      'necropotence',
-      'timetwister',
-      'wheel of fortune',
-      'grim monolith',
-      'mox amber',
-      'ancient tomb',
-      'bolas s citadel',
-      'bolass citadel',
-      'mystic sanctuary',
-      'strip mine',
-      'wasteland',
-      'urza s saga',
-      'sylvan library',
-      'enlightened tutor',
-      'worldly tutor',
-      'mystical tutor',
-      'imperial seal',
-      'grim tutor',
-      'yawgmoth s will',
-      'yawgmoths will',
-      'reanimate',
-      'animate dead',
-      'necromancy',
-      'seedborn muse',
-      'heroic intervention',
-      'toxic deluge',
-      'expropriate',
-      'time warp',
-      'nexus of fate',
-      'karn liberated',
-      'ugin the spirit dragon',
-    ]);
-
-    return knownStaples.has(clean);
+    return this.cache.get(clean) === true;
   }
 
   /**
@@ -223,6 +165,49 @@ export class GamechangerService {
   }
 
   /**
+   * Register card gamechanger data directly from any lookup response (e.g. Scryfall/Frostpoint batch lookup)
+   */
+  static registerCardsFromLookup(
+    cardList: Array<{
+      name?: string;
+      game_changer?: any;
+      is_game_changer?: any;
+      isGamechanger?: any;
+      is_gamechanger?: any;
+      gameChanger?: any;
+    }>
+  ) {
+    this.init();
+    if (!cardList || !Array.isArray(cardList) || cardList.length === 0) return;
+
+    let anyChanged = false;
+    for (const raw of cardList) {
+      if (!raw || !raw.name) continue;
+      const clean = this.normalizeName(raw.name);
+      const isGc = Boolean(
+        raw.game_changer === true ||
+        raw.game_changer === 'true' ||
+        raw.is_game_changer === true ||
+        raw.is_game_changer === 'true' ||
+        raw.isGamechanger === true ||
+        raw.is_gamechanger === true ||
+        raw.gameChanger === true
+      );
+
+      const previous = this.cache.get(clean);
+      if (previous !== isGc) {
+        this.cache.set(clean, isGc);
+        anyChanged = true;
+      }
+    }
+
+    if (anyChanged) {
+      this.persistCache();
+      this.notify();
+    }
+  }
+
+  /**
    * Query gamechanger status for an array of card names directly from Frostpointlabs API.
    * Uses POST /deckbuilder/cards/lookup.
    */
@@ -246,24 +231,25 @@ export class GamechangerService {
 
     const namesToQuery = Array.from(uniqueRawNames.values());
     const frostpointBase = getApiBaseUrl();
-    const chunkSize = 50;
+    const chunkSize = 200;
     let anyChanged = false;
 
     for (let i = 0; i < namesToQuery.length; i += chunkSize) {
       const chunk = namesToQuery.slice(i, i + chunkSize);
       try {
-        const res = await apiFetch('/deckbuilder/cards/lookup', {
+        const res = await fetch(`${frostpointBase}/deckbuilder/cards/lookup`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
+            'User-Agent': 'DeckBuilder/1.0',
           },
           body: JSON.stringify(chunk),
         });
 
         if (res.ok) {
           const json = await res.json();
-          const cardList = Array.isArray(json) ? json : (json.data && Array.isArray(json.data) ? json.data : (json.items && Array.isArray(json.items) ? json.items : []));
+          const cardList = json.data && Array.isArray(json.data) ? json.data : [];
 
           for (const raw of cardList) {
             if (!raw || !raw.name) continue;
@@ -326,7 +312,7 @@ export class GamechangerService {
       const apiVal = apiResults.get(clean);
       const cacheVal = this.cache.get(clean);
       const cardVal = Boolean(c.game_changer || c.is_game_changer || c.isGamechanger || c.is_gamechanger);
-      const isGc = apiVal !== undefined ? Boolean(apiVal) : Boolean(cacheVal || cardVal);
+      const isGc = apiVal !== undefined ? apiVal : (cacheVal !== undefined ? cacheVal : cardVal);
 
       const currentGc = Boolean(c.game_changer || c.isGamechanger || c.is_game_changer);
       if (currentGc !== isGc || c.game_changer !== isGc || c.isGamechanger !== isGc) {

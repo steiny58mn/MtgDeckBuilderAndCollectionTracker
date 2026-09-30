@@ -1,12 +1,12 @@
 import { ScryfallCard } from '../types/mtg';
-import { getApiBaseUrl } from '../config/apiConfig';
+import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConfig';
 import { GamechangerService } from './gamechangerService';
 
 const SCRYFALL_API_BASE = 'https://api.scryfall.com';
 
 export function getFrostpointBaseUrl(): string {
   const url = getApiBaseUrl();
-  return (url || 'https://api.frostpointlabs.com').replace(/\/+$/, '');
+  return (url || DEFAULT_PROD_API_URL).replace(/\/+$/, '');
 }
 
 /**
@@ -168,15 +168,15 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
 
   // 1. Primary: Query Frostpointlabs Search API
   try {
-    const params = new URLSearchParams({
+    const queryObj: Record<string, string> = {
       q: trimmed,
       limit: String(limit),
       offset: String(offset),
-    });
-    if (order && order !== 'name') params.append('order', order);
-    if (dir && dir !== 'auto') params.append('dir', dir);
+    };
+    if (order && order !== 'name') queryObj.order = order;
+    if (dir && dir !== 'auto') queryObj.dir = dir;
 
-    const res = await fetch(`${frostpointBase}/deckbuilder/cards/search?${params.toString()}`);
+    const res = await apiFetch('/deckbuilder/cards/search', { query: queryObj });
     if (res.ok) {
       const json = await res.json();
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
@@ -241,9 +241,10 @@ export async function getAutocomplete(query: string): Promise<string[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const frostpointBase = getFrostpointBaseUrl();
   try {
-    const res = await fetch(`${frostpointBase}/deckbuilder/cards/autocomplete?q=${encodeURIComponent(trimmed)}`);
+    const res = await apiFetch('/deckbuilder/cards/autocomplete', {
+      query: { q: trimmed },
+    });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json.data) && json.data.length > 0) {
@@ -268,9 +269,8 @@ export async function getCardById(id: string): Promise<ScryfallCard | null> {
   const trimmed = (id || '').trim();
   if (!trimmed) return null;
 
-  const frostpointBase = getFrostpointBaseUrl();
   try {
-    const res = await fetch(`${frostpointBase}/deckbuilder/cards/${encodeURIComponent(trimmed)}`);
+    const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(trimmed)}`);
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.data) {
@@ -298,9 +298,10 @@ export async function fetchCardPrints(cardNameOrId: string): Promise<ScryfallCar
   const clean = cardNameOrId.trim();
   if (!clean) return [];
 
-  const frostpointBase = getFrostpointBaseUrl();
   try {
-    const res = await fetch(`${frostpointBase}/deckbuilder/cards/${encodeURIComponent(clean)}/prints?limit=100`);
+    const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(clean)}/prints`, {
+      query: { limit: 100 },
+    });
     if (res.ok) {
       const json = await res.json();
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
@@ -569,7 +570,7 @@ export async function fetchBatchCardsCollection(
   }
 
   const frostpointBase = getFrostpointBaseUrl();
-  const chunkSize = 50;
+  const chunkSize = 200;
   const chunks: Array<Array<{ name: string; set?: string }>> = [];
   for (let i = 0; i < uniqueItems.length; i += chunkSize) {
     chunks.push(uniqueItems.slice(i, i + chunkSize));
@@ -580,7 +581,7 @@ export async function fetchBatchCardsCollection(
   for (const chunk of chunks) {
     try {
       const names = chunk.map((c) => c.name);
-      const res = await fetch(`${frostpointBase}/deckbuilder/cards/lookup`, {
+      const res = await apiFetch('/deckbuilder/cards/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(names),
@@ -588,15 +589,17 @@ export async function fetchBatchCardsCollection(
 
       if (res.ok) {
         const json = await res.json();
-        const list = Array.isArray(json) ? json : (json.data && Array.isArray(json.data) ? json.data : (json.items && Array.isArray(json.items) ? json.items : []));
-        for (const raw of list) {
-          // Check that card actually has metadata (not null placeholder)
-          if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
-            const card = normalizeFrostpointCard(raw);
-            const exactLower = card.name.toLowerCase().trim();
-            cardMap.set(exactLower, card);
-            const frontName = exactLower.split(' // ')[0].trim();
-            cardMap.set(frontName, card);
+        if (json.data && Array.isArray(json.data)) {
+          GamechangerService.registerCardsFromLookup(json.data);
+          for (const raw of json.data) {
+            // Check that card actually has metadata (not null placeholder)
+            if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
+              const card = normalizeFrostpointCard(raw);
+              const exactLower = card.name.toLowerCase().trim();
+              cardMap.set(exactLower, card);
+              const frontName = exactLower.split(' // ')[0].trim();
+              cardMap.set(frontName, card);
+            }
           }
         }
       }

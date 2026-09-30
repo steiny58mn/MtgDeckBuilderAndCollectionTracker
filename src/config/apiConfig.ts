@@ -4,7 +4,7 @@
  */
 
 // Default URLs
-export const DEFAULT_LOCAL_API_URL = 'http://localhost:5205';
+export const DEFAULT_LOCAL_API_URL = 'https://api.frostpointlabs.com';
 export const DEFAULT_PROD_API_URL = 'https://api.frostpointlabs.com';
 
 // Storage Keys
@@ -26,7 +26,7 @@ export function isLocalEnvironment(): boolean {
 
 /**
  * Resolves the active API Base URL in prioritized order:
- * 1. Runtime override in localStorage['mtg_custom_api_base_url'] (cleans up stale localhost entries when running remotely)
+ * 1. Runtime override in localStorage['mtg_custom_api_base_url'] (cleans up stale localhost:5205 entries)
  * 2. Vite environment variable import.meta.env.VITE_API_BASE_URL
  * 3. Default to production API URL -> https://api.frostpointlabs.com
  */
@@ -37,8 +37,13 @@ export function getApiBaseUrl(): string {
     const saved = localStorage.getItem(STORAGE_API_BASE_KEY);
     if (saved !== null && saved.trim() !== '') {
       const cleanSaved = saved.trim().replace(/\/+$/, '');
-      // If saved URL points to localhost or frontend dev hostname but we're on a remote host, clear it
-      if (!isLocal && (cleanSaved.includes('localhost') || cleanSaved.includes('127.0.0.1') || cleanSaved.includes(window.location.hostname) || cleanSaved.includes('run.app'))) {
+      // If saved URL points to port 5205 / 7091 or frontend dev hostname or run.app, clear it so it defaults to live API
+      if (
+        cleanSaved.includes(':5205') ||
+        cleanSaved.includes(':7091') ||
+        cleanSaved.includes('run.app') ||
+        (!isLocal && (cleanSaved.includes('localhost') || cleanSaved.includes('127.0.0.1')))
+      ) {
         localStorage.removeItem(STORAGE_API_BASE_KEY);
       } else if (cleanSaved.startsWith('http://') || cleanSaved.startsWith('https://')) {
         return cleanSaved;
@@ -48,9 +53,12 @@ export function getApiBaseUrl(): string {
 
   const envUrl = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined)?.trim();
   if (envUrl) {
-    // Safety guard for remote deployments:
-    // If a localhost URL was baked in during a local build, ignore it on remote hostnames.
-    if (!isLocal && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1') || envUrl.includes('run.app'))) {
+    // Safety guard: If an unrunning localhost port was specified, fall back to production API URL
+    if (
+      envUrl.includes(':5205') ||
+      envUrl.includes(':7091') ||
+      (!isLocal && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1') || envUrl.includes('run.app')))
+    ) {
       return DEFAULT_PROD_API_URL;
     }
     return envUrl.replace(/\/+$/, '');
