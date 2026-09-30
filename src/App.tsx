@@ -837,6 +837,13 @@ export default function App() {
               decks={decks}
               onSelectDeck={(d) => {
                 setActiveDeck(d);
+                DeckService.enrichDeckCards(d)
+                  .then((enriched) => {
+                    if (enriched) {
+                      setActiveDeck((prev) => (prev?.id === enriched.id ? enriched : prev));
+                    }
+                  })
+                  .catch(() => {});
               }}
               onCreateDeck={handleCreateDeck}
               onDuplicateDeck={handleDuplicateDeck}
