@@ -1927,12 +1927,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
               {/* Left Side: Badges + MTGNexus URL + Notice Dropdown */}
               <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
-                {/* Mainboard Card Count: stats.mainboardCount already includes commander cards */}
-                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs font-mono font-semibold text-slate-300">
-                  {stats.mainboardCount}
-                  {deck.format === 'commander' ? '/100 cards' : ' cards'}
-                </span>
-
                 <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs font-bold text-emerald-400" title="Total deck market value">
                   ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
