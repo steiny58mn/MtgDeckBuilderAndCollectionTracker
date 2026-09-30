@@ -543,6 +543,15 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     <span>{colAddedToast ? 'Saved!' : 'Add to Binder'}</span>
                   </button>
                 </div>
+
+                {(displayCard.collector_number || (displayCard as any).collectorNumber) && (
+                  <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                    <span className="text-slate-500 truncate mr-2">{(displayCard.set || '').toUpperCase()}{displayCard.set_name ? ` · ${displayCard.set_name}` : ''}</span>
+                    <span className="font-bold text-slate-200 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 shrink-0">
+                      Card #{displayCard.collector_number || (displayCard as any).collectorNumber}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 

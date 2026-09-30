@@ -2106,6 +2106,17 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                       </span>
                     )}
                   </div>
+
+                  {/* Card Number Overlay in Binder Context */}
+                  {isBinderContext && (card.collector_number || (card as any).collectorNumber) && (
+                    <div
+                      className="absolute bottom-1.5 right-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-300 shadow-sm flex items-center gap-0.5"
+                      title={`Card #${card.collector_number || (card as any).collectorNumber}`}
+                    >
+                      <span className="text-slate-500 text-[9px]">#</span>
+                      {card.collector_number || (card as any).collectorNumber}
+                    </div>
+                  )}
                 </div>
 
                 {/* Card Info & Quick Actions */}
@@ -2131,9 +2142,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                     <ManaCostBadge manaCost={card.mana_cost} size="sm" />
                   </div>
                   {isBinderContext && (
-                    <div className="flex items-center text-[10px] text-slate-500 mt-0.5 truncate" title={card.set_name}>
-                      <span className="uppercase font-bold mr-1.5 text-slate-400">{card.set}</span>
-                      <span className="truncate">{card.set_name}</span>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5" title={`${card.set_name || ''} · #${card.collector_number || (card as any).collectorNumber || ''}`}>
+                      <div className="flex items-center truncate min-w-0 mr-1.5">
+                        <span className="uppercase font-bold mr-1 text-slate-300">{card.set}</span>
+                        <span className="truncate text-slate-500">{card.set_name}</span>
+                      </div>
+                      {(card.collector_number || (card as any).collectorNumber) && (
+                        <span className="font-mono font-bold text-slate-300 bg-slate-950/80 px-1 py-0.5 rounded border border-slate-800 shrink-0 text-[10px]">
+                          #{card.collector_number || (card as any).collectorNumber}
+                        </span>
+                      )}
                     </div>
                   )}
 
@@ -2283,24 +2301,32 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                     ) : (
                       // Binder context: ONLY Binder button shown!
                       onQuickAddToCollection && (
-                        <div className="flex gap-1.5">
-                          <button
-                            onClick={() => onQuickAddToCollection(card, false)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-200 text-[11px] font-bold transition-all cursor-pointer shadow-sm"
-                            title={`Add 1 normal copy to ${activeBinder?.name || 'binder'}`}
-                          >
-                            <Bookmark className="w-3 h-3 text-emerald-400 group-hover:text-emerald-100" />
-                            <span>Add</span>
-                          </button>
-                          {(card.finishes?.includes('foil') || card.foil) && (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex gap-1.5">
                             <button
-                              onClick={() => onQuickAddToCollection(card, true)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-fuchsia-600 hover:text-white text-slate-200 text-[11px] font-bold transition-all cursor-pointer shadow-sm"
-                              title={`Add 1 foil copy to ${activeBinder?.name || 'binder'}`}
+                              onClick={() => onQuickAddToCollection(card, false)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-200 text-[11px] font-bold transition-all cursor-pointer shadow-sm"
+                              title={`Add 1 normal copy to ${activeBinder?.name || 'binder'}`}
                             >
-                              <Sparkles className="w-3 h-3 text-fuchsia-400 group-hover:text-fuchsia-100" />
-                              <span>Foil</span>
+                              <Bookmark className="w-3 h-3 text-emerald-400 group-hover:text-emerald-100" />
+                              <span>Add</span>
                             </button>
+                            {(card.finishes?.includes('foil') || card.foil) && (
+                              <button
+                                onClick={() => onQuickAddToCollection(card, true)}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-fuchsia-600 hover:text-white text-slate-200 text-[11px] font-bold transition-all cursor-pointer shadow-sm"
+                                title={`Add 1 foil copy to ${activeBinder?.name || 'binder'}`}
+                              >
+                                <Sparkles className="w-3 h-3 text-fuchsia-400 group-hover:text-fuchsia-100" />
+                                <span>Foil</span>
+                              </button>
+                            )}
+                          </div>
+                          {(card.collector_number || (card as any).collectorNumber) && (
+                            <div className="text-[10px] font-mono text-center text-slate-400 bg-slate-950/60 py-0.5 px-1.5 rounded border border-slate-800/80 flex items-center justify-center gap-1">
+                              <span className="text-slate-500 uppercase tracking-wider text-[9px]">Card #</span>
+                              <span className="font-bold text-slate-200">#{card.collector_number || (card as any).collectorNumber}</span>
+                            </div>
                           )}
                         </div>
                       )
