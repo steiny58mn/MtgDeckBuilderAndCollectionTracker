@@ -1,8 +1,98 @@
 import { ScryfallCard } from '../types/mtg';
+import { getApiBaseUrl } from '../config/apiConfig';
 
 const SCRYFALL_API_BASE = 'https://api.scryfall.com';
 
+export function getFrostpointBaseUrl(): string {
+  const url = getApiBaseUrl();
+  return (url || 'https://api.frostpointlabs.com').replace(/\/+$/, '');
+}
 
+/**
+ * Normalizes card data returned from Frostpointlabs API to match ScryfallCard schema
+ */
+export function normalizeFrostpointCard(c: any): ScryfallCard {
+  if (!c) return c;
+
+  // Normalization for colors: can be "B", ["B"], or empty
+  let colors: string[] | undefined = undefined;
+  if (Array.isArray(c.colors)) {
+    colors = c.colors;
+  } else if (typeof c.colors === 'string' && c.colors.trim() !== '') {
+    colors = c.colors.split('').filter((ch: string) => /[WUBRG]/i.test(ch));
+  }
+
+  // Normalization for color_identity:
+  let color_identity: string[] = [];
+  if (Array.isArray(c.color_identity)) {
+    color_identity = c.color_identity;
+  } else if (typeof c.color_identity === 'string' && c.color_identity.trim() !== '') {
+    color_identity = c.color_identity.split('').filter((ch: string) => /[WUBRG]/i.test(ch));
+  }
+
+  // Normalization for cmc:
+  let cmc = 0;
+  if (typeof c.cmc === 'number') {
+    cmc = c.cmc;
+  } else if (typeof c.cmc === 'string') {
+    const parsed = parseFloat(c.cmc);
+    cmc = isNaN(parsed) ? 0 : parsed;
+  }
+
+  // Normalization for image_uris:
+  let image_uris = c.image_uris;
+  if (!image_uris && c.image_url) {
+    image_uris = {
+      small: c.image_url,
+      normal: c.image_url,
+      large: c.image_url,
+      art_crop: c.image_url,
+      png: c.image_url,
+    };
+  }
+
+  const isGc = Boolean(
+    c.game_changer === true ||
+    c.game_changer === 'true' ||
+    c.is_game_changer === true ||
+    c.is_game_changer === 'true' ||
+    c.isGamechanger === true ||
+    c.is_gamechanger === true ||
+    c.gameChanger === true
+  );
+
+  return {
+    id: c.scryfall_id || c.id,
+    name: c.name,
+    layout: c.layout || 'normal',
+    oracle_id: c.oracle_id,
+    mana_cost: c.mana_cost,
+    cmc,
+    type_line: c.type_line || c.type || '',
+    oracle_text: c.oracle_text || '',
+    power: c.power,
+    toughness: c.toughness,
+    loyalty: c.loyalty,
+    colors,
+    color_identity,
+    keywords: Array.isArray(c.keywords) ? c.keywords : [],
+    rarity: c.rarity || 'common',
+    set: (c.set || c.set_code || '').toLowerCase(),
+    set_name: c.set_name || '',
+    collector_number: String(c.collector_number || ''),
+    image_uris,
+    card_faces: Array.isArray(c.card_faces) ? c.card_faces : undefined,
+    legalities: c.legalities || {},
+    prices: c.prices || {},
+    isGamechanger: isGc,
+    is_gamechanger: isGc,
+    game_changer: isGc,
+    foil: Boolean(c.foil),
+    nonfoil: Boolean(c.nonfoil),
+    scryfall_uri: c.related_uris?.gatherer || c.related_uris?.edhrec,
+    purchase_uris: c.purchase_uris,
+  };
+}
 
 export interface SearchOptions {
   unique?: 'cards' | 'art' | 'prints';
@@ -59,33 +149,58 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     return { data: [], total_cards: 0, has_more: false };
   }
 
-  const params = new URLSearchParams({
+  const limit = 50;
+  const offset = (page - 1) * limit;
+  const frostpointBase = getFrostpointBaseUrl();
+
+  const cacheKey = `search-${trimmed}-${order}-${dir}-${page}-${unique || ''}`;
+  let cachedData = await getFromBrowserCache(cacheKey);
+  if (!cachedData && fallbackCache.has(cacheKey)) {
+    cachedData = fallbackCache.get(cacheKey);
+  }
+  if (cachedData) {
+    return cachedData;
+  }
+
+  // 1. Primary: Query Frostpointlabs Search API
+  try {
+    const params = new URLSearchParams({
+      q: trimmed,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (order && order !== 'name') params.append('order', order);
+    if (dir && dir !== 'auto') params.append('dir', dir);
+
+    const res = await fetch(`${frostpointBase}/deckbuilder/cards/search?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+        const normalized = json.data.map(normalizeFrostpointCard);
+        const result: SearchResult = {
+          data: normalized,
+          total_cards: json.total_cards || normalized.length,
+          has_more: Boolean(json.has_more),
+        };
+        fallbackCache.set(cacheKey, result);
+        await putToBrowserCache(cacheKey, result);
+        return result;
+      }
+    }
+  } catch (err) {
+    console.warn('[CardService] Frostpoint search error, falling back to Scryfall:', err);
+  }
+
+  // 2. Fallback to Scryfall if Frostpoint returns no results (e.g. database still populating)
+  const scryParams = new URLSearchParams({
     q: trimmed,
     order,
     dir,
     page: page.toString(),
   });
-  if (unique) params.append('unique', unique);
+  if (unique) scryParams.append('unique', unique);
 
-  const requestUrl = `${SCRYFALL_API_BASE}/cards/search?${params.toString()}`;
-  
-  // 1. Try Browser Cache API (Persistent across sessions)
-  let cachedData = await getFromBrowserCache(requestUrl);
-  
-  // 2. Try In-Memory Fallback
-  if (!cachedData && fallbackCache.has(requestUrl)) {
-    cachedData = fallbackCache.get(requestUrl);
-  }
-
-  if (cachedData) {
-    return {
-      data: cachedData.data || [],
-      total_cards: cachedData.total_cards || 0,
-      has_more: cachedData.has_more || false,
-      next_page: cachedData.next_page,
-    };
-  }
-
+  const requestUrl = `${SCRYFALL_API_BASE}/cards/search?${scryParams.toString()}`;
   try {
     const res = await fetch(requestUrl);
     if (res.status === 404) {
@@ -105,15 +220,14 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
       next_page: data.next_page,
     };
     
-    // Store in both caches
-    fallbackCache.set(requestUrl, result);
-    await putToBrowserCache(requestUrl, result);
+    fallbackCache.set(cacheKey, result);
+    await putToBrowserCache(cacheKey, result);
     
     return result;
   } catch (error: any) {
-    console.error('Error searching Scryfall cards:', error);
+    console.error('Error searching cards:', error);
     if (error.message === 'Failed to fetch') {
-      throw new Error('Network error: Blocked by rate-limit or adblocker. Please wait a moment, or try pausing browser shields/adblockers for Scryfall.');
+      throw new Error('Network error: Blocked by rate-limit or connection issue. Please wait a moment.');
     }
     throw error;
   }
@@ -122,6 +236,19 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
 export async function getAutocomplete(query: string): Promise<string[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
+
+  const frostpointBase = getFrostpointBaseUrl();
+  try {
+    const res = await fetch(`${frostpointBase}/deckbuilder/cards/autocomplete?q=${encodeURIComponent(trimmed)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json.data) && json.data.length > 0) {
+        return json.data;
+      }
+    }
+  } catch (e) {
+    console.warn('[CardService] Frostpoint autocomplete error:', e);
+  }
 
   try {
     const res = await fetch(`${SCRYFALL_API_BASE}/cards/autocomplete?q=${encodeURIComponent(trimmed)}`);
@@ -134,14 +261,65 @@ export async function getAutocomplete(query: string): Promise<string[]> {
 }
 
 export async function getCardById(id: string): Promise<ScryfallCard | null> {
+  const trimmed = (id || '').trim();
+  if (!trimmed) return null;
+
+  const frostpointBase = getFrostpointBaseUrl();
   try {
-    const res = await fetch(`${SCRYFALL_API_BASE}/cards/${id}`);
+    const res = await fetch(`${frostpointBase}/deckbuilder/cards/${encodeURIComponent(trimmed)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data) {
+        return normalizeFrostpointCard(json.data);
+      }
+    }
+  } catch (e) {
+    console.warn('[CardService] Frostpoint single card error:', e);
+  }
+
+  try {
+    const res = await fetch(`${SCRYFALL_API_BASE}/cards/${encodeURIComponent(trimmed)}`);
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
     console.error('Error fetching card by id:', e);
     return null;
   }
+}
+
+/**
+ * Fetch all available printings and editions of a card
+ */
+export async function fetchCardPrints(cardNameOrId: string): Promise<ScryfallCard[]> {
+  const clean = cardNameOrId.trim();
+  if (!clean) return [];
+
+  const frostpointBase = getFrostpointBaseUrl();
+  try {
+    const res = await fetch(`${frostpointBase}/deckbuilder/cards/${encodeURIComponent(clean)}/prints?limit=100`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+        return json.data.map(normalizeFrostpointCard);
+      }
+    }
+  } catch (err) {
+    console.warn('[CardService] Frostpoint prints error:', err);
+  }
+
+  try {
+    const res = await fetch(`${SCRYFALL_API_BASE}/cards/search?q=!"${encodeURIComponent(clean)}"+include:extras&unique=prints`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.data)) {
+        return data.data;
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching printings fallback:', err);
+  }
+
+  return [];
 }
 
 export async function getRandomCard(q?: string): Promise<ScryfallCard | null> {
@@ -365,8 +543,8 @@ export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<s
 }
 
 /**
- * Batch resolve cards by name and optional set code using Scryfall's /cards/collection endpoint.
- * Up to 75 cards per batch request for maximum import speed.
+ * Batch resolve cards by name and optional set code using Frostpointlabs deckbuilder lookup endpoint,
+ * with fallback for unindexed cards.
  */
 export async function fetchBatchCardsCollection(
   cardsToFetch: Array<{ name: string; set?: string }>
@@ -386,69 +564,109 @@ export async function fetchBatchCardsCollection(
     }
   }
 
-  const chunkSize = 75;
+  const frostpointBase = getFrostpointBaseUrl();
+  const chunkSize = 50;
   const chunks: Array<Array<{ name: string; set?: string }>> = [];
   for (let i = 0; i < uniqueItems.length; i += chunkSize) {
     chunks.push(uniqueItems.slice(i, i + chunkSize));
   }
 
-  const notFoundList: string[] = [];
+  const missingFromFrostpoint: Array<{ name: string; set?: string }> = [];
 
   for (const chunk of chunks) {
     try {
-      const identifiers = chunk.map((item) => {
-        if (item.set) {
-          return { name: item.name, set: item.set.toLowerCase() };
-        }
-        return { name: item.name };
-      });
-
-      const res = await fetch(`${SCRYFALL_API_BASE}/cards/collection`, {
+      const names = chunk.map((c) => c.name);
+      const res = await fetch(`${frostpointBase}/deckbuilder/cards/lookup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifiers }),
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(names),
       });
 
-      if (!res.ok) {
-        console.warn('Batch card collection response status:', res.status);
-        continue;
-      }
-
-      const json = await res.json();
-      if (json.data && Array.isArray(json.data)) {
-        for (const card of json.data) {
-          const exactLower = card.name.toLowerCase().trim();
-          cardMap.set(exactLower, card);
-          const frontName = exactLower.split(' // ')[0].trim();
-          cardMap.set(frontName, card);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data)) {
+          for (const raw of json.data) {
+            // Check that card actually has metadata (not null placeholder)
+            if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
+              const card = normalizeFrostpointCard(raw);
+              const exactLower = card.name.toLowerCase().trim();
+              cardMap.set(exactLower, card);
+              const frontName = exactLower.split(' // ')[0].trim();
+              cardMap.set(frontName, card);
+            }
+          }
         }
-      }
-
-      if (json.not_found && Array.isArray(json.not_found)) {
-        for (const missing of json.not_found) {
-          if (missing.name) notFoundList.push(missing.name);
-        }
-      }
-
-      if (chunks.length > 1) {
-        await new Promise((r) => setTimeout(r, 75));
       }
     } catch (err) {
-      console.error('Error fetching batch card collection:', err);
+      console.warn('[CardService] Frostpoint lookup error:', err);
+    }
+
+    // Check which items in this chunk were not populated
+    for (const item of chunk) {
+      const exact = item.name.toLowerCase().trim();
+      const front = exact.split(' // ')[0].trim();
+      if (!cardMap.has(exact) && !cardMap.has(front)) {
+        missingFromFrostpoint.push(item);
+      }
     }
   }
 
-  // Fallback for not_found or unmatched items (e.g. slight name variances)
-  for (const missingName of notFoundList.slice(0, 15)) {
-    try {
-      const searchRes = await searchCards({ query: `!"${missingName}"` });
-      if (searchRes.data && searchRes.data.length > 0) {
-        const found = searchRes.data[0];
-        cardMap.set(missingName.toLowerCase().trim(), found);
-        cardMap.set(found.name.toLowerCase().trim(), found);
+  // Fallback to Scryfall for unindexed cards so decks never show blank/missing cards
+  if (missingFromFrostpoint.length > 0) {
+    const fallbackChunks: Array<Array<{ name: string; set?: string }>> = [];
+    for (let i = 0; i < missingFromFrostpoint.length; i += 75) {
+      fallbackChunks.push(missingFromFrostpoint.slice(i, i + 75));
+    }
+
+    const notFoundList: string[] = [];
+
+    for (const chunk of fallbackChunks) {
+      try {
+        const identifiers = chunk.map((item) => {
+          if (item.set) {
+            return { name: item.name, set: item.set.toLowerCase() };
+          }
+          return { name: item.name };
+        });
+
+        const res = await fetch(`${SCRYFALL_API_BASE}/cards/collection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifiers }),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            for (const card of json.data) {
+              const exactLower = card.name.toLowerCase().trim();
+              cardMap.set(exactLower, card);
+              const frontName = exactLower.split(' // ')[0].trim();
+              cardMap.set(frontName, card);
+            }
+          }
+          if (json.not_found && Array.isArray(json.not_found)) {
+            for (const missing of json.not_found) {
+              if (missing.name) notFoundList.push(missing.name);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error in fallback batch card collection:', err);
       }
-    } catch (e) {
-      // Ignore fallback failures
+    }
+
+    for (const missingName of notFoundList.slice(0, 10)) {
+      try {
+        const searchRes = await searchCards({ query: `!"${missingName}"` });
+        if (searchRes.data && searchRes.data.length > 0) {
+          const found = searchRes.data[0];
+          cardMap.set(missingName.toLowerCase().trim(), found);
+          cardMap.set(found.name.toLowerCase().trim(), found);
+        }
+      } catch (e) {
+        // ignore
+      }
     }
   }
 

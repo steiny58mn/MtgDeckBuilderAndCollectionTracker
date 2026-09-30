@@ -14,7 +14,7 @@ import {
   Crown
 } from 'lucide-react';
 import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
-import { getCardImageUrl, getCardBackImageUrl, getCardById } from '../services/scryfall';
+import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints } from '../services/scryfall';
 import { ManaCostBadge } from './ManaCostBadge';
 import { getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
 
@@ -74,12 +74,9 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     try {
       setIsLoadingPrintings(true);
       const cleanName = displayCard.name.split(' // ')[0].trim();
-      const res = await fetch(`https://api.scryfall.com/cards/search?q=!"${encodeURIComponent(cleanName)}"+include:extras&unique=prints`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.data)) {
-          setPrintingsList(data.data);
-        }
+      const prints = await fetchCardPrints(cleanName);
+      if (Array.isArray(prints) && prints.length > 0) {
+        setPrintingsList(prints);
       }
     } catch (err) {
       console.error('Error fetching printings:', err);
