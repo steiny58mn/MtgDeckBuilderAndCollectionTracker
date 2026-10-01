@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
-import { getKnownMedianPrice, toHighResImageUrl } from '../services/scryfall';
+import { getKnownMedianPrice, toHighResImageUrl } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
 import { getCardColorCategoryRank } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -657,7 +657,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     setRefreshToast(null);
     try {
       await DeckService.refreshCollectionPrices(collection);
-      setRefreshToast('Collection prices synced with live Scryfall market!');
+      setRefreshToast('Collection prices synced with live market!');
       setTimeout(() => setRefreshToast(null), 3000);
     } catch (err: any) {
       setRefreshToast('Price refresh error: ' + (err.message || 'Error'));
@@ -851,7 +851,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               onClick={handleLivePriceRefresh}
               disabled={isRefreshingPrices}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-200 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
-              title="Batch query Scryfall API for current market prices"
+              title="Query database API for current market prices"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPrices ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
               <span className="hidden sm:inline">{isRefreshingPrices ? 'Syncing...' : 'Live Prices'}</span>
@@ -942,7 +942,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               </div>
               <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
                 <span>Basis: ${(Number(totalAcquiredValue) || 0).toFixed(2)}</span>
-                <span className="text-slate-500 font-mono text-[10px]">Scryfall Market</span>
+                <span className="text-slate-500 font-mono text-[10px]">Market Price</span>
               </div>
             </div>
 
@@ -1843,7 +1843,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           <Bookmark className="w-10 h-10 mx-auto text-slate-600" />
           <h3 className="text-base font-semibold text-slate-200">Your binder is empty</h3>
           <p className="text-xs max-w-sm mx-auto text-slate-500">
-            {searchQuery ? 'No cards match your filter criteria.' : 'Search Scryfall and click "Add to Collection" to catalog your physical or digital Magic cards.'}
+            {searchQuery ? 'No cards match your filter criteria.' : 'Search cards and click "Add to Collection" to catalog your physical or digital Magic cards.'}
           </p>
           <button
             onClick={onOpenSearch}

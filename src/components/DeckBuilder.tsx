@@ -130,11 +130,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   }, []);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import' | 'proxy' | 'nexus'>('export');
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
   const [showPendingChangesModal, setShowPendingChangesModal] = useState(false);
   useBodyScrollLock(showPendingChangesModal);
   useEscapeKey(showPendingChangesModal, () => setShowPendingChangesModal(false));
-  const [exportModalInitialTab, setExportModalInitialTab] = useState<'export' | 'import'>('export');
   const [activeCategoryTab, setActiveCategoryTab] = useState<'main' | 'sideboard' | 'maybeboard'>(() => {
     try {
       const saved = localStorage.getItem('deck_builder_category_tab');
@@ -438,6 +438,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return { owned, needed, missingPrice, missingList };
   }, [activeDeck.cards, getCardOwnedQuantity]);
   const missingCount = Math.max(0, ownershipStats.needed - ownershipStats.owned);
+  const ownedCount = ownershipStats.owned;
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -686,6 +687,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSave();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        setExportModalInitialTab('import');
+        setShowExportModal(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1928,7 +1933,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
 
-                {/* Total Cards Count Badge */}
+                {/* Total Cards Count Badge (shows the cards in the list) */}
                 <button
                   type="button"
                   onClick={() => setOwnershipFilter('all')}
@@ -1937,14 +1942,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       ? 'bg-slate-800/90 border-slate-700 text-white ring-1 ring-slate-600/40'
                       : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                   }`}
-                  title={`Total deck cards: ${stats.totalCards}. Click to show all cards.`}
+                  title={`Total deck cards: ${stats.totalCards}. Click to show all cards in list.`}
                 >
                   <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>Cards:</span>
                   <span className="font-mono font-bold text-white">{stats.totalCards}</span>
                 </button>
 
-                {/* Missing Cards Interactive Badge (Click to show only missing cards) */}
+                {/* Missing Cards Badge (filters cards down to what is missing) */}
                 <button
                   type="button"
                   onClick={() => setOwnershipFilter((prev) => (prev === 'unowned' ? 'all' : 'unowned'))}
@@ -1962,11 +1967,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <AlertCircle className={`w-3.5 h-3.5 shrink-0 ${ownershipFilter === 'unowned' ? 'text-amber-400' : 'text-amber-500/80'}`} />
                   <span>Missing:</span>
                   <span className="font-mono font-bold">{missingCount}</span>
-                  {ownershipFilter === 'unowned' && (
-                    <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      Active
-                    </span>
-                  )}
+
                 </button>
 
                 {/* Watchlist Dropdown Badge (Encompassing Gamechangers & Banned Cards) */}
@@ -2003,7 +2004,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                         onClick={() => setShowGamechangersDetails(false)}
                       />
                       <div 
-                        className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 z-30 w-80 sm:w-96 max-w-[calc(100vw-2rem)] p-3.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl ring-1 ring-slate-600/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
+                        className="fixed left-3 right-3 top-24 sm:absolute sm:top-full sm:left-0 sm:right-auto sm:w-96 sm:max-w-[calc(100vw-2rem)] mt-2 z-50 p-3.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl ring-1 ring-slate-600/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
                       >
                         <div className="font-semibold text-slate-200 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                           <span className="flex items-center gap-1.5 font-bold">
@@ -2119,7 +2120,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                           onClick={() => setShowFormatNoticeDetails(false)}
                         />
                         <div 
-                          className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 z-30 w-80 sm:w-96 max-w-[calc(100vw-2rem)] p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
+                          className="fixed left-3 right-3 top-24 sm:absolute sm:top-full sm:left-0 sm:right-auto sm:w-96 sm:max-w-[calc(100vw-2rem)] mt-2 z-50 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
                         >
                           <div className="font-semibold text-fuchsia-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                             <span className="flex items-center gap-1.5 font-bold">
@@ -2820,6 +2821,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
       {/* Export / Import Multi-format Modal */}
       <DeckExportModal
+        initialTab={exportModalInitialTab}
         deck={{
           ...activeDeck,
           name: isHistoricalView ? activeDeck.name : title,
@@ -2855,7 +2857,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onBack();
           }
         }}
-        initialTab={exportModalInitialTab}
+        
       />
 
       {/* Pending Unsaved Changes Modal */}

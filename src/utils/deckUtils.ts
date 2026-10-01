@@ -682,6 +682,83 @@ export const KNOWN_PARTNER_WITH_PAIRS: Record<string, string> = {
   'Soulblade Renewer': 'Soulblade Corrupter',
 };
 
+export const KNOWN_GENERIC_PARTNERS = new Set([
+  'akiri, line-slinger', 'alharu, solemn ritualist', 'anara, wolvid familiar',
+  'ardenn, intrepid archaeologist', 'armix, filigree thrasher', 'bruse tarl, boorish herder',
+  'dargo, the shipwrecker', 'esior, wardwing familiar', 'falthis, shadowcat familiar',
+  'ghost of ramirez depietro', 'glacian, powerstone engineer', 'halana, kessig ranger',
+  'ich-tekik, salvage splicer', 'ikra shidiqi, the usurper', 'ishai, ojutai dragonspeaker',
+  'jeska, thrice reborn', 'kamahl, heart of krosa', 'kediss, emberclaw familiar',
+  'keleth, sunmane familiar', 'keskit, the flesh sculptor', 'kodama of the east tree',
+  'krark, the thumbless', 'kraum, ludevic\'s opus', 'kydele, chosen of kruphix',
+  'livio, oathsworn sentinel', 'ludevic, necro-alchemist', 'malcolm, keen-eyed navigator',
+  'miara, thorn of the glade', 'nadier, agent of the duskenel', 'numa, joraga chieftain',
+  'piper wright, publick reporter', 'prava of the steel legion', 'ravos, soultender',
+  'rebbec, architect of ascension', 'reyhan, last of the abzan', 'rograkh, son of rohgahh',
+  'sakashima of a thousand faces', 'sengir, the dark baron', 'siani, eye of the dusk',
+  'sidar kondo of jamuraa', 'silas renn, seeker adept', 'slurrk, all-ingesting',
+  'tana, the bloodsower', 'thrasios, triton hero', 'toggo, goblin weaponsmith',
+  'tormod, the desecrator', 'tymna the weaver', 'vial smasher the fierce',
+  'yoshimaru, ever faithful'
+]);
+
+export const KNOWN_CHOOSE_BACKGROUND_COMMANDERS = new Set([
+  'abdel adrian, gorion\'s ward', 'alora, merry thief', 'amber gristle o\'maul',
+  'baeloth barrityl, entertainer', 'burakos, party leader', 'ellyn harbreeze, busybody',
+  'erinis, gloom stalker', 'ganax, astral hunter', 'gut, true soul zealot',
+  'halsin, emerald archdruid', 'imoen, mystic trickster', 'jaheira, friend of the forest',
+  'karlach, fury of avernus', 'lulu, loyal hollyphant', 'rasaad yn bashir',
+  'renari, merchant of marvels', 'safana, calimport cutthroat', 'shadowheart, dark justiciar',
+  'sivriss, nightmare speaker', 'skanos dragonheart', 'vhal, candlekeep researcher',
+  'viconia, drow apostate', 'volo, itinerant scholar', 'wilson, refined grizzly',
+  'wyll, blade of frontiers'
+]);
+
+export const KNOWN_BACKGROUND_ENCHANTMENTS = new Set([
+  'agent of the iron throne', 'agent of the shadow thieves', 'clan crafter',
+  'cloakwood hermit', 'criminal past', 'cultist of the absolute', 'dragon cultist',
+  'dungeon delver', 'faceless one', 'far traveler', 'feywild visitor', 'flaming fist',
+  'folk hero', 'guild artisan', 'hardy outlander', 'haunted one', 'inspiring leader',
+  'master chef', 'military veteran', 'noble heritage', 'passionate archaeologist',
+  'popular entertainer', 'raised by giants', 'scion of halaster', 'shameless charlatan',
+  'street urchin', 'sword coast sailor', 'tavern brawler', 'veteran soldier'
+]);
+
+export const KNOWN_FRIENDS_FOREVER = new Set([
+  'bjorna, nightfall alchemist', 'cecily, haunted mage', 'elmar, renegade mage',
+  'hargilde, kindly runecrafter', 'othelm, sigardian outcast', 'sophina, spearsage deserter',
+  'wernog, rider\'s chaplain', 'chief jim hopper', 'dustin, gadget genius',
+  'eleven, the mage', 'lucas, the sharper', 'max, the daredevil', 'mike, the dungeon master',
+  'will the wise'
+]);
+
+export const KNOWN_DOCTORS = new Set([
+  'the first doctor', 'the second doctor', 'the third doctor', 'the fourth doctor',
+  'the fifth doctor', 'the sixth doctor', 'the seventh doctor', 'the eighth doctor',
+  'the ninth doctor', 'the tenth doctor', 'the eleventh doctor', 'the twelfth doctor',
+  'the thirteenth doctor', 'the fourteenth doctor', 'the fifteenth doctor',
+  'the war doctor', 'fugitive of the doctor'
+]);
+
+export const KNOWN_DOCTORS_COMPANIONS = new Set([
+  'amy pond', 'clara oswald', 'donna noble', 'ian chesterton', 'jamie mccrimmon',
+  'jo grant', 'k-9, mark i', 'leela, sevateem warrior', 'martha jones', 'nardole, resourceful cyborg',
+  'peri brown', 'romana ii', 'rose tyler', 'ryan sinclair', 'sarah jane smith',
+  'susan foreman', 'tegan jovanka', 'vislor turlough', 'yasmin khan'
+]);
+
+export const KNOWN_PARTNER_VARIANTS: Record<string, string> = {
+  'chun-li, countless kicks': 'character select',
+  'dhalsim, pliable pacifist': 'character select',
+  'guile, sonic soldier': 'character select',
+  'e. honda, sumo slammer': 'character select',
+  'ken, burning brawler': 'character select',
+  'ryu, world warrior': 'character select',
+  'zangief, the red cyclone': 'character select',
+  'blanka, ferocious friend': 'character select'
+};
+
+
 /**
  * Analyzes card metadata (keywords, type_line, oracle_text) to determine
  * whether a card supports Partner, Partner Variants, Background, Friends Forever, or Doctor mechanics.
@@ -696,6 +773,62 @@ export function getCardPartnerInfo(card: {
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
   const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
   const keywords = (card.keywords || []).map((k) => k.toLowerCase());
+
+  // Authoritative name check fallback (works even if oracle_text or keywords are missing from card object)
+  const normName = (card.name || '').split(' // ')[0].replace(/\s*\[.*?\]/g, '').replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
+  if (normName) {
+    if (KNOWN_BACKGROUND_ENCHANTMENTS.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'background',
+        description: 'Background (Pairs with a Commander having "Choose a Background")',
+      };
+    }
+    if (KNOWN_CHOOSE_BACKGROUND_COMMANDERS.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'choose_background',
+        description: 'Choose a Background (Pairs with a Legendary Background enchantment)',
+      };
+    }
+    if (KNOWN_GENERIC_PARTNERS.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'partner',
+        description: 'Partner (Pairs with any other Commander with generic Partner)',
+      };
+    }
+    if (KNOWN_FRIENDS_FOREVER.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'friends_forever',
+        description: 'Friends Forever (Pairs with another Friends Forever commander)',
+      };
+    }
+    if (KNOWN_DOCTORS.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'doctor',
+        description: "Time Lord Doctor (Pairs with a Doctor's Companion)",
+      };
+    }
+    if (KNOWN_DOCTORS_COMPANIONS.has(normName)) {
+      return {
+        canHavePartner: true,
+        partnerType: 'doctors_companion',
+        description: "Doctor's Companion (Pairs with a Time Lord Doctor)",
+      };
+    }
+    if (KNOWN_PARTNER_VARIANTS[normName]) {
+      const v = KNOWN_PARTNER_VARIANTS[normName];
+      return {
+        canHavePartner: true,
+        partnerType: 'partner_variant',
+        partnerVariant: v,
+        description: `Partner — ${v.charAt(0).toUpperCase() + v.slice(1)} (Pairs only with other "${v}" commanders)`,
+      };
+    }
+  }
 
   // 1. Background enchantment (Pairs with a Commander having "Choose a Background")
   if (typeLine.includes('background') && typeLine.includes('enchantment')) {
@@ -924,6 +1057,44 @@ export function getCardCategorySortOrder(card: { type_line?: string }): number {
  * Constructs a clean backend API query term to search for candidate partner/background cards
  * from the database/API without using Scryfall-specific search operators.
  */
+
+export function getCandidatePartnerNames(cmdr: {
+  name?: string;
+  type_line?: string;
+  oracle_text?: string;
+  keywords?: string[];
+  all_parts?: { component?: string; name: string; type_line?: string }[];
+}): string[] {
+  const pInfo = getCardPartnerInfo(cmdr);
+  if (!pInfo.canHavePartner) return [];
+
+  switch (pInfo.partnerType) {
+    case 'partner':
+      return Array.from(KNOWN_GENERIC_PARTNERS);
+    case 'choose_background':
+      return Array.from(KNOWN_BACKGROUND_ENCHANTMENTS);
+    case 'background':
+      return Array.from(KNOWN_CHOOSE_BACKGROUND_COMMANDERS);
+    case 'friends_forever':
+      return Array.from(KNOWN_FRIENDS_FOREVER);
+    case 'doctor':
+      return Array.from(KNOWN_DOCTORS_COMPANIONS);
+    case 'doctors_companion':
+      return Array.from(KNOWN_DOCTORS);
+    case 'partner_with':
+      return pInfo.partnerWithTarget ? [pInfo.partnerWithTarget] : [];
+    case 'partner_variant':
+      if (pInfo.partnerVariant) {
+        return Object.entries(KNOWN_PARTNER_VARIANTS)
+          .filter(([_, v]) => v.toLowerCase() === pInfo.partnerVariant?.toLowerCase())
+          .map(([k]) => k);
+      }
+      return [];
+    default:
+      return [];
+  }
+}
+
 export function getPartnerApiQuery(cmdr: {
   name?: string;
   type_line?: string;
@@ -1883,7 +2054,7 @@ export function calculateCommanderSaltAndPower(deck: Deck): DeckPowerAndSaltResu
 }
 
 // ==========================================
-// Deck Gamechangers Analysis (From Frostpointlabs API)
+// Deck Gamechangers Analysis (From API Data)
 // ==========================================
 export type GamechangerCategory = 'gamechanger';
 
@@ -1939,12 +2110,15 @@ export function isCardGamechanger(card: any): boolean {
     card.game_changer === 'true' ||
     card.is_game_changer === true ||
     card.is_game_changer === 'true' ||
-    card.gameChanger === true
+    card.gameChanger === true ||
+    card.IsGamechanger === true ||
+    card.GameChanger === true ||
+    card.gamechanger === true
   );
 }
 
 /**
- * Detects gamechangers in a deck evaluated from Frostpointlabs API data.
+ * Detects gamechangers in a deck evaluated strictly from API data.
  * All gamechangers are unified in presentation without dynamic categories.
  */
 export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
@@ -1957,7 +2131,7 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const cat = (card.category || 'main').toLowerCase();
     if (cat === 'sideboard' || cat === 'maybeboard') return;
 
-    const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[(\[].*?[)\]]/g, '').trim();
     if (!cleanName) return;
     const lowerName = cleanName.toLowerCase();
     if (seenCardNames.has(lowerName)) return;
@@ -1985,6 +2159,3 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     return a.card.name.localeCompare(b.card.name);
   });
 }
-
-
-

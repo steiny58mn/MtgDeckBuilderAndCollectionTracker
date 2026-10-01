@@ -5,7 +5,7 @@
  */
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
-import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice } from './scryfall';
+import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice } from './api';
 import { AuthService } from './authService';
 import { GamechangerService } from './gamechangerService';
 import {

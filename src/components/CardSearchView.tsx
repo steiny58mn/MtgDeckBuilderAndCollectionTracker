@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Search, 
   Filter, 
@@ -27,7 +27,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
-import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi } from '../services/scryfall';
+import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi } from '../services/api';
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
@@ -140,7 +140,26 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const isCommanderDeck = activeDeck?.format === 'commander';
   const hasCommander = Boolean(commanderInfo?.commanderName);
   const commanderColorIdentity = commanderInfo?.colorIdentity || [];
-  const commanderCards = (activeDeck?.cards || []).filter((c) => c.category === 'commander');
+  const commanderCards = useMemo(() => {
+    if (!activeDeck) return [];
+    const tagged = (activeDeck.cards || []).filter((c) => (c.category || '').toLowerCase() === 'commander');
+    if (tagged.length > 0) return tagged;
+    if (activeDeck.commanderName) {
+      const names = activeDeck.commanderName.split(' // ');
+      const primaryName = names[0].split(' + ')[0].trim().toLowerCase();
+      const matched = (activeDeck.cards || []).filter(
+        (c) => c.name.toLowerCase() === primaryName || c.name.toLowerCase().startsWith(primaryName)
+      );
+      if (matched.length > 0) return matched;
+      return [{
+        id: activeDeck.commanderId || 'cmdr-primary',
+        name: names[0].split(' + ')[0].trim(),
+        category: 'commander',
+        quantity: 1,
+      } as DeckCard];
+    }
+    return [];
+  }, [activeDeck?.cards, activeDeck?.commanderName, activeDeck?.commanderId]);
   const firstCmdrPartnerInfo = commanderCards.length >= 1 ? getCardPartnerInfo(commanderCards[0]) : null;
   const canHavePartner = isCommanderDeck && commanderCards.length >= 1 && Boolean(firstCmdrPartnerInfo?.canHavePartner);
 
@@ -229,32 +248,46 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       })()
     : null;
 
-  const [isPartnerSectionExpanded, setIsPartnerSectionExpanded] = useState<boolean>(false);
+  const commanderStatsCacheRef = useRef<Map<string, any>>(new Map());
+  const primaryCommander = commanderCards[0] || null;
+  const currentPartner = commanderCards.length > 1 ? commanderCards[1] : null;
+
+  // Partner option is ONLY eligible when there is strictly 1 commander that has partner/paired options
+  const canSearchForPartner = Boolean(
+    isDeckContext &&
+    isCommanderDeck &&
+    primaryCommander &&
+    commanderCards.length === 1 &&
+    !currentPartner &&
+    firstCmdrPartnerInfo?.canHavePartner
+  );
+
+  const [isPartnerSectionExpanded, setIsPartnerSectionExpanded] = useState<boolean>(() => canSearchForPartner);
   const [availablePartners, setAvailablePartners] = useState<ScryfallCard[]>([]);
   const [loadingPartners, setLoadingPartners] = useState<boolean>(false);
   const [partnerFilter, setPartnerFilter] = useState<string>('');
 
-  const primaryCommander = commanderCards[0] || null;
-  const currentPartner = commanderCards.length > 1 ? commanderCards[1] : null;
-
   useEffect(() => {
-    if (initialPartnerMode) {
+    if (initialPartnerMode && canSearchForPartner) {
       setIsPartnerSectionExpanded(true);
       onResetPartnerSearchRequest?.();
     }
-  }, [initialPartnerMode]);
+  }, [initialPartnerMode, canSearchForPartner]);
 
   // When commander can have a partner and no partner is currently selected, auto-show available partners
   useEffect(() => {
-    if (isCommanderDeck && isDeckContext && firstCmdrPartnerInfo?.canHavePartner && !currentPartner) {
+    if (canSearchForPartner) {
       setIsPartnerSectionExpanded(true);
+    } else {
+      setIsPartnerSectionExpanded(false);
     }
-  }, [isCommanderDeck, isDeckContext, firstCmdrPartnerInfo?.canHavePartner, currentPartner]);
+  }, [canSearchForPartner]);
 
-  // Load available legal partners/backgrounds strictly from the API (never Scryfall)
+  // Load available legal partners/backgrounds strictly from the API (only when exactly 1 commander exists)
   useEffect(() => {
-    if (!isDeckContext || !isCommanderDeck || !primaryCommander || !firstCmdrPartnerInfo?.canHavePartner) {
+    if (!canSearchForPartner) {
       setAvailablePartners([]);
+      setLoadingPartners(false);
       return;
     }
 
@@ -282,14 +315,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       isMounted = false;
     };
   }, [
+    canSearchForPartner,
     primaryCommander?.id,
     primaryCommander?.name,
     currentPartner?.id,
-    currentPartner?.scryfallId,
     currentPartner?.name,
     firstCmdrPartnerInfo?.canHavePartner,
-    isDeckContext,
-    isCommanderDeck,
   ]);
 
   const handleSelectPrimaryCommander = (card: ScryfallCard) => {
@@ -762,7 +793,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
         order: searchSortOrder,
         dir: sortDir,
         page: pageNum,
-        unique: isBinderContext ? 'prints' : 'cards'
+        unique: isBinderContext ? 'prints' : 'cards',
+        signal: currentAbort.signal,
       });
 
       if (currentAbort.signal.aborted) return;
@@ -781,15 +813,19 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
         });
       }
 
-      // Client-side sorting for Synergy/Commander Decks
+      // Client-side sorting for Synergy/Commander Decks (fast & cached)
       if (sortBy === 'synergy' && activeDeck?.commanderName) {
-        const stats = await getCommanderData(activeDeck.commanderName);
+        let stats = commanderStatsCacheRef.current.get(activeDeck.commanderName);
+        if (!stats) {
+          try {
+            stats = await getCommanderData(activeDeck.commanderName);
+            if (stats) commanderStatsCacheRef.current.set(activeDeck.commanderName, stats);
+          } catch {}
+        }
         if (stats && stats.cardMap) {
           processedData.sort((a, b) => {
-            // First try Synergy (if it's in the 99)
             const aVal = stats.cardMap.get(a.name.toLowerCase()) || 0;
             const bVal = stats.cardMap.get(b.name.toLowerCase()) || 0;
-            
             if (aVal !== bVal) {
               return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
             }
@@ -797,45 +833,36 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           });
         }
       } else if (sortBy === 'commander_decks') {
-        // Fetch deck counts for potential commander cards
-        const deckCounts = new Map<string, number>();
-        await Promise.all(
-          processedData.map(async (card) => {
-            const isPotentialCommander = 
-              card.type_line?.includes('Legendary') && 
-              (card.type_line?.includes('Creature') || 
-               card.oracle_text?.toLowerCase().includes('can be your commander') || 
-               card.type_line?.includes('Background'));
-
-            if (!isPotentialCommander) {
-              deckCounts.set(card.id, 0);
-              return;
-            }
-
-            try {
-              const stats = await getCommanderData(card.name);
-              if (stats) {
-                deckCounts.set(card.id, stats.numDecks);
-              } else {
-                deckCounts.set(card.id, 0);
-              }
-            } catch {
-              deckCounts.set(card.id, 0);
-            }
-          })
-        );
-        
+        // Fast sort using edhrec rank or lightweight non-blocking check
         processedData.sort((a, b) => {
-          const aVal = deckCounts.get(a.id) || 0;
-          const bVal = deckCounts.get(b.id) || 0;
-          if (aVal !== bVal) {
-             return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+          const aRank = (a as any).edhrec_rank ?? (a as any).edhrecRank ?? 999999;
+          const bRank = (b as any).edhrec_rank ?? (b as any).edhrecRank ?? 999999;
+          if (aRank !== bRank) {
+            return sortDir === 'asc' ? bRank - aRank : aRank - bRank;
           }
-          return 0;
+          return a.name.localeCompare(b.name);
         });
       }
 
+
       if (currentAbort.signal.aborted) return;
+
+      // When building a deck (!isBinderContext), strictly ensure unique cards (only first print per name)
+      if (!isBinderContext) {
+        const seenNames = new Set<string>();
+        if (append) {
+          for (const card of results) {
+            const clean = (card.name || '').toLowerCase().trim();
+            if (clean) seenNames.add(clean);
+          }
+        }
+        processedData = processedData.filter((card) => {
+          const clean = (card.name || '').toLowerCase().trim();
+          if (!clean || seenNames.has(clean)) return false;
+          seenNames.add(clean);
+          return true;
+        });
+      }
 
       if (append) {
         setResults((prev) => [...prev, ...processedData]);
@@ -881,7 +908,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
       executeSearch(1, false);
-    }, 200);
+    }, 350);
 
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);

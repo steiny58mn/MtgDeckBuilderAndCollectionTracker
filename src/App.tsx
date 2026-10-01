@@ -25,7 +25,7 @@ import { CardDetailModal } from './components/CardDetailModal';
 import { BinderList } from './components/BinderList';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
-import { getCardImageUrl } from './services/scryfall';
+import { getCardImageUrl } from './services/api';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
@@ -991,7 +991,7 @@ export default function App() {
           )
         )}
 
-        {/* Scryfall Card Search Database Tab */}
+        {/* Card Search Database Tab */}
         <div className={activeTab === 'search' ? 'block' : 'hidden'}>
           <CardSearchView
             isActive={activeTab === 'search'}

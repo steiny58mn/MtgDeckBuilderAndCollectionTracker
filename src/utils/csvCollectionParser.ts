@@ -87,7 +87,7 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   return results;
 }
 
-import { getKnownMedianPrice } from '../services/scryfall';
+import { getKnownMedianPrice } from '../services/api';
 
 export function convertParsedCardsToCollectionCards(
   parsed: ParsedCsvCard[],

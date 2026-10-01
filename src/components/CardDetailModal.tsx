@@ -14,7 +14,7 @@ import {
   Crown
 } from 'lucide-react';
 import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
-import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints } from '../services/scryfall';
+import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints } from '../services/api';
 import { ManaCostBadge } from './ManaCostBadge';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
 

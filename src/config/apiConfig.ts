@@ -267,6 +267,9 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
 
     return res;
   } catch (err: any) {
+    if (fetchInit?.signal?.aborted) {
+      throw err;
+    }
     if (primaryUrl !== prodUrl) {
       try {
         console.warn(`[API Config] Primary fetch to ${primaryUrl} failed (${err?.message}); retrying against ${prodUrl}`);

@@ -57,7 +57,7 @@ import {
   parseDeckImport, 
   ParsedDeckImport 
 } from '../utils/deckImport';
-import { fetchBatchCardsCollection } from '../services/scryfall';
+import { fetchBatchCardsCollection } from '../services/api';
 import { DeckService } from '../services/deckService';
 
 export interface UploadedBatchDeckItem {
@@ -297,6 +297,9 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setActiveTab(deck ? initialTab : 'import');
+      if (deck) {
+        setTargetDeckToOverwrite(deck);
+      }
       setImportError(null);
       setShowSaveConfirmModal(false);
       if (isHistorical && (selectedExportFormat === 'bbcode' || selectedExportFormat === 'picklist')) {

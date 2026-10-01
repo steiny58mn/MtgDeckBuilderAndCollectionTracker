@@ -45,6 +45,7 @@ export const DeckList: React.FC<DeckListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importTargetDeck, setImportTargetDeck] = useState<Deck | null>(null);
   const [sortBy, setSortBy] = useState<'name' | 'completion' | 'updated'>('name');
   useBodyScrollLock(showCreateModal);
 
@@ -168,7 +169,10 @@ export const DeckList: React.FC<DeckListProps> = ({
         {/* Action Buttons: Import & New Deck */}
         <div className="flex items-center gap-2 shrink-0">
           <button
-            onClick={() => setShowImportModal(true)}
+            onClick={() => {
+              setImportTargetDeck(null);
+              setShowImportModal(true);
+            }}
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors shrink-0 cursor-pointer"
             title="Import decklist from BBCode, TappedOut, Moxfield, MTGO, Excel, CSV, or text"
           >
@@ -340,6 +344,17 @@ export const DeckList: React.FC<DeckListProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          setImportTargetDeck(deck);
+                          setShowImportModal(true);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                        title={`Import cards and overwrite "${deck.name}"`}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           onDuplicateDeck(deck);
                         }}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
@@ -459,7 +474,8 @@ export const DeckList: React.FC<DeckListProps> = ({
       {/* Import Modal */}
       {showImportModal && (
         <DeckExportModal
-          deck={null}
+          deck={importTargetDeck}
+          initialTab="import"
           existingDecks={decks}
           isOpen={showImportModal}
           onClose={() => setShowImportModal(false)}
@@ -496,7 +512,6 @@ export const DeckList: React.FC<DeckListProps> = ({
               onBatchImportCompleted(count);
             }
           }}
-          initialTab="import"
         />
       )}
       <ConfirmModal 

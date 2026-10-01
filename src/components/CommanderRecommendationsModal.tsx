@@ -13,7 +13,7 @@ import { Deck, DeckCategory, ScryfallCard } from '../types/mtg';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { getDeckCommander } from '../utils/deckUtils';
-import { searchCards, getCardImageUrl } from '../services/scryfall';
+import { searchCards, getCardImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 
 interface RecommendationItem {
