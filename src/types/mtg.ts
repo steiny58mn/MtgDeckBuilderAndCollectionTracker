@@ -116,6 +116,7 @@ export interface DeckCard {
   backImageUrl?: string;
   priceUsd?: number;
   priceUsdFoil?: number;
+  legalities?: Record<string, string>;
   isGameChanger?: boolean;
   IsGameChanger?: boolean;
   isGamechanger?: boolean;

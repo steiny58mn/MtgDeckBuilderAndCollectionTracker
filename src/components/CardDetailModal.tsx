@@ -85,7 +85,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     }
   };
 
-  // Whenever `card` changes or modal opens, initialize displayCard and fetch complete Scryfall record if needed
+  // Whenever `card` changes or modal opens, initialize displayCard and fetch complete card record if needed
   useEffect(() => {
     if (!card) {
       setDisplayCard(null);
@@ -181,9 +181,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               className="w-full h-auto rounded-2xl object-cover transition-transform duration-300 group-hover:scale-[1.02]"
               referrerPolicy="no-referrer"
               onError={(e) => {
-                const cId = displayCard.id || (displayCard as any).scryfallId;
-                if (cId && !e.currentTarget.src.includes('format=image')) {
-                  e.currentTarget.src = `https://api.scryfall.com/cards/${cId}?format=image&version=large`;
+                if (displayCard.image_uris?.normal && e.currentTarget.src !== displayCard.image_uris.normal) {
+                  e.currentTarget.src = displayCard.image_uris.normal;
                 }
               }}
             />
@@ -558,7 +557,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 hover:text-fuchsia-400 transition-colors"
                   >
-                    <span>Scryfall</span>
+                    <span>Card Page</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}

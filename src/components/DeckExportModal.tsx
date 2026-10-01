@@ -1,6 +1,6 @@
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { 
   X, 
   Copy, 
@@ -138,34 +138,42 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     return map;
   }, [collection]);
 
-  const getCardUniqueKey = (c: DeckCard, idx: number): string => {
-    return c.id || `${c.name}__${c.category}__${c.set_name || ''}__${idx}`;
-  };
+  const getCardUniqueKey = useCallback((c: DeckCard, idx?: number): string => {
+    return c.id || `${c.name}__${c.category}__${c.set_name || ''}__${idx ?? 0}`;
+  }, []);
+
+  // Cards eligible for proxy printing based on board scope (mainboard vs all)
+  const eligibleDeckCards = useMemo(() => {
+    if (!deck?.cards) return [];
+    return deck.cards
+      .map((card, originalIndex) => ({
+        card,
+        key: getCardUniqueKey(card, originalIndex),
+        originalIndex,
+      }))
+      .filter(({ card }) => proxyScope === 'all' || (card.category === 'main' || card.category === 'commander'));
+  }, [deck?.cards, proxyScope, getCardUniqueKey]);
 
   // Automatically sync selected cards when deck, board scope, collection filter, or basic lands filter changes
   useEffect(() => {
-    if (!deck?.cards) {
+    if (!eligibleDeckCards.length) {
       setSelectedCardKeys(new Set());
       return;
     }
     const newSelected = new Set<string>();
-    deck.cards.forEach((c, idx) => {
-      const key = getCardUniqueKey(c, idx);
-      const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
-      if (!inScope) return;
-
+    eligibleDeckCards.forEach(({ card, key }) => {
       // Basic land filter (defaulted to off)
-      if (!includeBasicLands && isBasicLand(c)) return;
+      if (!includeBasicLands && isBasicLand(card)) return;
 
       // Collection filter
-      const lowerName = c.name.trim().toLowerCase();
+      const lowerName = card.name.trim().toLowerCase();
       const inCol = collectionCardMap.has(lowerName);
       if (onlyNotInCollection && inCol) return;
 
       newSelected.add(key);
     });
     setSelectedCardKeys(newSelected);
-  }, [deck?.id, deck?.cards, proxyScope, onlyNotInCollection, includeBasicLands, collectionCardMap]);
+  }, [deck?.id, eligibleDeckCards, onlyNotInCollection, includeBasicLands, collectionCardMap]);
 
   const toggleCardSelection = (key: string) => {
     setSelectedCardKeys((prev) => {
@@ -179,11 +187,12 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     });
   };
 
-  const handleSelectAllVisible = (cardsToSelect: DeckCard[]) => {
+  const handleSelectAllVisible = (cardsToSelect?: Array<{ key: string }>) => {
+    const targetCards = cardsToSelect || displayProxyCards;
     setSelectedCardKeys((prev) => {
       const next = new Set(prev);
-      cardsToSelect.forEach((c, idx) => {
-        next.add(getCardUniqueKey(c, idx));
+      targetCards.forEach((c) => {
+        next.add(c.key);
       });
       return next;
     });
@@ -194,38 +203,56 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   };
 
   const handleSelectOnlyMissing = () => {
-    if (!deck?.cards) return;
+    if (!eligibleDeckCards.length) return;
     const next = new Set<string>();
-    deck.cards.forEach((c, idx) => {
-      const inScope = proxyScope === 'all' || (c.category === 'main' || c.category === 'commander');
-      if (!inScope) return;
-      if (!includeBasicLands && isBasicLand(c)) return;
-      const lowerName = c.name.trim().toLowerCase();
+    eligibleDeckCards.forEach(({ card, key }) => {
+      if (!includeBasicLands && isBasicLand(card)) return;
+      const lowerName = card.name.trim().toLowerCase();
       if (!collectionCardMap.has(lowerName)) {
-        next.add(getCardUniqueKey(c, idx));
+        next.add(key);
       }
     });
     setSelectedCardKeys(next);
   };
 
-  const eligibleDeckCards = useMemo(() => {
-    if (!deck?.cards) return [];
-    return deck.cards.filter((c) => proxyScope === 'all' || (c.category === 'main' || c.category === 'commander'));
-  }, [deck?.cards, proxyScope]);
+  // Cards displayed in the interactive grid with cards included in the print sorted to the top
+  const displayProxyCards = useMemo(() => {
+    let list = eligibleDeckCards;
+
+    if (proxySearchTerm.trim()) {
+      const q = proxySearchTerm.toLowerCase();
+      list = list.filter(({ card }) => card.name.toLowerCase().includes(q));
+    }
+
+    return [...list].sort((a, b) => {
+      const aSelected = selectedCardKeys.has(a.key);
+      const bSelected = selectedCardKeys.has(b.key);
+
+      // 1. Cards included in print (selected) sorted to top
+      if (aSelected && !bSelected) return -1;
+      if (!aSelected && bSelected) return 1;
+
+      // 2. Secondary alphabetical sort by card name
+      const nameComp = a.card.name.localeCompare(b.card.name);
+      if (nameComp !== 0) return nameComp;
+
+      return a.originalIndex - b.originalIndex;
+    });
+  }, [eligibleDeckCards, proxySearchTerm, selectedCardKeys]);
 
   const cardsToPrintList = useMemo(() => {
-    if (!deck?.cards) return [];
+    if (!eligibleDeckCards.length) return [];
     const list: DeckCard[] = [];
-    deck.cards.forEach((c, idx) => {
-      const key = getCardUniqueKey(c, idx);
+    eligibleDeckCards.forEach(({ card, key }) => {
       if (selectedCardKeys.has(key)) {
-        for (let i = 0; i < (c.quantity || 1); i++) {
-          list.push(c);
+        for (let i = 0; i < (card.quantity || 1); i++) {
+          list.push(card);
         }
       }
     });
-    return list;
-  }, [deck?.cards, selectedCardKeys]);
+    // Sort proxy sheets alphabetically for easy physical sorting
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [eligibleDeckCards, selectedCardKeys]);
 
   const totalSheetsCount = Math.ceil(cardsToPrintList.length / 9);
   
@@ -389,15 +416,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
   const handlePrintProxies = () => {
     if (!deck) return;
-    const cardsToPrint: DeckCard[] = [];
-    deck.cards.forEach((c, idx) => {
-      const key = getCardUniqueKey(c, idx);
-      if (selectedCardKeys.has(key)) {
-        for (let i = 0; i < (c.quantity || 1); i++) {
-          cardsToPrint.push(c);
-        }
-      }
-    });
+    const cardsToPrint: DeckCard[] = [...cardsToPrintList];
 
     if (cardsToPrint.length === 0) {
       alert('Please select at least one card to print proxies.');
@@ -995,7 +1014,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
     setIsResolvingCards(true);
     setImportError(null);
-    setResolveProgress('Resolving cards with Scryfall database...');
+    setResolveProgress('Resolving cards with database...');
 
     try {
       const cardsToFetch = parsedPreview.cards.map((c) => ({ name: c.name, set: c.set }));
@@ -1091,7 +1110,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     if (!parsedPreview || parsedPreview.cards.length === 0 || !onImportOverwriteDeck) return;
     setIsResolvingCards(true);
     setImportError(null);
-    setResolveProgress('Resolving imported cards with Scryfall database...');
+    setResolveProgress('Resolving imported cards with database...');
 
     try {
       const cardsToFetch = parsedPreview.cards.map((c) => ({
@@ -1187,7 +1206,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
     if (!parsedPreview || parsedPreview.cards.length === 0 || !onImportAppendToDeck) return;
     setIsResolvingCards(true);
     setImportError(null);
-    setResolveProgress('Resolving cards with Scryfall database...');
+    setResolveProgress('Resolving cards with database...');
 
     try {
       const cardsToFetch = parsedPreview.cards.map((c) => ({ name: c.name, set: c.set }));
@@ -1502,7 +1521,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleSelectAllVisible(eligibleDeckCards)}
+                    onClick={() => handleSelectAllVisible()}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
                     title="Select all cards in scope"
                   >
@@ -1545,7 +1564,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
                 <div className="flex items-center gap-3 flex-wrap">
                   <span>
-                    Selected: <b className="text-violet-300">{cardsToPrintList.length}</b> / {eligibleDeckCards.reduce((s, c) => s + (c.quantity || 1), 0)} cards
+                    Selected: <b className="text-violet-300">{cardsToPrintList.length}</b> / {eligibleDeckCards.reduce((s, item) => s + (item.card.quantity || 1), 0)} cards
                   </span>
                   <span>
                     Sheets: <b className="text-white">{totalSheetsCount}</b>
@@ -1557,19 +1576,16 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
             {/* Interactive Cards Grid */}
             <div className="space-y-2">
               <div className="text-xs text-slate-400 flex items-center justify-between">
-                <span>Click any card or checkbox to include/exclude it from printing:</span>
-                <span>Showing {eligibleDeckCards.length} unique card entries</span>
+                <span>Click any card or checkbox to include/exclude it from printing (included cards sorted to top):</span>
+                <span>Showing {displayProxyCards.length} unique card entries ({cardsToPrintList.length} included in print)</span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2.5 p-3 bg-slate-950 rounded-2xl border border-slate-800/80 max-h-[52vh] overflow-y-auto">
-                {eligibleDeckCards
-                  .filter((c) => !proxySearchTerm.trim() || c.name.toLowerCase().includes(proxySearchTerm.toLowerCase()))
-                  .map((c, idx) => {
-                    const key = getCardUniqueKey(c, idx);
-                    const isSelected = selectedCardKeys.has(key);
-                    const isBasic = isBasicLand(c);
-                    const ownedCount = collectionCardMap.get(c.name.trim().toLowerCase()) || 0;
-                    const inCol = ownedCount > 0;
+                {displayProxyCards.map(({ card: c, key }) => {
+                  const isSelected = selectedCardKeys.has(key);
+                  const isBasic = isBasicLand(c);
+                  const ownedCount = collectionCardMap.get(c.name.trim().toLowerCase()) || 0;
+                  const inCol = ownedCount > 0;
 
                     return (
                       <div

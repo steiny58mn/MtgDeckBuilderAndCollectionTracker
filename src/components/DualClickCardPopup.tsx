@@ -164,15 +164,11 @@ export const DualClickCardModal: React.FC<DualClickCardModalProps> = ({ card, on
   let frontImage = card.imageUrl;
   if (frontImage) {
     frontImage = frontImage.replace('version=small', 'version=large').replace('version=normal', 'version=large');
-  } else if (card.scryfallId) {
-    frontImage = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large`;
   }
 
   let backImage = card.backImageUrl;
   if (backImage) {
     backImage = backImage.replace('version=small', 'version=large').replace('version=normal', 'version=large');
-  } else if (card.scryfallId && showBackFace) {
-    backImage = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large&face=back`;
   }
 
   const activeImage = showBackFace && backImage ? backImage : frontImage || 'https://cards.scryfall.io/back.jpg';
@@ -231,11 +227,6 @@ export const DualClickCardModal: React.FC<DualClickCardModalProps> = ({ card, on
             alt={card.name}
             className="w-full h-full object-contain"
             referrerPolicy="no-referrer"
-            onError={(e) => {
-              if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large${showBackFace ? '&face=back' : ''}`;
-              }
-            }}
           />
         </div>
 

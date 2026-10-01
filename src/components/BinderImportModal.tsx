@@ -115,7 +115,7 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
       await DeckService.saveBinder(updatedBinder);
 
       // Background price & card detail refresh
-      setStatusMessage('Enriching cards with Scryfall card data in background...');
+      setStatusMessage('Enriching cards with database card data in background...');
       DeckService.refreshCollectionPrices(newCollectionCards).catch(() => {});
 
       onImportComplete(updatedBinder);
@@ -143,7 +143,7 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Upload or paste your CSV collection with card names, quantities, and Scryfall IDs.
+                Upload or paste your CSV collection with card names, quantities, and Card IDs.
               </p>
             </div>
           </div>
@@ -261,13 +261,13 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             value={csvText}
             onChange={(e) => handleTextChange(e.target.value)}
             rows={7}
-            placeholder={`"Oracle Name","ID: Scryfall","ID: Gatherer","Haves: Paper","Haves: Foil","Haves: Etched"\n"Red Elemental Blast","4fafd3f9-f7de-4d6e-8824-6b60866fc50f",512,1,0,0\n"Taiga","01006833-6007-4c16-9ebb-20d31c60a57a",883,1,1,0`}
+            placeholder={`"Oracle Name","ID: Card","ID: Gatherer","Haves: Paper","Haves: Foil","Haves: Etched"\n"Red Elemental Blast","4fafd3f9-f7de-4d6e-8824-6b60866fc50f",512,1,0,0\n"Taiga","01006833-6007-4c16-9ebb-20d31c60a57a",883,1,1,0`}
             className="w-full p-3 font-mono text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 focus:outline-none focus:border-emerald-500 placeholder-slate-600"
           />
 
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span>
-              Supports columns: <strong>Oracle Name</strong>, <strong>ID: Scryfall</strong>, <strong>Haves: Paper</strong>, <strong>Haves: Foil</strong>, and <strong>Haves: Etched</strong>.
+              Supports columns: <strong>Oracle Name</strong>, <strong>ID: Card</strong>, <strong>Haves: Paper</strong>, <strong>Haves: Foil</strong>, and <strong>Haves: Etched</strong>.
             </span>
             <span className="text-emerald-400 font-medium">
               Etched is treated as Foil

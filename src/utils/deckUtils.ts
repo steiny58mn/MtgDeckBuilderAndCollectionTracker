@@ -581,10 +581,16 @@ export function isCardLegalInCommander(
     type_line?: string;
     legalities?: Record<string, string>;
   },
-  commanderColorIdentity: string[]
-): { isLegal: boolean; reason?: string } {
-  if (card.legalities && card.legalities['commander'] === 'banned') {
-    return { isLegal: false, reason: 'Card is banned in Commander format' };
+  commanderColorIdentity: string[],
+  options?: { allowBanned?: boolean }
+): { isLegal: boolean; reason?: string; isBanned?: boolean } {
+  const isBanned = Boolean(
+    card.legalities &&
+    (card.legalities['commander'] === 'banned' || card.legalities['Commander'] === 'banned')
+  );
+
+  if (isBanned && !options?.allowBanned) {
+    return { isLegal: false, reason: 'Card is banned in Commander format', isBanned: true };
   }
 
   const cardIdentity = (card.color_identity && card.color_identity.length > 0)
@@ -610,7 +616,8 @@ export function isCardLegalInCommander(
 
 export interface CommanderPartnerInfo {
   canHavePartner: boolean;
-  partnerType: 'none' | 'partner' | 'partner_with' | 'choose_background' | 'background' | 'friends_forever' | 'doctors_companion' | 'doctor';
+  partnerType: 'none' | 'partner' | 'partner_variant' | 'partner_with' | 'choose_background' | 'background' | 'friends_forever' | 'doctors_companion' | 'doctor';
+  partnerVariant?: string;
   partnerWithTarget?: string;
   description: string;
 }
@@ -625,7 +632,7 @@ export function canBePrimaryCommander(card: {
   oracle_text?: string;
 }): boolean {
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  const oracle = (card.oracle_text || '').toLowerCase();
+  const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
 
   if (oracle.includes('can be your commander')) {
     return true;
@@ -676,8 +683,8 @@ export const KNOWN_PARTNER_WITH_PAIRS: Record<string, string> = {
 };
 
 /**
- * Analyzes Scryfall metadata (keywords, type_line, oracle_text) to determine
- * whether a card supports Partner, Background, Friends Forever, or Doctor mechanics.
+ * Analyzes card metadata (keywords, type_line, oracle_text) to determine
+ * whether a card supports Partner, Partner Variants, Background, Friends Forever, or Doctor mechanics.
  */
 export function getCardPartnerInfo(card: {
   name?: string;
@@ -686,11 +693,11 @@ export function getCardPartnerInfo(card: {
   keywords?: string[];
   all_parts?: { component?: string; name: string; type_line?: string }[];
 }): CommanderPartnerInfo {
-  const typeLine = (card.type_line || '').toLowerCase();
-  const oracle = (card.oracle_text || '').toLowerCase();
+  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
+  const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
   const keywords = (card.keywords || []).map((k) => k.toLowerCase());
 
-  // 1. Background enchantment
+  // 1. Background enchantment (Pairs with a Commander having "Choose a Background")
   if (typeLine.includes('background') && typeLine.includes('enchantment')) {
     return {
       canHavePartner: true,
@@ -699,7 +706,7 @@ export function getCardPartnerInfo(card: {
     };
   }
 
-  // 2. Choose a Background
+  // 2. Choose a Background (Pairs with a Legendary Background enchantment)
   if (keywords.includes('choose a background') || oracle.includes('choose a background')) {
     return {
       canHavePartner: true,
@@ -711,7 +718,7 @@ export function getCardPartnerInfo(card: {
   // 3. Partner with [Specific Card Name]
   // Card names can contain commas (e.g. "Krav, the Unredeemed", "Brallin, Skyshark Rider").
   // Reminder text begins with '(', a newline, or trailing period.
-  const partnerWithMatch = (card.oracle_text || '').match(/partner with\s+([^\r\n(]+?)(?:\s*\(|\.?\s*[\r\n]|\.?\s*$)/i);
+  const partnerWithMatch = (card.oracle_text || (card as any).oracleText || '').match(/partner with\s+([^\r\n(]+?)(?:\s*\(|\.?\s*[\r\n]|\.?\s*$)/i);
   let target = partnerWithMatch ? partnerWithMatch[1].trim().replace(/\.+$/, '') : undefined;
 
   // Fallback 1: Scryfall all_parts combo_piece
@@ -738,7 +745,7 @@ export function getCardPartnerInfo(card: {
     }
   }
 
-  if (keywords.includes('partner with') || target || (card.oracle_text || '').toLowerCase().includes('partner with')) {
+  if (keywords.includes('partner with') || target || (card.oracle_text || (card as any).oracleText || '').toLowerCase().includes('partner with')) {
     return {
       canHavePartner: true,
       partnerType: 'partner_with',
@@ -747,7 +754,23 @@ export function getCardPartnerInfo(card: {
     };
   }
 
-  // 4. Doctor's companion
+  // 4. Partner - [Specific Variant] (e.g. "Partner—Character select" / "Partner - Character select")
+  // Handles em-dash, en-dash, and standard hyphen
+  const partnerVariantMatch = (card.oracle_text || (card as any).oracleText || '').match(/partner\s*[—–-]\s*([^\r\n(]+?)(?:\s*\(|\.?\s*[\r\n]|\.?\s*$)/i);
+  if (partnerVariantMatch) {
+    const rawVariant = partnerVariantMatch[1].trim().replace(/\.+$/, '');
+    const normVariant = rawVariant.toLowerCase();
+    if (!normVariant.startsWith('with')) {
+      return {
+        canHavePartner: true,
+        partnerType: 'partner_variant',
+        partnerVariant: normVariant,
+        description: `Partner — ${rawVariant} (Pairs only with other "${rawVariant}" commanders)`,
+      };
+    }
+  }
+
+  // 5. Doctor's companion
   if (keywords.includes("doctor's companion") || oracle.includes("doctor's companion")) {
     return {
       canHavePartner: true,
@@ -756,7 +779,7 @@ export function getCardPartnerInfo(card: {
     };
   }
 
-  // 5. Time Lord Doctor
+  // 6. Time Lord Doctor
   if (typeLine.includes('time lord') && typeLine.includes('doctor')) {
     return {
       canHavePartner: true,
@@ -765,7 +788,7 @@ export function getCardPartnerInfo(card: {
     };
   }
 
-  // 6. Friends forever
+  // 7. Friends forever
   if (keywords.includes('friends forever') || oracle.includes('friends forever')) {
     return {
       canHavePartner: true,
@@ -774,12 +797,13 @@ export function getCardPartnerInfo(card: {
     };
   }
 
-  // 7. Generic Partner
-  if (keywords.includes('partner') || (/partner/i.test(oracle) && !oracle.includes('partner with'))) {
+  // 8. Generic Partner (MUST NOT have partner with, partner—, partner -, etc.)
+  const hasGenericPartner = keywords.includes('partner') || /\bpartner\b/i.test(oracle);
+  if (hasGenericPartner && !/partner\s*(?:with|[—–-])/i.test(oracle)) {
     return {
       canHavePartner: true,
       partnerType: 'partner',
-      description: 'Partner (Pairs with any other Commander with Partner)',
+      description: 'Partner (Pairs with any other Commander with generic Partner)',
     };
   }
 
@@ -814,12 +838,23 @@ export function canCardsPartnerTogether(
     };
   }
 
-  // Generic Partner + Generic Partner
+  // 1. Generic Partner + Generic Partner ONLY
   if (p1.partnerType === 'partner' && p2.partnerType === 'partner') {
     return { canPartner: true };
   }
 
-  // Choose a Background + Background Enchantment
+  // 2. Partner Variant + Partner Variant (e.g. Partner - Character Select only pairs with Partner - Character Select)
+  if (p1.partnerType === 'partner_variant' && p2.partnerType === 'partner_variant') {
+    if (p1.partnerVariant && p2.partnerVariant && p1.partnerVariant === p2.partnerVariant) {
+      return { canPartner: true };
+    }
+    return {
+      canPartner: false,
+      reason: `Incompatible partner variants: "${cmdr1.name}" (${p1.description}) cannot pair with "${cmdr2.name}" (${p2.description}).`,
+    };
+  }
+
+  // 3. Choose a Background + Background Enchantment
   if (
     (p1.partnerType === 'choose_background' && p2.partnerType === 'background') ||
     (p1.partnerType === 'background' && p2.partnerType === 'choose_background')
@@ -827,15 +862,15 @@ export function canCardsPartnerTogether(
     return { canPartner: true };
   }
 
-  // Partner with [Specific Card]
+  // 4. Partner with [Specific Card]
   if (p1.partnerType === 'partner_with' || p2.partnerType === 'partner_with') {
-    const target1 = p1.partnerWithTarget ? p1.partnerWithTarget.toLowerCase() : '';
-    const target2 = p2.partnerWithTarget ? p2.partnerWithTarget.toLowerCase() : '';
-    const name1 = (cmdr1.name || '').toLowerCase();
-    const name2 = (cmdr2.name || '').toLowerCase();
+    const target1 = p1.partnerWithTarget ? p1.partnerWithTarget.toLowerCase().trim() : '';
+    const target2 = p2.partnerWithTarget ? p2.partnerWithTarget.toLowerCase().trim() : '';
+    const name1 = (cmdr1.name || '').toLowerCase().trim();
+    const name2 = (cmdr2.name || '').toLowerCase().trim();
 
-    const matches1 = Boolean(target1 && name2.includes(target1));
-    const matches2 = Boolean(target2 && name1.includes(target2));
+    const matches1 = Boolean(target1 && (name2.includes(target1) || target1.includes(name2)));
+    const matches2 = Boolean(target2 && (name1.includes(target2) || target2.includes(name1)));
 
     if (matches1 || matches2) {
       return { canPartner: true };
@@ -846,12 +881,12 @@ export function canCardsPartnerTogether(
     };
   }
 
-  // Friends Forever + Friends Forever
+  // 5. Friends Forever + Friends Forever
   if (p1.partnerType === 'friends_forever' && p2.partnerType === 'friends_forever') {
     return { canPartner: true };
   }
 
-  // Doctor + Doctor's Companion
+  // 6. Doctor + Doctor's Companion
   if (
     (p1.partnerType === 'doctor' && p2.partnerType === 'doctors_companion') ||
     (p1.partnerType === 'doctors_companion' && p2.partnerType === 'doctor')
@@ -883,6 +918,45 @@ export function getCardCategorySortOrder(card: { type_line?: string }): number {
   if (t.includes('artifact')) return 6;
   if (t.includes('enchantment')) return 7;
   return 8; // other
+}
+
+/**
+ * Constructs a clean backend API query term to search for candidate partner/background cards
+ * from the database/API without using Scryfall-specific search operators.
+ */
+export function getPartnerApiQuery(cmdr: {
+  name?: string;
+  type_line?: string;
+  oracle_text?: string;
+  keywords?: string[];
+  all_parts?: { component?: string; name: string; type_line?: string }[];
+}): string | null {
+  const pInfo = getCardPartnerInfo(cmdr);
+  if (!pInfo.canHavePartner) return null;
+
+  switch (pInfo.partnerType) {
+    case 'partner':
+      return 'partner';
+    case 'partner_variant':
+      return pInfo.partnerVariant || 'partner';
+    case 'choose_background':
+      return 'Background';
+    case 'background':
+      return 'Choose a Background';
+    case 'partner_with':
+      if (pInfo.partnerWithTarget) {
+        return pInfo.partnerWithTarget;
+      }
+      return 'partner with';
+    case 'doctors_companion':
+      return 'Doctor';
+    case 'doctor':
+      return "Doctor's Companion";
+    case 'friends_forever':
+      return 'Friends Forever';
+    default:
+      return null;
+  }
 }
 
 /**

@@ -69,10 +69,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
               <div>
                 <span className="font-serif font-black tracking-wide text-white text-base block group-hover:text-fuchsia-400 transition-colors">
-                  ScrySync
+                  MTG Studio
                 </span>
                 <span className="text-[10px] uppercase tracking-widest text-violet-400/90 font-bold block -mt-0.5">
-                  MTG Studio
+                  Deck & Collection
                 </span>
               </div>
             </div>
@@ -112,7 +112,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 <Search className="w-3.5 h-3.5" />
-                <span>Scryfall DB</span>
+                <span>Card Database</span>
               </button>
             </nav>
           </div>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Deck, 
   CollectionCard, 
@@ -48,6 +48,11 @@ export default function App() {
   const [authModalMode, setAuthModalMode] = useState<AuthMode>('login');
   const [authModalReason, setAuthModalReason] = useState<string | undefined>(undefined);
   const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
+
+  // Browser navigation & history tracking refs
+  const prevActiveDeckIdRef = useRef<string | null>(null);
+  const prevActiveBinderIdRef = useRef<string | null>(null);
+  const isPopStateNavigationRef = useRef<boolean>(false);
   
   // Modals & Notifications
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
@@ -154,10 +159,50 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize URL search params to reflect active deck, binder, and tab for new tabs/sharing
+  // Seed the grid as base history entry if user opened directly to a deck or binder deep-link
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const initialDeckId = params.get('deck');
+      const initialBinderId = params.get('binder');
+
+      if (initialDeckId || initialBinderId) {
+        const gridUrl = new URL(window.location.href);
+        gridUrl.searchParams.delete('deck');
+        gridUrl.searchParams.delete('binder');
+        if (initialBinderId) {
+          gridUrl.searchParams.set('tab', 'collection');
+        } else {
+          gridUrl.searchParams.delete('tab');
+        }
+
+        // Replace the root entry with the grid so pressing Back returns to grid rather than leaving site
+        window.history.replaceState(
+          { deckId: null, binderId: null, tab: initialBinderId ? 'collection' : 'decks' },
+          '',
+          gridUrl.toString()
+        );
+        // Push the active deck/binder on top
+        window.history.pushState(
+          { deckId: initialDeckId, binderId: initialBinderId, tab: initialBinderId ? 'collection' : 'decks' },
+          '',
+          window.location.href
+        );
+        prevActiveDeckIdRef.current = initialDeckId;
+        prevActiveBinderIdRef.current = initialBinderId;
+      }
+    } catch (e) {
+      console.warn('Initial history seeding failed:', e);
+    }
+  }, []);
+
+  // Synchronize URL search params to reflect active deck, binder, and tab for new tabs/sharing & browser history
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
+      const currentDeckId = activeDeck?.id || null;
+      const currentBinderId = activeBinder?.id || null;
+
       if (activeDeck) {
         url.searchParams.set('deck', activeDeck.id);
         url.searchParams.delete('binder');
@@ -175,7 +220,35 @@ export default function App() {
           url.searchParams.delete('tab');
         }
       }
-      window.history.replaceState({}, '', url.toString());
+
+      if (isPopStateNavigationRef.current) {
+        // Triggered by browser forward/back button navigation - history state already popped/pushed
+        isPopStateNavigationRef.current = false;
+        prevActiveDeckIdRef.current = currentDeckId;
+        prevActiveBinderIdRef.current = currentBinderId;
+        return;
+      }
+
+      const didEnterDeck = currentDeckId && currentDeckId !== prevActiveDeckIdRef.current;
+      const didEnterBinder = currentBinderId && currentBinderId !== prevActiveBinderIdRef.current;
+
+      if (didEnterDeck || didEnterBinder) {
+        // Navigating into a deck or binder from grid -> push new history entry so Back button returns to grid!
+        window.history.pushState(
+          { deckId: currentDeckId, binderId: currentBinderId, tab: activeTab },
+          '',
+          url.toString()
+        );
+      } else {
+        window.history.replaceState(
+          { deckId: currentDeckId, binderId: currentBinderId, tab: activeTab },
+          '',
+          url.toString()
+        );
+      }
+
+      prevActiveDeckIdRef.current = currentDeckId;
+      prevActiveBinderIdRef.current = currentBinderId;
     } catch (err) {
       console.error('URL sync error:', err);
     }
@@ -184,10 +257,14 @@ export default function App() {
   // Handle browser back/forward navigation
   useEffect(() => {
     const handlePopState = () => {
+      isPopStateNavigationRef.current = true;
       const params = new URLSearchParams(window.location.search);
       const deckId = params.get('deck');
       const binderId = params.get('binder');
       const tab = params.get('tab') as 'decks' | 'collection' | 'search' | 'login' | null;
+
+      prevActiveDeckIdRef.current = deckId;
+      prevActiveBinderIdRef.current = binderId;
 
       if (deckId) {
         const foundDeck = DeckService.getLocalDecks().find(d => d.id === deckId);
@@ -205,6 +282,7 @@ export default function App() {
           return;
         }
       }
+      // No deck or binder in URL -> return to grid!
       setActiveDeck(null);
       setActiveBinder(null);
       if (tab && ['decks', 'collection', 'search', 'login'].includes(tab)) {
@@ -456,13 +534,12 @@ export default function App() {
     // Get latest state to prevent race conditions
     const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
-    // Check format legality & ban list
+    // Check format legality & ban list (warn user but allow adding for casual/Rule-0 play)
     if (card.legalities && card.legalities[latestActiveDeck.format] === 'banned') {
       showToast(
-        `Banned Card: "${card.name}" is banned in ${latestActiveDeck.format} format and cannot be added!`,
+        `Added "${card.name}" (Note: Banned in ${latestActiveDeck.format} format).`,
         'info'
       );
-      return;
     }
 
     // Check Commander rules
@@ -471,7 +548,7 @@ export default function App() {
 
       // If adding as regular card (not designating commander), check color identity against existing commander
       if (category !== 'commander' && commanderInfo.hasCommander) {
-        const legality = isCardLegalInCommander(card, commanderInfo.colorIdentity);
+        const legality = isCardLegalInCommander(card, commanderInfo.colorIdentity, { allowBanned: true });
         if (!legality.isLegal) {
           showToast(
             `Illegal Card: "${card.name}" color identity does not fit Commander ${commanderInfo.commanderName || 'commander'} (${commanderInfo.colorIdentity.join('') || 'C'})`,
@@ -825,7 +902,11 @@ export default function App() {
             <DeckBuilder
               deck={activeDeck}
               onBack={() => {
-                setActiveDeck(null);
+                if (window.history.length > 1 && (window.history.state?.deckId || new URLSearchParams(window.location.search).has('deck'))) {
+                  window.history.back();
+                } else {
+                  setActiveDeck(null);
+                }
               }}
               onUpdateDeck={handleUpdateDeck}
               onSaveDeck={handleSaveDeck}
@@ -890,7 +971,11 @@ export default function App() {
                 if (activeBinder && AuthService.isLoggedIn()) {
                   await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
                 }
-                setActiveBinder(null);
+                if (window.history.length > 1 && (window.history.state?.binderId || new URLSearchParams(window.location.search).has('binder'))) {
+                  window.history.back();
+                } else {
+                  setActiveBinder(null);
+                }
               }}
             />
           ) : (

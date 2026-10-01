@@ -31,6 +31,7 @@ import {
   Swords,
   Search,
   Zap,
+  Ban,
   Shield,
   Mountain,
   Bookmark,
@@ -117,6 +118,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showStats, setShowStats] = useState(false);
   const [showFormatNoticeDetails, setShowFormatNoticeDetails] = useState(false);
   const [showGamechangersDetails, setShowGamechangersDetails] = useState(false);
+
+  // Close dropdown popups when scrolling so they do not overlap top layout or navbar
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowFormatNoticeDetails(false);
+      setShowGamechangersDetails(false);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
   const [showHandSimulator, setShowHandSimulator] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showGameSummaryModal, setShowGameSummaryModal] = useState(false);
@@ -342,6 +353,66 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
   const gamechangers = useMemo(() => detectGamechangers(activeDeck), [activeDeck, gamechangerTick]);
   const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
+
+  const deckFormat = (activeDeck.format || 'commander').toLowerCase();
+
+  // Unified Watchlist: Detection of Gamechangers & Banned cards in the deck
+  const watchlistItems = useMemo(() => {
+    const itemMap = new Map<string, {
+      card: DeckCard;
+      isGamechanger: boolean;
+      isBanned: boolean;
+      quantity: number;
+    }>();
+
+    // 1. Add gamechangers from API / database
+    gamechangers.forEach((gc) => {
+      const cleanName = (gc.card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      itemMap.set(cleanName, {
+        card: gc.card,
+        isGamechanger: true,
+        isBanned: false,
+        quantity: gc.card.quantity || 1,
+      });
+    });
+
+    // 2. Add banned cards in activeDeck format
+    (activeDeck.cards || []).forEach((c) => {
+      const cat = (c.category || 'main').toLowerCase();
+      if (cat === 'sideboard' || cat === 'maybeboard') return;
+      const leg = c.legalities?.[deckFormat] || c.legalities?.[deckFormat.toLowerCase()];
+      const isBanned = leg === 'banned';
+      if (isBanned) {
+        const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        const existing = itemMap.get(cleanName);
+        if (existing) {
+          existing.isBanned = true;
+        } else {
+          itemMap.set(cleanName, {
+            card: c,
+            isGamechanger: isCardGamechanger(c),
+            isBanned: true,
+            quantity: c.quantity || 1,
+          });
+        }
+      }
+    });
+
+    const list = Array.from(itemMap.values());
+    list.sort((a, b) => {
+      if (a.isBanned !== b.isBanned) return a.isBanned ? -1 : 1;
+      const priceA = (a.card.isFoil && a.card.priceUsdFoil) ? a.card.priceUsdFoil : (a.card.priceUsd || 0);
+      const priceB = (b.card.isFoil && b.card.priceUsdFoil) ? b.card.priceUsdFoil : (b.card.priceUsd || 0);
+      if (priceB !== priceA) return priceB - priceA;
+      return a.card.name.localeCompare(b.card.name);
+    });
+
+    return list;
+  }, [activeDeck.cards, deckFormat, gamechangers]);
+
+  const watchlistBannedCount = useMemo(() => watchlistItems.filter((i) => i.isBanned).length, [watchlistItems]);
+  const watchlistGamechangerCount = useMemo(() => watchlistItems.filter((i) => i.isGamechanger).length, [watchlistItems]);
+  const totalWatchlistCards = useMemo(() => watchlistItems.reduce((sum, i) => sum + i.quantity, 0), [watchlistItems]);
   const ownershipStats = useMemo(() => {
     let owned = 0;
     let needed = 0;
@@ -366,6 +437,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     return { owned, needed, missingPrice, missingList };
   }, [activeDeck.cards, getCardOwnedQuantity]);
+  const missingCount = Math.max(0, ownershipStats.needed - ownershipStats.owned);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -1064,7 +1136,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     try {
       const updated = await DeckService.refreshDeckPrices(deck);
       onUpdateDeck(updated);
-      setPriceRefreshMessage('Prices updated live from Scryfall!');
+      setPriceRefreshMessage('Prices updated live from database!');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
     } catch (e: any) {
       setPriceRefreshMessage('Price refresh failed: ' + (e.message || 'Error'));
@@ -1629,17 +1701,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="flex flex-col gap-2.5">
               {/* Top line: Navigation & Title & Commander Badge on Left, Save / Restore / Pending on Right */}
               <div className="flex items-center justify-between gap-2.5 flex-wrap">
-                {/* Left: Navigation, Title & Commander Badges */}
+                {/* Left: Title & Commander Badges */}
                 <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap min-w-0">
-                  <button
-                    type="button"
-                    onClick={handleBack}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-semibold transition-colors shrink-0 cursor-pointer border border-slate-800 hover:border-slate-700"
-                    title="Return to Decks"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5 text-violet-400" />
-                    <span>Decks</span>
-                  </button>
                   <div 
                     onClick={() => setIsEditingTitle(true)}
                     className="group flex items-center gap-1.5 cursor-pointer min-w-0"
@@ -1865,77 +1928,91 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   ${(Number(stats.totalPriceUsd) || 0).toFixed(2)}
                 </span>
 
-                {/* Collection Ownership Interactive Toggle Badge in Top Header */}
+                {/* Total Cards Count Badge */}
                 <button
                   type="button"
-                  onClick={cycleOwnershipFilter}
+                  onClick={() => setOwnershipFilter('all')}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
-                    ownershipFilter === 'owned'
-                      ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 ring-1 ring-emerald-500/40'
-                      : ownershipFilter === 'unowned'
-                      ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-500/40'
-                      : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
-                  }`}
-                  title={
                     ownershipFilter === 'all'
-                      ? `Ownership Filter: Showing All cards (${ownershipStats.owned}/${ownershipStats.needed} owned). Click to show Owned only.`
-                      : ownershipFilter === 'owned'
-                      ? `Ownership Filter: Showing Owned cards only (${ownershipStats.owned} owned). Click to show Unowned / Missing only.`
-                      : `Ownership Filter: Showing Unowned / Missing cards only (${ownershipStats.needed - ownershipStats.owned} missing). Click to show All cards.`
-                  }
+                      ? 'bg-slate-800/90 border-slate-700 text-white ring-1 ring-slate-600/40'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={`Total deck cards: ${stats.totalCards}. Click to show all cards.`}
                 >
-                  {ownershipFilter === 'owned' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  ) : ownershipFilter === 'unowned' ? (
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  )}
-                  <span>Owned:</span>
-                  <span className="font-mono font-bold">{ownershipStats.owned}/{ownershipStats.needed}</span>
-                  <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded ${
-                    ownershipFilter === 'owned'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      : ownershipFilter === 'unowned'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      : 'bg-slate-700/60 text-slate-300 border border-slate-600/60'
-                  }`}>
-                    {ownershipFilter === 'all' ? 'All' : ownershipFilter === 'owned' ? 'Owned' : 'Missing'}
-                  </span>
+                  <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>Cards:</span>
+                  <span className="font-mono font-bold text-white">{stats.totalCards}</span>
                 </button>
 
-                {/* Gamechangers Dropdown Badge */}
-                <div className="relative z-50">
+                {/* Missing Cards Interactive Badge (Click to show only missing cards) */}
+                <button
+                  type="button"
+                  onClick={() => setOwnershipFilter((prev) => (prev === 'unowned' ? 'all' : 'unowned'))}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+                    ownershipFilter === 'unowned'
+                      ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-500/40'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:text-amber-300 hover:border-amber-800/60'
+                  }`}
+                  title={
+                    ownershipFilter === 'unowned'
+                      ? `Showing only missing cards (${missingCount} missing · est. $${(Number(ownershipStats.missingPrice) || 0).toFixed(2)}). Click to show all cards.`
+                      : `Click to filter and show only missing cards (${missingCount} missing from collection).`
+                  }
+                >
+                  <AlertCircle className={`w-3.5 h-3.5 shrink-0 ${ownershipFilter === 'unowned' ? 'text-amber-400' : 'text-amber-500/80'}`} />
+                  <span>Missing:</span>
+                  <span className="font-mono font-bold">{missingCount}</span>
+                  {ownershipFilter === 'unowned' && (
+                    <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Active
+                    </span>
+                  )}
+                </button>
+
+                {/* Watchlist Dropdown Badge (Encompassing Gamechangers & Banned Cards) */}
+                <div className="relative z-30">
                   <button
                     type="button"
                     onClick={() => setShowGamechangersDetails(!showGamechangersDetails)}
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs border ${
-                      gamechangers.length > 0
+                      watchlistBannedCount > 0
+                        ? 'bg-rose-950/90 border-rose-500/70 text-rose-300 hover:bg-rose-900/80 ring-1 ring-rose-500/30'
+                        : watchlistItems.length > 0
                         ? 'bg-amber-950/90 border-amber-500/70 text-amber-300 hover:bg-amber-900/80 ring-1 ring-amber-500/30'
                         : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
                     }`}
                     title={
-                      gamechangers.length > 0
-                        ? `Click to view ${gamechangers.length} deck Gamechangers`
-                        : 'Click to view Gamechangers analysis (0 detected)'
+                      watchlistItems.length > 0
+                        ? `Click to view ${watchlistItems.length} Watchlist cards (${watchlistGamechangerCount} Gamechangers, ${watchlistBannedCount} Banned)`
+                        : 'Click to view Watchlist (0 Gamechangers or Banned cards detected)'
                     }
                   >
-                    <Zap className={`w-3.5 h-3.5 shrink-0 ${gamechangers.length > 0 ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}`} />
-                    <span>Gamechangers ({gamechangers.length})</span>
+                    {watchlistBannedCount > 0 ? (
+                      <Ban className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                    ) : (
+                      <Zap className={`w-3.5 h-3.5 shrink-0 ${watchlistItems.length > 0 ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}`} />
+                    )}
+                    <span>Watchlist ({watchlistItems.length})</span>
                     <ChevronDown className={`w-3 h-3 transition-transform ${showGamechangersDetails ? 'rotate-180' : ''}`} />
                   </button>
 
                   {showGamechangersDetails && (
                     <>
                       <div
-                        className="fixed inset-0 z-[60] bg-transparent cursor-default"
+                        className="fixed inset-0 z-20 bg-transparent cursor-default"
                         onClick={() => setShowGamechangersDetails(false)}
                       />
-                      <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-amber-500 shadow-2xl ring-1 ring-amber-500/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
-                        <div className="font-semibold text-amber-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
+                      <div 
+                        className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 z-30 w-80 sm:w-96 max-w-[calc(100vw-2rem)] p-3.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl ring-1 ring-slate-600/30 text-xs space-y-2.5 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
+                      >
+                        <div className="font-semibold text-slate-200 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                           <span className="flex items-center gap-1.5 font-bold">
-                            <Zap className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400" />
-                            Gamechangers ({gamechangers.length} Unique, {totalGamechangerCards} Cards):
+                            {watchlistBannedCount > 0 ? (
+                              <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                            ) : (
+                              <Zap className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400" />
+                            )}
+                            <span>Deck Watchlist ({watchlistItems.length} Flagged, {totalWatchlistCards} Cards):</span>
                           </span>
                           <button 
                             type="button"
@@ -1946,45 +2023,70 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        {gamechangers.length === 0 ? (
+
+                        {/* Breakdown summary pills */}
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-500/30 text-amber-300 font-semibold flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-amber-400" /> {watchlistGamechangerCount} Gamechangers
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-950/60 border border-rose-500/30 text-rose-300 font-semibold flex items-center gap-1">
+                            <Ban className="w-3 h-3 text-rose-400" /> {watchlistBannedCount} Banned ({activeDeck.format || 'Commander'})
+                          </span>
+                        </div>
+
+                        {watchlistItems.length === 0 ? (
                           <div className="p-4 text-center bg-slate-950/70 rounded-lg border border-slate-800 text-slate-400 space-y-1.5">
                             <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-400">
                               <Sparkles className="w-4 h-4 text-emerald-400" />
-                              <span>No Notorious Gamechangers</span>
+                              <span>No Flagged Cards</span>
                             </div>
                             <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">
-                              This deck contains no notorious high-salt or game-warping staples (like fast mana, free counterspells, or instant 2-card combos). Well-suited for casual Commander pods!
+                              This deck contains no banned cards or notorious high-salt gamechangers. Well-suited for casual play and pods!
                             </p>
                           </div>
                         ) : (
                           <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                            {gamechangers.map((gc, i) => (
+                            {watchlistItems.map((item, i) => (
                               <div
                                 key={i}
                                 onClick={() => {
-                                  if (onSelectCard && gc.card) {
-                                    onSelectCard(gc.card as any);
+                                  if (onSelectCard && item.card) {
+                                    onSelectCard(item.card as any);
                                   }
                                   setShowGamechangersDetails(false);
                                 }}
-                                className="flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 cursor-pointer transition-colors group"
+                                className={`flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border cursor-pointer transition-colors group ${
+                                  item.isBanned
+                                    ? 'border-rose-900/60 hover:border-rose-500/50'
+                                    : 'border-slate-800 hover:border-amber-500/50'
+                                }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
-                                  {gc.card.imageUrl && (
-                                    <img src={gc.card.imageUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
+                                  {item.card.imageUrl && (
+                                    <img src={item.card.imageUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
                                   )}
                                   <div className="min-w-0">
-                                    <div className="font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
-                                      {gc.card.name}
+                                    <div className={`font-bold truncate transition-colors ${item.isBanned ? 'text-rose-200 group-hover:text-rose-300' : 'text-slate-200 group-hover:text-amber-300'}`}>
+                                      {item.card.name}
                                     </div>
-                                    <div className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
-                                      <Zap className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
-                                      <span>Gamechanger</span>
+                                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                      {item.isBanned && (
+                                        <span className="text-[9px] uppercase tracking-wide font-extrabold text-rose-300 bg-rose-950/90 border border-rose-500/40 rounded px-1.5 py-0.2 flex items-center gap-1">
+                                          <Ban className="w-2.5 h-2.5 text-rose-400" />
+                                          <span>Banned ({activeDeck.format || 'Commander'})</span>
+                                        </span>
+                                      )}
+                                      {item.isGamechanger && (
+                                        <span className="text-[9px] uppercase tracking-wide font-extrabold text-amber-300 bg-amber-950/90 border border-amber-500/40 rounded px-1.5 py-0.2 flex items-center gap-1">
+                                          <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                                          <span>Gamechanger</span>
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
                                 <span className="text-[11px] font-mono font-bold text-slate-400 shrink-0 ml-2">
-                                  ×{gc.card.quantity || 1}
+                                  ×{item.quantity}
                                 </span>
                               </div>
                             ))}
@@ -1997,7 +2099,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
                 {/* Notice Dropdown right next to Gamechangers */}
                 {stats.illegalCards.length > 0 && (
-                  <div className="relative shrink-0 z-50">
+                  <div className="relative shrink-0 z-30">
                     <button
                       type="button"
                       onClick={() => setShowFormatNoticeDetails(!showFormatNoticeDetails)}
@@ -2013,10 +2115,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       <>
                         {/* Transparent click-away backdrop */}
                         <div
-                          className="fixed inset-0 z-[60] bg-transparent cursor-default"
+                          className="fixed inset-0 z-20 bg-transparent cursor-default"
                           onClick={() => setShowFormatNoticeDetails(false)}
                         />
-                        <div className="absolute left-0 top-full mt-2 z-[70] w-80 sm:w-96 p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
+                        <div 
+                          className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 z-30 w-80 sm:w-96 max-w-[calc(100vw-2rem)] p-3.5 rounded-xl bg-slate-900 border border-fuchsia-600 shadow-2xl ring-1 ring-fuchsia-500/30 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150 max-h-[80vh] overflow-y-auto"
+                        >
                           <div className="font-semibold text-fuchsia-300 flex items-center justify-between text-xs pb-1.5 border-b border-slate-800">
                             <span className="flex items-center gap-1.5 font-bold">
                               <AlertTriangle className="w-4 h-4 text-violet-400 shrink-0" />
@@ -2312,45 +2416,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         {/* View Mode Switcher and Add Cards Button */}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {/* Collection Ownership Toggle Badge */}
-          <button
-            type="button"
-            onClick={cycleOwnershipFilter}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
-              ownershipFilter === 'owned'
-                ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 ring-1 ring-emerald-500/30'
-                : ownershipFilter === 'unowned'
-                ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 ring-1 ring-amber-500/30'
-                : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-            }`}
-            title={
-              ownershipFilter === 'all'
-                ? `Ownership Filter: Showing All cards (${ownershipStats.owned}/${ownershipStats.needed} owned). Click to show Owned only.`
-                : ownershipFilter === 'owned'
-                ? `Ownership Filter: Showing Owned cards only (${ownershipStats.owned} owned). Click to show Unowned / Missing only.`
-                : `Ownership Filter: Showing Unowned / Missing cards only (${ownershipStats.needed - ownershipStats.owned} missing). Click to show All cards.`
-            }
-          >
-            {ownershipFilter === 'owned' ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            ) : ownershipFilter === 'unowned' ? (
-              <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-            ) : (
-              <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
-            )}
-            <span className="hidden sm:inline">Owned:</span>
-            <span className="font-mono font-bold">{ownershipStats.owned}/{ownershipStats.needed}</span>
-            <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded ${
-              ownershipFilter === 'owned'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : ownershipFilter === 'unowned'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                : 'bg-slate-800 text-slate-400 border border-slate-700/60'
-            }`}>
-              {ownershipFilter === 'all' ? 'All' : ownershipFilter === 'owned' ? 'Owned' : 'Missing'}
-            </span>
-          </button>
-
           {/* Quick Search / Filter Input */}
           <div className="relative">
             <input

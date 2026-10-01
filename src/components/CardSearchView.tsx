@@ -27,7 +27,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
-import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult } from '../services/scryfall';
+import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi } from '../services/scryfall';
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
@@ -244,36 +244,33 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     }
   }, [initialPartnerMode]);
 
-  // Load available legal partners/backgrounds without cluttering main search
+  // When commander can have a partner and no partner is currently selected, auto-show available partners
+  useEffect(() => {
+    if (isCommanderDeck && isDeckContext && firstCmdrPartnerInfo?.canHavePartner && !currentPartner) {
+      setIsPartnerSectionExpanded(true);
+    }
+  }, [isCommanderDeck, isDeckContext, firstCmdrPartnerInfo?.canHavePartner, currentPartner]);
+
+  // Load available legal partners/backgrounds strictly from the API (never Scryfall)
   useEffect(() => {
     if (!isDeckContext || !isCommanderDeck || !primaryCommander || !firstCmdrPartnerInfo?.canHavePartner) {
       setAvailablePartners([]);
       return;
     }
 
-    const partnerQuery = getPartnerScryfallQuery(primaryCommander);
-    if (!partnerQuery) {
-      setAvailablePartners([]);
-      return;
-    }
-
     let isMounted = true;
     setLoadingPartners(true);
-    searchCards({
-      query: partnerQuery,
-      order: 'name',
-      dir: 'asc',
-      page: 1,
-      unique: 'cards',
-    })
-      .then((res) => {
+    fetchAvailablePartnersFromApi(primaryCommander, currentPartner)
+      .then((partners) => {
         if (isMounted) {
-          const valid = filterAvailablePartners(primaryCommander, res.data || [], currentPartner);
-          setAvailablePartners(sortCardsByName(valid));
+          setAvailablePartners(partners);
         }
       })
       .catch((err) => {
-        console.error('Failed to load available partners', err);
+        console.error('Failed to load available partners from API:', err);
+        if (isMounted) {
+          setAvailablePartners([]);
+        }
       })
       .finally(() => {
         if (isMounted) {
@@ -286,6 +283,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     };
   }, [
     primaryCommander?.id,
+    primaryCommander?.name,
     currentPartner?.id,
     currentPartner?.scryfallId,
     currentPartner?.name,
@@ -430,6 +428,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       updatedAt: Date.now(),
     };
     onUpdateDeck(updated);
+    setIsPartnerSectionExpanded(true);
     setSearchTerm('');
   };
 
@@ -663,25 +662,25 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     if (isDeckContext) {
       if (isCommanderDeck) {
         if (hasCommander) {
-          boundaryClauses.push('f:commander');
+          boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
           const idString = commanderColorIdentity.length === 0
             ? 'c'
             : commanderColorIdentity.map((c) => c.toLowerCase()).join('');
           boundaryClauses.push(`id<=${idString}`);
         } else {
-          boundaryClauses.push('f:commander');
-          boundaryClauses.push('is:commander');
+          boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
+          boundaryClauses.push(hideBannedCards ? 'is:commander' : '(is:commander or (type:legendary (type:creature or o:"can be your commander")))');
         }
       } else {
         const effectiveFormat = selectedFormat || (activeDeck?.format !== 'commander' ? activeDeck?.format : '');
         if (effectiveFormat && effectiveFormat !== 'casual') {
-          boundaryClauses.push(`format:${effectiveFormat}`);
+          boundaryClauses.push(hideBannedCards ? `format:${effectiveFormat}` : `(format:${effectiveFormat} or banned:${effectiveFormat})`);
         }
       }
     } else {
       // In binder context, we might still want to apply the explicit format dropdown filter if the user selected one
       if (selectedFormat && selectedFormat !== 'casual') {
-        boundaryClauses.push(`format:${selectedFormat}`);
+        boundaryClauses.push(hideBannedCards ? `format:${selectedFormat}` : `(format:${selectedFormat} or banned:${selectedFormat})`);
       }
     }
 
@@ -712,26 +711,30 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       orClauses.push(...filterClauses);
 
       if (orClauses.length === 0) {
-        const parts: string[] = [...boundaryClauses];
+        const parts: string[] = [];
         if (trimmedSearch && scopeBySearchTerm) parts.push(trimmedSearch);
+        parts.push(...boundaryClauses);
         return sanitizeQuery(parts.join(' '));
       }
 
       const orExpression = orClauses.length === 1 ? orClauses[0] : `(${orClauses.join(' or ')})`;
-      const parts: string[] = [...boundaryClauses];
+      const parts: string[] = [];
       if (trimmedSearch && scopeBySearchTerm) parts.push(trimmedSearch);
       parts.push(orExpression);
+      parts.push(...boundaryClauses);
       return sanitizeQuery(parts.join(' '));
     } else {
       // AND mode: all active criteria must match
-      const parts: string[] = [...boundaryClauses];
+      const parts: string[] = [];
       if (trimmedSearch) parts.push(trimmedSearch);
       parts.push(...filterClauses);
+      parts.push(...boundaryClauses);
       return sanitizeQuery(parts.join(' '));
     }
   };
 
   const currentCompiledQuery = buildQueryString();
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   const executeSearch = async (pageNum = 1, append = false, overrideSearchTerm?: string) => {
     const query = buildQueryString(overrideSearchTerm);
@@ -742,20 +745,27 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       return;
     }
 
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+    const currentAbort = new AbortController();
+    searchAbortRef.current = currentAbort;
+
     setLoading(true);
     setError(null);
 
     try {
-      // If sorting by synergy, ask Scryfall to sort by global EDHREC first so the page contains popular cards
-      const scryfallSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category') ? 'edhrec' : sortBy;
+      const searchSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category') ? 'edhrec' : sortBy;
       
       const res = await searchCards({
         query,
-        order: scryfallSortOrder,
+        order: searchSortOrder,
         dir: sortDir,
         page: pageNum,
         unique: isBinderContext ? 'prints' : 'cards'
       });
+
+      if (currentAbort.signal.aborted) return;
       
       let processedData = res.data;
       
@@ -825,6 +835,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
         });
       }
 
+      if (currentAbort.signal.aborted) return;
+
       if (append) {
         setResults((prev) => [...prev, ...processedData]);
       } else {
@@ -834,10 +846,13 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       setHasMore(res.has_more);
       setPage(pageNum);
     } catch (err: any) {
-      setError(err.message || 'Error executing Scryfall search');
+      if (currentAbort.signal.aborted) return;
+      setError(err.message || 'Error executing search');
       if (!append) setResults([]);
     } finally {
-      setLoading(false);
+      if (!currentAbort.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
@@ -866,7 +881,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
       executeSearch(1, false);
-    }, 750);
+    }, 200);
 
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -884,6 +899,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     specificManaCost,
     selectedRarity,
     selectedFormat,
+    hideBannedCards,
     scopeBySearchTerm,
     searchTerm,
     sortBy,
@@ -915,7 +931,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     autocompleteDebounceRef.current = setTimeout(async () => {
       const items = await getAutocomplete(searchTerm);
       setAutocompleteItems(items);
-    }, 450);
+    }, 180);
 
     return () => {
       if (autocompleteDebounceRef.current) clearTimeout(autocompleteDebounceRef.current);
@@ -1161,7 +1177,9 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-100">
                     {firstCmdrPartnerInfo.partnerType === 'choose_background' || firstCmdrPartnerInfo.partnerType === 'background'
-                      ? 'Available Backgrounds'
+                      ? (firstCmdrPartnerInfo.partnerType === 'background' ? 'Available Background Commanders' : 'Available Backgrounds')
+                      : firstCmdrPartnerInfo.partnerType === 'partner_variant'
+                      ? `Available Partner — ${firstCmdrPartnerInfo.partnerVariant ? firstCmdrPartnerInfo.partnerVariant.charAt(0).toUpperCase() + firstCmdrPartnerInfo.partnerVariant.slice(1) : 'Variant'}`
                       : 'Available Partners'}
                   </span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 font-semibold">
@@ -1220,7 +1238,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               {loadingPartners ? (
                 <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
                   <Loader2 className="w-6 h-6 animate-spin text-fuchsia-400" />
-                  <span className="text-xs">Loading legal options from Scryfall...</span>
+                  <span className="text-xs">Loading legal options from database...</span>
                 </div>
               ) : availablePartners.length === 0 ? (
                 <div className="py-6 text-center text-xs text-slate-400">
@@ -1543,7 +1561,14 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               <input
                 type="checkbox"
                 checked={hideBannedCards}
-                onChange={(e) => setHideBannedCards(e.target.checked)}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setHideBannedCards(val);
+                  if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                  setTimeout(() => {
+                    executeSearch(1, false);
+                  }, 50);
+                }}
                 className="rounded border-slate-700 text-fuchsia-600 focus:ring-fuchsia-500 bg-slate-900 w-3.5 h-3.5 cursor-pointer"
               />
               <span>Hide Banned ({activeDeck?.format || selectedFormat || 'Commander'})</span>
@@ -1916,11 +1941,11 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               </div>
             )}
 
-            {/* Live Scryfall Query Preview */}
+            {/* Live Search Query Preview */}
             {currentCompiledQuery && (
               <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between gap-2 text-[11px] font-mono">
                 <div className="truncate text-slate-400">
-                  <span className="text-slate-500 font-sans mr-1">Scryfall Query:</span>
+                  <span className="text-slate-500 font-sans mr-1">Search Query:</span>
                   <code className="text-fuchsia-400">{currentCompiledQuery}</code>
                 </div>
                 <button
@@ -1945,14 +1970,14 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-fuchsia-400 transition-colors"
           >
             <Info className="w-3.5 h-3.5" />
-            <span>{showSyntaxHelp ? 'Hide Scryfall Syntax Guide' : 'Scryfall Syntax Guide'}</span>
+            <span>{showSyntaxHelp ? 'Hide Search Syntax Guide' : 'Search Syntax Guide'}</span>
           </button>
         </div>
 
-        {/* Scryfall Syntax Helper Card */}
+        {/* Syntax Helper Card */}
         {showSyntaxHelp && (
           <div className="p-3 bg-slate-950 rounded-xl border border-fuchsia-900/40 text-xs text-slate-300 space-y-1">
-            <p className="font-semibold text-fuchsia-300">Scryfall Advanced Syntax Tips:</p>
+            <p className="font-semibold text-fuchsia-300">Advanced Search Syntax Tips:</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-slate-400">
               <div><code>o:&quot;draw a card&quot;</code> — rules text</div>
               <div><code>cmc&lt;=3</code> or <code>cmc=4</code> — mana value</div>
@@ -1971,7 +1996,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <span>
             {loading
-              ? 'Searching Scryfall...'
+              ? 'Searching Database...'
               : `${displayedCards.length}${displayedCards.length !== totalCount ? ` of ${totalCount.toLocaleString()}` : ''} cards shown`}
             {activeFilterCount > 0 && (
               <span className="ml-2 px-2 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 font-medium">
@@ -2343,7 +2368,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             <h3 className="text-base font-semibold text-slate-300">
               {results.length > 0 && cardsHiddenAtLimit > 0
                 ? 'All matching cards are already at their deck limit'
-                : 'Ready to search Scryfall'}
+                : 'Ready to search Card Database'}
             </h3>
             <p className="text-xs max-w-md mx-auto text-slate-500">
               {results.length > 0 && cardsHiddenAtLimit > 0

@@ -131,40 +131,7 @@ export default {
       }
     }
 
-    // 4. Scryfall API Proxy (with proper User-Agent & caching)
-    if (url.pathname.startsWith('/api/scryfall')) {
-      const targetPath = url.pathname.replace(/^\/api\/scryfall/, '');
-      const targetUrl = `https://api.scryfall.com${targetPath}${url.search}`;
-
-      try {
-        const scryfallRes = await fetch(targetUrl, {
-          method: request.method,
-          headers: {
-            'User-Agent': 'MtgDeckBuilderAndCollectionTracker/1.0 (https://github.com/steiny58mn/MtgDeckBuilderAndCollectionTracker)',
-            'Accept': 'application/json;q=0.9,*/*;q=0.8',
-            ...(request.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
-          },
-          body: request.method === 'POST' ? await request.text() : undefined,
-        });
-
-        const data = await scryfallRes.text();
-        return new Response(data, {
-          status: scryfallRes.status,
-          headers: {
-            'Content-Type': scryfallRes.headers.get('content-type') || 'application/json',
-            'Cache-Control': 'public, max-age=3600, s-maxage=86400',
-            ...corsHeaders,
-          },
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message || 'Scryfall proxy error' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
-      }
-    }
-
-    // 5. EDHREC API Proxy
+    // 4. EDHREC API Proxy
     if (url.pathname.startsWith('/api/edhrec')) {
       const targetPath = url.pathname.replace(/^\/api\/edhrec/, '');
       const targetUrl = `https://json.edhrec.com${targetPath}${url.search}`;
