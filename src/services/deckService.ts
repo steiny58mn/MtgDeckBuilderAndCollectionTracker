@@ -145,9 +145,6 @@ export function normalizeCard(card: any): DeckCard {
   const quantity = typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1);
   const category = (card.category || card.Category || 'main').toLowerCase();
 
-  const existingGc = Boolean(card.game_changer || card.is_game_changer || card.isGamechanger || card.gameChanger);
-  const isGc = existingGc || isCardGamechanger(card);
-
   return {
     ...card,
     id: card.id || card.Id || card.cardId || card.CardId || `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -176,9 +173,11 @@ export function normalizeCard(card: any): DeckCard {
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
-    isGamechanger: isGc,
-    game_changer: isGc,
-    is_game_changer: isGc,
+    isGamechanger: isCardGamechanger(card),
+    game_changer: isCardGamechanger(card),
+    is_game_changer: isCardGamechanger(card),
+    isGameChanger: isCardGamechanger(card),
+    IsGameChanger: isCardGamechanger(card),
   };
 }
 
@@ -285,10 +284,8 @@ export function normalizeBinderCard(card: any): CollectionCard {
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
 
-  // If all cards already have image URLs, type lines, and gamechanger flags populated, return immediately to eliminate flicker
-  const needsEnrichment = deck.cards.some(
-    (c) => !c.imageUrl || !c.type_line || !c.typeLine || (c.game_changer === undefined && c.isGamechanger === undefined && c.is_game_changer === undefined)
-  );
+  // If cards are already pre-hydrated by backend (have typeLine, manaCost, isGameChanger, etc.), skip external lookups
+  const needsEnrichment = deck.cards.some((c) => !c.type_line && !c.typeLine);
   if (!needsEnrichment) {
     return deck;
   }
@@ -309,20 +306,9 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Check gamechanger from Frostpointlabs/Scryfall JSON data, preserving existing true state to prevent flashing to 0
-        const isGc = Boolean(
-          matched.game_changer ||
-          matched.is_game_changer ||
-          matched.isGamechanger ||
-          matched.is_gamechanger ||
-          c.isGamechanger ||
-          c.game_changer ||
-          c.is_game_changer ||
-          isCardGamechanger(matched) ||
-          isCardGamechanger(c) ||
-          (c.name && GamechangerService.isKnownGamechanger(c.name))
-        );
-        const gcMismatch = Boolean(c.isGamechanger) !== isGc || Boolean(c.game_changer) !== isGc || Boolean(c.is_game_changer) !== isGc;
+        // Check gamechanger from API response property
+        const isGc = isCardGamechanger(matched);
+        const gcMismatch = isCardGamechanger(c) !== isGc;
         const typeMismatch = !c.type_line && Boolean(typeLine);
         const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
         const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
@@ -475,6 +461,8 @@ export async function saveRemoteDeck(deck: Deck): Promise<boolean> {
         collectorNumber,
         color_identity: colorIdentity,
         colorIdentity,
+        isGameChanger: isGc,
+        IsGameChanger: isGc,
         game_changer: isGc,
         is_game_changer: isGc,
         isGamechanger: isGc,
@@ -1640,6 +1628,62 @@ export class DeckService {
   private static unsavedListeners: Set<(unsavedIds: Set<string>) => void> = new Set();
   private static lastSavedDecks: Map<string, Deck> = new Map();
 
+  private static getCacheKey(type: 'decks' | 'binders'): string {
+    const user = AuthService.getCurrentUser();
+    const id = user?.userId || user?.username || 'guest';
+    return `mtg_cached_${type}_${id}`;
+  }
+
+  private static loadCachedState() {
+    if (typeof window === 'undefined') return;
+    try {
+      const decksKey = this.getCacheKey('decks');
+      const rawDecks = localStorage.getItem(decksKey);
+      if (rawDecks && this.inMemoryDecks.length === 0) {
+        const parsed = JSON.parse(rawDecks);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log(`[DeckService] ⚡ Loaded ${parsed.length} cached deck(s) from localStorage.`);
+          this.inMemoryDecks = parsed.map(normalizeDeck);
+          for (const d of this.inMemoryDecks) {
+            if (!this.lastSavedDecks.has(d.id)) {
+              this.lastSavedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
+            }
+          }
+        }
+      }
+
+      const bindersKey = this.getCacheKey('binders');
+      const rawBinders = localStorage.getItem(bindersKey);
+      if (rawBinders && this.inMemoryBinders.length === 0) {
+        const parsedB = JSON.parse(rawBinders);
+        if (Array.isArray(parsedB) && parsedB.length > 0) {
+          this.inMemoryBinders = parsedB.map((b: any) => ({
+            ...b,
+            cards: (b.cards || []).map(normalizeBinderCard),
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('[DeckService] Error reading cached library:', e);
+    }
+  }
+
+  public static persistDecksToCache(decks: Deck[]) {
+    if (typeof window === 'undefined') return;
+    try {
+      const key = this.getCacheKey('decks');
+      localStorage.setItem(key, JSON.stringify(decks));
+    } catch {}
+  }
+
+  public static persistBindersToCache(binders: Binder[]) {
+    if (typeof window === 'undefined') return;
+    try {
+      const key = this.getCacheKey('binders');
+      localStorage.setItem(key, JSON.stringify(binders));
+    } catch {}
+  }
+
   static onSyncStatusChange(callback: (status: SyncStatus, error?: string) => void): () => void {
     this.statusListeners.add(callback);
     callback(this.currentStatus);
@@ -1769,38 +1813,41 @@ export class DeckService {
    * Fetch all decks and binders from the remote API
    */
   public static async syncWithRemote(): Promise<void> {
+    if (!AuthService.isLoggedIn()) {
+      console.log('[DeckService] User is not logged in. Operating in local guest mode.');
+      this.setStatus('synced');
+      return;
+    }
     console.log('[DeckService] 🔄 Starting syncWithRemote()...');
     this.setStatus('syncing');
 
     try {
-      const [remoteDecks, remoteBinders] = await Promise.all([
-        getRemoteDecks(),
-        getRemoteBinders(),
-      ]);
-
-      console.log(`[DeckService] 🔄 syncWithRemote resolved with ${remoteDecks.length} deck(s) and ${remoteBinders.length} binder(s).`);
-
-      this.inMemoryDecks = remoteDecks;
-      this.lastSavedDecks.clear();
-      for (const d of remoteDecks) {
-        this.lastSavedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
-      }
-      this.unsavedDeckIds.clear();
-      this.notifyUnsavedChanges();
-      this.inMemoryBinders = remoteBinders.length > 0 ? remoteBinders : [DEFAULT_BINDER];
-
-      this.notifyDecks();
-      this.notifyBinders();
-      this.setStatus('synced');
-      console.log('[DeckService] ✅ syncWithRemote complete. State updated and status set to "synced".');
-
-      // Proactively warm gamechanger cache for all cards across decks in background
-      try {
-        const allCardNames = remoteDecks.flatMap((d) => (d.cards || []).map((c) => c.name)).filter(Boolean);
-        if (allCardNames.length > 0) {
-          GamechangerService.queryGamechangersFromApi(allCardNames).catch(() => {});
+      // Unblock decks from binders: update and render decks immediately as soon as getRemoteDecks resolves!
+      const decksPromise = getRemoteDecks().then((remoteDecks) => {
+        this.inMemoryDecks = remoteDecks;
+        this.lastSavedDecks.clear();
+        for (const d of remoteDecks) {
+          this.lastSavedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
         }
-      } catch {}
+        this.unsavedDeckIds.clear();
+        this.notifyUnsavedChanges();
+        this.persistDecksToCache(remoteDecks);
+        this.notifyDecks();
+        console.log(`[DeckService] ⚡ Decks retrieved and notified immediately (${remoteDecks.length} deck(s)).`);
+        return remoteDecks;
+      });
+
+      const bindersPromise = getRemoteBinders().then((remoteBinders) => {
+        this.inMemoryBinders = remoteBinders.length > 0 ? remoteBinders : [DEFAULT_BINDER];
+        this.persistBindersToCache(this.inMemoryBinders);
+        this.notifyBinders();
+        console.log(`[DeckService] ⚡ Binders retrieved and notified (${this.inMemoryBinders.length} binder(s)).`);
+        return remoteBinders;
+      });
+
+      await Promise.all([decksPromise, bindersPromise]);
+      this.setStatus('synced');
+      console.log('[DeckService] ✅ syncWithRemote complete. All library data synced.');
     } catch (e: any) {
       console.error('[DeckService] ❌ Error syncing with remote API:', e);
       this.setStatus('offline', e?.message);
@@ -1808,12 +1855,14 @@ export class DeckService {
   }
 
   private static initSync() {
+    this.loadCachedState();
     if (this.hasInitialized) return;
     this.hasInitialized = true;
     this.syncWithRemote();
   }
 
   static subscribeDecks(onUpdate: (decks: Deck[]) => void): Unsubscribe {
+    this.loadCachedState();
     this.deckListeners.add(onUpdate);
     console.log(`[DeckService] 📥 Subscribed new deck listener (total: ${this.deckListeners.size}). Initializing with ${this.inMemoryDecks.length} cached deck(s).`);
     onUpdate([...this.inMemoryDecks]);
@@ -1948,6 +1997,7 @@ export class DeckService {
       this.unsavedDeckIds.delete(updated.id);
       this.notifyUnsavedChanges();
       this.clearDeckFormatCache(updated.id);
+      this.persistDecksToCache(this.inMemoryDecks);
       this.setStatus('synced');
     } else {
       this.setStatus('offline');
@@ -1964,6 +2014,7 @@ export class DeckService {
     this.lastSavedDecks.delete(deckId);
     this.notifyUnsavedChanges();
     this.inMemoryDecks = this.inMemoryDecks.filter((d) => d.id !== deckId);
+    this.persistDecksToCache(this.inMemoryDecks);
     this.notifyDecks();
 
     this.setStatus('syncing');
@@ -2450,6 +2501,10 @@ export class DeckService {
    */
   public static clearUserData(): void {
     console.log('[DeckService] 🧹 Clearing user data on logout.');
+    try {
+      localStorage.removeItem(this.getCacheKey('decks'));
+      localStorage.removeItem(this.getCacheKey('binders'));
+    } catch {}
     this.inMemoryDecks = [];
     this.inMemoryDeckHistory.clear();
     this.lastSavedDecks.clear();

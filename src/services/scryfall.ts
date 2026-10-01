@@ -53,14 +53,19 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
   }
 
   const isGc = Boolean(
+    c.isGameChanger === true ||
+    c.isGameChanger === 'true' ||
+    c.IsGameChanger === true ||
+    c.IsGameChanger === 'true' ||
+    c.isGamechanger === true ||
+    c.isGamechanger === 'true' ||
+    c.is_gamechanger === true ||
+    c.is_gamechanger === 'true' ||
     c.game_changer === true ||
     c.game_changer === 'true' ||
     c.is_game_changer === true ||
     c.is_game_changer === 'true' ||
-    c.isGamechanger === true ||
-    c.is_gamechanger === true ||
-    c.gameChanger === true ||
-    (c.name && GamechangerService.isKnownGamechanger(c.name))
+    c.gameChanger === true
   );
 
   return {

@@ -1,10 +1,9 @@
 /**
  * Gamechanger Service
  * Centralized service for tracking and querying MTG Gamechangers exclusively
- * from the Frostpointlabs API (POST /deckbuilder/cards/lookup).
+ * from the API responses (POST /deckbuilder/cards/lookup).
  *
- * Persists known gamechangers in localStorage and in-memory cache to prevent
- * badge flickering/flashing to 0 on initial loads or deck switches.
+ * Checks the IsGameChanger/game_changer property directly from the API/DB.
  */
 
 import { getApiBaseUrl } from '../config/apiConfig';
@@ -20,21 +19,11 @@ export class GamechangerService {
   private static activeQueries: Map<string, Promise<boolean>> = new Map();
 
   /**
-   * Initialize cache from localStorage and seed with known verified gamechangers
+   * Initialize cache from localStorage
    */
   private static init() {
     if (this.isInitialized) return;
     this.isInitialized = true;
-
-    // Seed known staple gamechangers verified on Frostpointlabs
-    const seedGamechangers = [
-      'ad nauseam',
-      'cyclonic rift',
-      'smothering tithe',
-    ];
-    for (const name of seedGamechangers) {
-      this.cache.set(name, true);
-    }
 
     if (typeof window !== 'undefined') {
       try {
@@ -107,6 +96,28 @@ export class GamechangerService {
   }
 
   /**
+   * Extracts gamechanger boolean status directly from API payload property
+   */
+  static extractIsGamechanger(raw: any): boolean {
+    if (!raw) return false;
+    return Boolean(
+      raw.isGameChanger === true ||
+      raw.isGameChanger === 'true' ||
+      raw.IsGameChanger === true ||
+      raw.IsGameChanger === 'true' ||
+      raw.isGamechanger === true ||
+      raw.isGamechanger === 'true' ||
+      raw.is_gamechanger === true ||
+      raw.is_gamechanger === 'true' ||
+      raw.game_changer === true ||
+      raw.game_changer === 'true' ||
+      raw.is_game_changer === true ||
+      raw.is_game_changer === 'true' ||
+      raw.gameChanger === true
+    );
+  }
+
+  /**
    * Check if a card is currently known as a gamechanger in cache or on card object
    */
   static isKnownGamechanger(cardOrName: any): boolean {
@@ -115,15 +126,7 @@ export class GamechangerService {
 
     // Check direct card properties if passed an object
     if (typeof cardOrName === 'object') {
-      if (
-        cardOrName.game_changer === true ||
-        cardOrName.game_changer === 'true' ||
-        cardOrName.is_game_changer === true ||
-        cardOrName.is_game_changer === 'true' ||
-        cardOrName.isGamechanger === true ||
-        cardOrName.is_gamechanger === true ||
-        cardOrName.gameChanger === true
-      ) {
+      if (this.extractIsGamechanger(cardOrName)) {
         const n = this.normalizeName(cardOrName.name || '');
         if (n && !this.cache.has(n)) {
           this.cache.set(n, true);
@@ -132,7 +135,7 @@ export class GamechangerService {
       }
     }
 
-    const nameStr = typeof cardOrName === 'string' ? cardOrName : cardOrName.name;
+    const nameStr = typeof cardOrName === 'string' ? cardOrName : cardOrName?.name;
     const clean = this.normalizeName(nameStr || '');
     if (!clean) return false;
 
@@ -140,7 +143,7 @@ export class GamechangerService {
   }
 
   /**
-   * Query a single card from Frostpointlabs API and update cache
+   * Query a single card from API and update cache
    */
   static async queryCardGamechanger(cardName: string): Promise<boolean> {
     this.init();
@@ -168,14 +171,7 @@ export class GamechangerService {
    * Register card gamechanger data directly from any lookup response (e.g. Scryfall/Frostpoint batch lookup)
    */
   static registerCardsFromLookup(
-    cardList: Array<{
-      name?: string;
-      game_changer?: any;
-      is_game_changer?: any;
-      isGamechanger?: any;
-      is_gamechanger?: any;
-      gameChanger?: any;
-    }>
+    cardList: Array<any>
   ) {
     this.init();
     if (!cardList || !Array.isArray(cardList) || cardList.length === 0) return;
@@ -184,15 +180,7 @@ export class GamechangerService {
     for (const raw of cardList) {
       if (!raw || !raw.name) continue;
       const clean = this.normalizeName(raw.name);
-      const isGc = Boolean(
-        raw.game_changer === true ||
-        raw.game_changer === 'true' ||
-        raw.is_game_changer === true ||
-        raw.is_game_changer === 'true' ||
-        raw.isGamechanger === true ||
-        raw.is_gamechanger === true ||
-        raw.gameChanger === true
-      );
+      const isGc = this.extractIsGamechanger(raw);
 
       const previous = this.cache.get(clean);
       if (previous !== isGc) {
@@ -208,7 +196,7 @@ export class GamechangerService {
   }
 
   /**
-   * Query gamechanger status for an array of card names directly from Frostpointlabs API.
+   * Query gamechanger status for an array of card names directly from API.
    * Uses POST /deckbuilder/cards/lookup.
    */
   static async queryGamechangersFromApi(
@@ -254,15 +242,7 @@ export class GamechangerService {
           for (const raw of cardList) {
             if (!raw || !raw.name) continue;
             const clean = this.normalizeName(raw.name);
-            const isGc = Boolean(
-              raw.game_changer === true ||
-              raw.game_changer === 'true' ||
-              raw.is_game_changer === true ||
-              raw.is_game_changer === 'true' ||
-              raw.isGamechanger === true ||
-              raw.is_gamechanger === true ||
-              raw.gameChanger === true
-            );
+            const isGc = this.extractIsGamechanger(raw);
 
             results.set(clean, isGc);
             const previous = this.cache.get(clean);
@@ -273,7 +253,7 @@ export class GamechangerService {
           }
         }
       } catch (err) {
-        console.warn('[GamechangerService] Error querying Frostpointlabs lookup:', err);
+        console.warn('[GamechangerService] Error querying API lookup:', err);
       }
     }
 
@@ -286,10 +266,8 @@ export class GamechangerService {
   }
 
   /**
-   * Synchronizes an entire Deck with Frostpointlabs API:
-   * 1. Evaluates all cards in the deck against cache immediately.
-   * 2. Queries Frostpointlabs API for current gamechanger status.
-   * 3. Returns the updated Deck with accurate game_changer and isGamechanger flags.
+   * Synchronizes an entire Deck with pre-hydrated card metadata in-memory.
+   * Returns the updated Deck with accurate game_changer and isGamechanger flags without network calls.
    */
   static async syncDeckGamechangers(
     deck: Deck
@@ -299,23 +277,19 @@ export class GamechangerService {
       return { deck, hasChanges: false };
     }
 
-    const cardNames = deck.cards
-      .map((c) => c.name)
-      .filter((n): n is string => Boolean(n && n.trim()));
-
-    // Query Frostpointlabs API
-    const apiResults = await this.queryGamechangersFromApi(cardNames);
-
     let hasChanges = false;
     const updatedCards = deck.cards.map((c) => {
       const clean = this.normalizeName(c.name);
-      const apiVal = apiResults.get(clean);
       const cacheVal = this.cache.get(clean);
-      const cardVal = Boolean(c.game_changer || c.is_game_changer || c.isGamechanger || c.is_gamechanger);
-      const isGc = apiVal !== undefined ? apiVal : (cacheVal !== undefined ? cacheVal : cardVal);
+      const cardVal = this.extractIsGamechanger(c);
+      const isGc = cardVal || cacheVal || false;
 
-      const currentGc = Boolean(c.game_changer || c.isGamechanger || c.is_game_changer);
-      if (currentGc !== isGc || c.game_changer !== isGc || c.isGamechanger !== isGc) {
+      if (
+        c.game_changer !== isGc ||
+        c.isGamechanger !== isGc ||
+        (c as any).isGameChanger !== isGc ||
+        (c as any).IsGameChanger !== isGc
+      ) {
         hasChanges = true;
         return {
           ...c,
@@ -323,6 +297,8 @@ export class GamechangerService {
           is_game_changer: isGc,
           isGamechanger: isGc,
           is_gamechanger: isGc,
+          isGameChanger: isGc,
+          IsGameChanger: isGc,
         };
       }
       return c;

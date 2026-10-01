@@ -304,18 +304,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         isGamechanger: isGc,
         game_changer: isGc,
         is_game_changer: isGc,
+        isGameChanger: isGc,
+        IsGameChanger: isGc,
       };
       onUpdateDeck({ ...activeDeck, cards: [...activeDeck.cards, newCard] });
-      GamechangerService.queryCardGamechanger(cardName).then((gcStatus) => {
-        if (gcStatus !== isGc) {
-          const syncedCards = activeDeck.cards.map((c) =>
-            c.name.toLowerCase() === cardName.toLowerCase()
-              ? { ...c, isGamechanger: gcStatus, game_changer: gcStatus, is_game_changer: gcStatus }
-              : c
-          );
-          onUpdateDeck({ ...activeDeck, cards: syncedCards });
-        }
-      });
     }
   };
 
@@ -392,29 +384,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return JSON.parse(JSON.stringify(deck.cards || []));
   });
 
-  // Keep saved baseline synced when switching to a different deck & enrich cards from Frostpointlabs in a single pass
+  // Keep saved baseline synced when switching to a different deck
   useEffect(() => {
     scrollToTop();
-    let isCancelled = false;
-
-    const syncDeck = async () => {
-      try {
-        const enrichedDeck = await DeckService.enrichDeckCards(deck);
-        const finalDeck = enrichedDeck && enrichedDeck !== deck ? enrichedDeck : null;
-
-        if (!isCancelled && finalDeck) {
-          DeckService.setLastSavedDeck(finalDeck);
-          setSavedCards(JSON.parse(JSON.stringify(finalDeck.cards || [])));
-          DeckService.setDeckHasUnsavedChanges(deck.id, false);
-          setHasUnsavedChanges(false);
-          onUpdateDeck(finalDeck, false);
-        }
-      } catch (err) {
-        console.warn('[DeckBuilder] Failed to sync deck & metadata on load:', err);
-      }
-    };
-
-    syncDeck();
 
     const fromService = DeckService.getLastSavedDeck(deck.id);
     if (fromService && fromService.cards) {
@@ -423,10 +395,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       DeckService.setLastSavedDeck(deck);
       setSavedCards(JSON.parse(JSON.stringify(deck.cards || [])));
     }
-
-    return () => {
-      isCancelled = true;
-    };
   }, [deck.id]);
 
   useEffect(() => {
@@ -439,30 +407,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       }
     }
   }, [hasUnsavedChanges, deck.id]);
-
-  // Query Frostpointlabs API only when card count changes after initial mount
-  const lastCheckedCardCountRef = useRef<number>(deck.cards?.length || 0);
-  useEffect(() => {
-    if (lastCheckedCardCountRef.current === activeDeck.cards?.length) {
-      return;
-    }
-    lastCheckedCardCountRef.current = activeDeck.cards?.length || 0;
-
-    let isCancelled = false;
-    const timer = setTimeout(() => {
-      if (!isCancelled && activeDeck && activeDeck.cards && activeDeck.cards.length > 0) {
-        GamechangerService.syncDeckGamechangers(activeDeck).then((res) => {
-          if (!isCancelled && res.hasChanges) {
-            onUpdateDeck(res.deck, hasUnsavedChanges);
-          }
-        }).catch(() => {});
-      }
-    }, 500);
-    return () => {
-      isCancelled = true;
-      clearTimeout(timer);
-    };
-  }, [activeDeck.cards?.length]);
   const pendingChanges = useMemo(() => {
     if (isHistoricalView) return { added: [], deleted: [] };
 
@@ -644,14 +588,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         mtgNexusEditThreadUrl: (nexusUrl || baseDeck.mtgNexusEditThreadUrl || '').trim() || undefined,
         updatedAt: Date.now(),
       };
-
-      // Query Frostpointlabs API on save to ensure exact, verified gamechanger status
-      try {
-        const synced = await GamechangerService.syncDeckGamechangers(currentDeckToSave);
-        currentDeckToSave = synced.deck;
-      } catch (gcErr) {
-        console.warn('[DeckBuilder] Error syncing gamechangers on save:', gcErr);
-      }
 
       if (onSaveDeck) {
         await onSaveDeck(currentDeckToSave);
@@ -1193,14 +1129,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   const handleAppendCardsToDeck = async (cardsToAdd: DeckCard[]) => {
-    // Determine gamechanger status immediately from cache for instant zero-flash UX
+    // Determine gamechanger status immediately from API property on card objects
     const preparedCards = cardsToAdd.map((card) => {
-      const isGc = Boolean(card.game_changer || card.isGamechanger) || GamechangerService.isKnownGamechanger(card.name);
+      const isGc = isCardGamechanger(card);
       return {
         ...card,
         isGamechanger: isGc,
         game_changer: isGc,
         is_game_changer: isGc,
+        isGameChanger: isGc,
+        IsGameChanger: isGc,
       };
     });
 
@@ -1224,13 +1162,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     setHasUnsavedChanges(true);
     setPriceRefreshMessage(`Added ${cardsToAdd.reduce((s, c) => s + c.quantity, 0)} cards to deck`);
     setTimeout(() => setPriceRefreshMessage(null), 3500);
-
-    // Query Frostpointlabs API in background to verify any new card gamechanger statuses
-    GamechangerService.syncDeckGamechangers(updatedDeck).then((res) => {
-      if (res.hasChanges) {
-        onUpdateDeck(res.deck, true);
-      }
-    }).catch(() => {});
   };
 
   const handleAddCardFromCompare = (cardName: string, cardData?: DeckCard) => {
@@ -1246,7 +1177,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (existing) {
       handleUpdateCardQuantity(existing.id, 1);
     } else if (cardData) {
-      const isGc = Boolean(cardData.game_changer || cardData.isGamechanger) || GamechangerService.isKnownGamechanger(cardName);
+      const isGc = isCardGamechanger(cardData);
       const newCard: DeckCard = {
         ...cardData,
         id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
@@ -1255,10 +1186,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         isGamechanger: isGc,
         game_changer: isGc,
         is_game_changer: isGc,
+        isGameChanger: isGc,
+        IsGameChanger: isGc,
       };
       handleAppendCardsToDeck([newCard]);
     } else {
-      const isGc = GamechangerService.isKnownGamechanger(cardName);
       const newCard: DeckCard = {
         id: `deckcard-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         scryfallId: '',
@@ -1268,9 +1200,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         type_line: 'Card',
         quantity: 1,
         category: 'main',
-        isGamechanger: isGc,
-        game_changer: isGc,
-        is_game_changer: isGc,
+        isGamechanger: false,
+        game_changer: false,
+        is_game_changer: false,
+        isGameChanger: false,
+        IsGameChanger: false,
       };
       handleAppendCardsToDeck([newCard]);
     }

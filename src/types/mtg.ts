@@ -67,6 +67,8 @@ export interface ScryfallCard {
   card_faces?: ScryfallCardFace[];
   legalities: Record<string, string>;
   prices: ScryfallCardPrices;
+  isGameChanger?: boolean;
+  IsGameChanger?: boolean;
   isGamechanger?: boolean;
   is_gamechanger?: boolean;
   is_game_changer?: boolean;
@@ -114,6 +116,8 @@ export interface DeckCard {
   backImageUrl?: string;
   priceUsd?: number;
   priceUsdFoil?: number;
+  isGameChanger?: boolean;
+  IsGameChanger?: boolean;
   isGamechanger?: boolean;
   is_gamechanger?: boolean;
   is_game_changer?: boolean;
@@ -173,11 +177,14 @@ export interface CollectionCard {
   isPriceEstimated?: boolean;
   addedAt: number;
   notes?: string;
+  isGameChanger?: boolean;
+  IsGameChanger?: boolean;
   isGamechanger?: boolean;
   is_gamechanger?: boolean;
   is_game_changer?: boolean;
   IsGamechanger?: boolean;
   game_changer?: boolean;
+  gameChanger?: boolean;
 }
 
 export interface Binder {

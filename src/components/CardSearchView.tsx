@@ -24,8 +24,7 @@ import {
   Crown,
   Lock,
   AlertCircle,
-  ShieldAlert,
-  Zap
+  ShieldAlert
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
 import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult } from '../services/scryfall';
@@ -44,7 +43,7 @@ import {
   sortWUBRG,
   sortCardsByName,
   filterAvailablePartners,
-  isCardGamechanger
+  canHaveAnyNumberOfCopies
 } from '../utils/deckUtils';
 
 interface CardSearchViewProps {
@@ -454,9 +453,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
   // Helper to determine format limit (1 for singleton/commander, 4 for other formats, 999 for basic lands/unlimited)
   const getDeckLimit = (card: ScryfallCard): number => {
-    const isBasicLand = /Basic Land/i.test(card.type_line || (card as any).typeLine || '') || /Basic Snow Land/i.test(card.type_line || (card as any).typeLine || '');
-    const hasUnlimitedRule = Boolean((card.oracle_text || card.card_faces?.[0]?.oracle_text) && /A deck can have any number of/i.test(card.oracle_text || card.card_faces?.[0]?.oracle_text || ''));
-    if (isBasicLand || hasUnlimitedRule) {
+    if (canHaveAnyNumberOfCopies(card)) {
       return 999;
     }
     const isSingleton = activeDeck?.format === 'commander' || activeDeck?.format === 'oathbreaker' || activeDeck?.format === 'brawl';
@@ -2143,15 +2140,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                     <span className="truncate max-w-[90px]">{card.type_line?.split('—')[0]}</span>
                     <ManaCostBadge manaCost={card.mana_cost} size="sm" />
                   </div>
-                  {/* Gamechanger Badge */}
-                  {isCardGamechanger(card) && (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 font-bold text-[10px]" title="Commander Gamechanger">
-                        <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
-                        <span>Gamechanger</span>
-                      </span>
-                    </div>
-                  )}
                   {isBinderContext && (
                     <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5" title={`${card.set_name || ''} · #${card.collector_number || (card as any).collectorNumber || ''}`}>
                       <div className="flex items-center truncate min-w-0 mr-1.5">

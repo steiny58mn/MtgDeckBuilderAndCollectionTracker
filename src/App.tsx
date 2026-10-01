@@ -28,7 +28,7 @@ import { LoginPage } from './components/LoginPage';
 import { getCardImageUrl } from './services/scryfall';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
-import { getDeckCommander, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
+import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search' | 'login'>('decks');
@@ -307,18 +307,10 @@ export default function App() {
       return;
     }
 
-    let deckToPersist = deckToSave;
-    try {
-      const synced = await GamechangerService.syncDeckGamechangers(deckToSave);
-      deckToPersist = synced.deck;
-    } catch (err) {
-      console.warn('[App] Error syncing gamechangers before save:', err);
-    }
-
-    await DeckService.saveDeck(deckToPersist);
-    DeckService.setLastSavedDeck(deckToPersist);
-    setActiveDeck(deckToPersist);
-    showToast(`Saved "${deckToPersist.name}"!`, 'success');
+    await DeckService.saveDeck(deckToSave);
+    DeckService.setLastSavedDeck(deckToSave);
+    setActiveDeck(deckToSave);
+    showToast(`Saved "${deckToSave.name}"!`, 'success');
   };
 
   const handleImportAsNewDeck = async (newDeck: Deck, shouldSaveCurrentDeck: boolean) => {
@@ -489,13 +481,10 @@ export default function App() {
         }
       }
 
-      // Check singleton rule for commander decks (max 1 copy of non-basic lands)
+      // Check singleton rule for commander decks (anything with Basic Supertype or unlimited rule can have any quantity)
       if (category !== 'maybeboard') {
-        const isBasic = /Basic Land/i.test(card.type_line || (card as any).typeLine || '');
-        const hasUnlimitedRule = (card.oracle_text || card.card_faces?.[0]?.oracle_text)
-          ? /A deck can have any number of/i.test(card.oracle_text || card.card_faces?.[0]?.oracle_text || '')
-          : false;
-        if (!isBasic && !hasUnlimitedRule) {
+        const isUnlimited = canHaveAnyNumberOfCopies(card);
+        if (!isUnlimited) {
           const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
           const alreadyInDeck = latestActiveDeck.cards.some(
             (c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName
@@ -545,12 +534,13 @@ export default function App() {
         rarity: card.rarity,
         imageUrl: getCardImageUrl(card, 'normal'),
         priceUsd: priceUsd,
-        isGamechanger: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
-        game_changer: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
-        is_game_changer: Boolean(card.game_changer) || GamechangerService.isKnownGamechanger(card.name),
+        isGamechanger: isCardGamechanger(card),
+        game_changer: isCardGamechanger(card),
+        is_game_changer: isCardGamechanger(card),
+        isGameChanger: isCardGamechanger(card),
+        IsGameChanger: isCardGamechanger(card),
       };
       currentCards.push(newCard);
-      GamechangerService.queryCardGamechanger(card.name);
     }
 
     // Auto-update commander metadata if designating a commander
@@ -601,11 +591,8 @@ export default function App() {
 
     // Commander singleton check
     if (latestActiveDeck.format === 'commander') {
-      const isBasic = /Basic Land/i.test(item.type_line || '');
-      const hasUnlimitedRule = item.oracle_text
-        ? /A deck can have any number of/i.test(item.oracle_text)
-        : false;
-      if (!isBasic && !hasUnlimitedRule) {
+      const isUnlimited = canHaveAnyNumberOfCopies(item);
+      if (!isUnlimited) {
         const cleanName = item.name.split(' // ')[0].trim().toLowerCase();
         const alreadyInDeck = latestActiveDeck.cards.some(
           (c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName

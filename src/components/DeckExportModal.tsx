@@ -33,19 +33,11 @@ import {
   SlidersHorizontal
 } from 'lucide-react';
 import { Deck, DeckCard, MTGFormat, CollectionCard } from '../types/mtg';
+import { hasBasicSupertype } from '../utils/deckUtils';
 
-// Helper to determine whether a card is a Basic Land
+// Helper to determine whether a card is a Basic Land (or has the Basic supertype)
 export const isBasicLand = (card: { name?: string; type_line?: string }): boolean => {
-  if (!card) return false;
-  const type = (card.type_line || '').toLowerCase();
-  if (type.includes('basic') && type.includes('land')) return true;
-  const name = (card.name || '').trim().toLowerCase();
-  const basicNames = [
-    'plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
-    'snow-covered plains', 'snow-covered island', 'snow-covered swamp',
-    'snow-covered mountain', 'snow-covered forest', 'snow-covered wastes'
-  ];
-  return basicNames.includes(name);
+  return hasBasicSupertype(card);
 };
 import { 
   ExportFormatKey, 

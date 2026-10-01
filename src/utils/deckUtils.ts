@@ -73,6 +73,58 @@ import {
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem } from '../types/mtg';
 
+/**
+ * Standard basic land card names for fallback matching
+ */
+export const BASIC_LAND_NAMES = new Set([
+  'plains',
+  'island',
+  'swamp',
+  'mountain',
+  'forest',
+  'wastes',
+  'snow-covered plains',
+  'snow-covered island',
+  'snow-covered swamp',
+  'snow-covered mountain',
+  'snow-covered forest',
+  'snow-covered wastes',
+]);
+
+/**
+ * Checks if a card has the "Basic" supertype (e.g. Basic Land, Basic Snow Land, etc.).
+ * Anything with the Basic Supertype can have any number of cards in the deck.
+ */
+export function hasBasicSupertype(card: { name?: string; type_line?: string; typeLine?: string } | null | undefined): boolean {
+  if (!card) return false;
+  const typeLine = (card.type_line || (card as any).typeLine || '').trim();
+  
+  // Check for the "Basic" supertype word anywhere in type line or before the subtype dash
+  const mainTypePart = typeLine.split('—')[0].split('//')[0];
+  if (/\bBasic\b/i.test(mainTypePart) || /\bBasic\b/i.test(typeLine)) {
+    return true;
+  }
+  
+  // Fallback check against known basic card names (e.g. Plains, Island, Swamp, Mountain, Forest, Wastes, Snow-Covered...)
+  const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+  return BASIC_LAND_NAMES.has(cleanName);
+}
+
+/**
+ * Checks whether a card can have any number of copies in a deck
+ * (either has the Basic supertype or has the explicit "A deck can have any number of cards named ~" rule).
+ */
+export function canHaveAnyNumberOfCopies(card: any): boolean {
+  if (!card) return false;
+  if (hasBasicSupertype(card)) return true;
+  
+  const oracleText = card.oracle_text || card.card_faces?.[0]?.oracle_text || (card as any).oracleText || '';
+  if (/A deck can have any number of/i.test(oracleText)) {
+    return true;
+  }
+  return false;
+}
+
 export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): DeckStats {
   const cards = deck.cards || [];
 
@@ -166,11 +218,11 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
 
   cards.forEach((c) => {
     if (c.category === 'main' || c.category === 'commander') {
-      const isBasicLand = /Basic Land/i.test(c.type_line || (c as any).typeLine || '');
+      const isUnlimited = canHaveAnyNumberOfCopies(c);
       const cleanName = c.name.split(' // ')[0].trim();
       cardNameCounts[cleanName] = (cardNameCounts[cleanName] || 0) + c.quantity;
 
-      if (!isBasicLand) {
+      if (!isUnlimited) {
         if (deck.format === 'commander' && cardNameCounts[cleanName] > 1) {
           illegalCards.push(`${cleanName} exceeds Commander singleton limit (1 copy allowed)`);
         } else if (deck.format !== 'commander' && cardNameCounts[cleanName] > 4) {
@@ -1796,23 +1848,25 @@ export function getScryfallGamechangerDetails(card?: DeckCard): GamechangerDefin
 }
 
 /**
- * Evaluates whether a card is a Gamechanger strictly from Frostpointlabs API data
- * and verified in-memory/localStorage gamechanger cache.
+ * Evaluates whether a card is a Gamechanger strictly from the API property.
  */
 export function isCardGamechanger(card: any): boolean {
   if (!card) return false;
-  if (
+  return Boolean(
+    card.isGameChanger === true ||
+    card.isGameChanger === 'true' ||
+    card.IsGameChanger === true ||
+    card.IsGameChanger === 'true' ||
+    card.isGamechanger === true ||
+    card.isGamechanger === 'true' ||
+    card.is_gamechanger === true ||
+    card.is_gamechanger === 'true' ||
     card.game_changer === true ||
     card.game_changer === 'true' ||
     card.is_game_changer === true ||
     card.is_game_changer === 'true' ||
-    card.isGamechanger === true ||
-    card.is_gamechanger === true ||
     card.gameChanger === true
-  ) {
-    return true;
-  }
-  return GamechangerService.isKnownGamechanger(card);
+  );
 }
 
 /**

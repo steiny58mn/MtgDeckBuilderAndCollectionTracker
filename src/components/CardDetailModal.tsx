@@ -16,7 +16,7 @@ import {
 import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
 import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints } from '../services/scryfall';
 import { ManaCostBadge } from './ManaCostBadge';
-import { getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
+import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
 
 interface CardDetailModalProps {
   card: ScryfallCard | null;
@@ -333,11 +333,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   activeDeck.format.toLowerCase()
                 );
 
-                const isBasicOrUnlimited = displayCard
-                  ? /Basic Land/i.test(displayCard.type_line || (displayCard as any).typeLine || '') ||
-                    Boolean((displayCard.oracle_text || displayCard.card_faces?.[0]?.oracle_text) && /A deck can have any number of/i.test(displayCard.oracle_text || displayCard.card_faces?.[0]?.oracle_text || ''))
-                  : false;
-
+                const isBasicOrUnlimited = canHaveAnyNumberOfCopies(displayCard);
                 const deckLimit = isBasicOrUnlimited ? 999 : (isSingleton ? 1 : 4);
                 const isAtDeckLimit = deckLimit < 999 && deckCopies >= deckLimit;
 
