@@ -138,8 +138,21 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
   const commanderInfo = activeDeck?.format === 'commander' ? getDeckCommander(activeDeck) : null;
   const isCommanderDeck = activeDeck?.format === 'commander';
-  const hasCommander = Boolean(commanderInfo?.commanderName);
-  const commanderColorIdentity = commanderInfo?.colorIdentity || [];
+  const commanderColorIdentity = useMemo(() => {
+    if (commanderInfo?.colorIdentity && commanderInfo.colorIdentity.length > 0) {
+      return commanderInfo.colorIdentity;
+    }
+    if (activeDeck?.commanderColorIdentity && activeDeck.commanderColorIdentity.length > 0) {
+      return sortWUBRG(activeDeck.commanderColorIdentity);
+    }
+    return [];
+  }, [commanderInfo?.colorIdentity, activeDeck?.commanderColorIdentity]);
+  const hasCommander = Boolean(
+    commanderInfo?.commanderName ||
+    activeDeck?.commanderName ||
+    activeDeck?.commanderId ||
+    commanderColorIdentity.length > 0
+  );
   const commanderCards = useMemo(() => {
     if (!activeDeck) return [];
     const tagged = (activeDeck.cards || []).filter((c) => (c.category || '').toLowerCase() === 'commander');
@@ -508,7 +521,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
     if (cmdrIdChanged || cmdrCountChanged || identityChanged) {
       if (searchContext === 'deck' && activeDeck?.format === 'commander') {
-        setSortBy(activeDeck?.commanderId ? 'synergy' : 'commander_decks');
+        setSortBy(activeDeck?.commanderId ? 'synergy' : 'name');
       }
 
       // When the Commander is chosen, even for partners, clear out the search box
@@ -549,7 +562,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       setSelectedRarity('');
       setSelectedFormat(searchContext === 'deck' && activeDeck?.format ? activeDeck.format : '');
       setScopeBySearchTerm(false);
-      setSortBy(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'commander_decks') : 'edhrec'));
+      setSortBy(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'name') : 'edhrec'));
       setSortDir('auto');
       setFilterMatchMode('AND');
       setResults([]);
@@ -581,6 +594,20 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     if (hideBannedCards && formatToCheck && card.legalities && card.legalities[formatToCheck] === 'banned') {
       return false;
     }
+    // When searching for cards in a Commander deck, if a commander is not selected yet, only show cards eligible to be a commander
+    if (isDeckContext && isCommanderDeck && !hasCommander) {
+      if (!canBePrimaryCommander(card)) {
+        return false;
+      }
+    }
+
+    // Filter out cards not legal based on color identity when adding cards to a Commander deck
+    if (isDeckContext && isCommanderDeck && (hasCommander || commanderColorIdentity.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
+      const legality = isCardLegalInCommander(card, commanderColorIdentity, { allowBanned: true });
+      if (!legality.isLegal) {
+        return false;
+      }
+    }
     if (!isDeckContext || !activeDeck || showCardsAtLimit) return true;
     const copies = getDeckCopies(card);
     const limit = getDeckLimit(card);
@@ -608,7 +635,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [copiedQuery, setCopiedQuery] = useState<boolean>(false);
 
   // Sorting
-  const [sortBy, setSortBy] = useState<'name' | 'usd' | 'cmc' | 'rarity' | 'edhrec' | 'released' | 'synergy' | 'commander_decks' | 'category'>(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'commander_decks') : 'edhrec'));
+  const [sortBy, setSortBy] = useState<'name' | 'usd' | 'cmc' | 'rarity' | 'edhrec' | 'released' | 'synergy' | 'commander_decks' | 'category'>(searchContext === 'binder' ? 'name' : (searchContext === 'deck' && activeDeck?.format === 'commander' ? (activeDeck?.commanderId ? 'synergy' : 'name') : 'edhrec'));
   const [sortDir, setSortDir] = useState<'auto' | 'asc' | 'desc'>('auto');
   const [showSyntaxHelp, setShowSyntaxHelp] = useState(false);
 
@@ -692,7 +719,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     // ONLY apply deck-specific format/color identity constraints if we are actively searching for the deck
     if (isDeckContext) {
       if (isCommanderDeck) {
-        if (hasCommander) {
+        if (hasCommander || commanderColorIdentity.length > 0) {
           boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
           const idString = commanderColorIdentity.length === 0
             ? 'c'
@@ -786,7 +813,11 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     setError(null);
 
     try {
-      const searchSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category') ? 'edhrec' : sortBy;
+      const searchSortOrder = (isCommanderDeck && !hasCommander)
+        ? 'name'
+        : (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category')
+        ? 'edhrec'
+        : sortBy;
       
       const res = await searchCards({
         query,
@@ -862,6 +893,25 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           seenNames.add(clean);
           return true;
         });
+
+        // When searching for cards in a Commander deck, if a commander is not selected yet, only show cards eligible to be a commander
+        if (isCommanderDeck && !hasCommander) {
+          processedData = processedData.filter((card) => canBePrimaryCommander(card));
+        }
+
+        // Sort by name when no commander is selected yet or when sortBy is 'name'
+        if ((isCommanderDeck && !hasCommander) || sortBy === 'name') {
+          processedData.sort((a, b) => {
+            return sortDir === 'desc' ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
+          });
+        }
+
+        // Filter out cards not legal based on color identity for Commander decks
+        if (isCommanderDeck && (hasCommander || commanderColorIdentity.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
+          processedData = processedData.filter((card) => {
+            return isCardLegalInCommander(card, commanderColorIdentity, { allowBanned: true }).isLegal;
+          });
+        }
       }
 
       if (append) {
@@ -1402,7 +1452,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   executeSearch(1, false);
                 }
               }}
-              placeholder='Search 30,000+ Magic cards by name or syntax (e.g. "Rhystic Study", "Lightning Bolt")...'
+              placeholder={isCommanderDeck && !hasCommander ? 'Search legal commanders by name, color, or rules text...' : 'Search 30,000+ Magic cards by name or syntax (e.g. "Rhystic Study", "Lightning Bolt")...'}
               className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
             />
             {loading && <Loader2 className="w-4 h-4 text-fuchsia-500 animate-spin shrink-0" />}
@@ -1415,6 +1465,19 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 Clear
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                setShowAutocomplete(false);
+                executeSearch(1, false);
+              }}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer shrink-0 disabled:opacity-50"
+              title="Search cards with current filters"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Search</span>
+            </button>
           </div>
 
           {/* Autocomplete Dropdown */}
@@ -1673,6 +1736,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   type="text"
                   value={customSubtype}
                   onChange={(e) => setCustomSubtype(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      executeSearch(1, false);
+                    }
+                  }}
                   placeholder="e.g. Dragon, Elf, Equipment, Aura, Zombie"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-fuchsia-500"
                 />
@@ -1741,6 +1810,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 type="text"
                 value={oracleText}
                 onChange={(e) => setOracleText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    executeSearch(1, false);
+                  }
+                }}
                 placeholder='Search rules text e.g. "draw a card", "counter target", "destroy all creatures"...'
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-fuchsia-500"
               />
@@ -2235,10 +2310,10 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                               <button
                                 onClick={() => handleSelectPrimaryCommander(card)}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/50 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
-                                title="Set this card as your Commander"
+                                title="Assign this card as Commander"
                               >
                                 <Crown className="w-3.5 h-3.5" />
-                                <span>Set as Commander</span>
+                                <span>Assign as Commander</span>
                               </button>
                             );
                           }
@@ -2248,10 +2323,10 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                               <button
                                 onClick={() => handleSelectPartner(card)}
                                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
-                                title={`Designate ${card.name} as Partner Commander`}
+                                title={`Assign ${card.name} as Partner Commander`}
                               >
                                 <Crown className="w-3.5 h-3.5 text-amber-300" />
-                                <span>+ Choose as Partner</span>
+                                <span>Assign as Partner</span>
                               </button>
                             );
                           }
@@ -2276,9 +2351,11 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           const mainCopies = getDeckCopiesByCategory(card, 'main');
                           const sideCopies = getDeckCopiesByCategory(card, 'sideboard');
                           const maybeCopies = getDeckCopiesByCategory(card, 'maybeboard');
+                          const canAlsoAssignAsCommander = isCommanderDeck && canBePrimaryCommander(card);
 
                           return (
-                            <div className="flex items-center gap-1 w-full">
+                            <div className="flex flex-col gap-1.5 w-full">
+                              <div className="flex items-center gap-1 w-full">
                               <button
                                 type="button"
                                 onClick={() => onQuickAddToDeck(card, 'main')}
@@ -2338,12 +2415,25 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                                   type="button"
                                   onClick={() => handleSelectPartner(card)}
                                   className="flex-none px-2 py-1.5 rounded-lg text-xs font-bold transition-all bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white cursor-pointer shadow-sm active:scale-95"
-                                  title={`Designate ${card.name} as Partner Commander`}
+                                  title={`Assign ${card.name} as Partner Commander`}
                                 >
                                   +P
                                 </button>
                               )}
                             </div>
+
+                            {canAlsoAssignAsCommander && (
+                              <button
+                                type="button"
+                                onClick={() => handleSelectPrimaryCommander(card)}
+                                className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-fuchsia-500/15 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/30 text-[11px] font-bold transition-all cursor-pointer shadow-xs"
+                                title="Assign this card as Commander (replaces current commander)"
+                              >
+                                <Crown className="w-3 h-3 text-fuchsia-400" />
+                                <span>Assign as Commander</span>
+                              </button>
+                            )}
+                          </div>
                           );
                         })()
                       ) : (

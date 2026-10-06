@@ -579,6 +579,7 @@ export function isCardLegalInCommander(
     color_identity?: string[];
     colors?: string[];
     type_line?: string;
+    mana_cost?: string;
     legalities?: Record<string, string>;
   },
   commanderColorIdentity: string[],
@@ -593,9 +594,40 @@ export function isCardLegalInCommander(
     return { isLegal: false, reason: 'Card is banned in Commander format', isBanned: true };
   }
 
-  const cardIdentity = (card.color_identity && card.color_identity.length > 0)
+  let cardIdentity = (card.color_identity && card.color_identity.length > 0)
     ? card.color_identity
     : (card.colors || []);
+
+  if (cardIdentity.length === 0) {
+    if (card.mana_cost) {
+      const pips = card.mana_cost.match(/[WUBRG]/gi);
+      if (pips && pips.length > 0) {
+        cardIdentity = Array.from(new Set(pips.map((p) => p.toUpperCase())));
+      }
+    }
+    if (cardIdentity.length === 0 && (card as any).card_faces && Array.isArray((card as any).card_faces)) {
+      const facePips = ((card as any).card_faces as any[]).flatMap((f) => {
+        const costPips = (f.mana_cost || '').match(/[WUBRG]/gi) || [];
+        return [...(f.colors || []), ...(f.color_identity || []), ...costPips];
+      });
+      if (facePips.length > 0) {
+        cardIdentity = Array.from(new Set(facePips.map((p) => p.toUpperCase())));
+      }
+    }
+    if (cardIdentity.length === 0 && card.name) {
+      const basicMap: Record<string, string> = {
+        plains: 'W',
+        island: 'U',
+        swamp: 'B',
+        mountain: 'R',
+        forest: 'G',
+      };
+      const cleanName = card.name.split(' // ')[0].toLowerCase().trim();
+      if (basicMap[cleanName]) {
+        cardIdentity = [basicMap[cleanName]];
+      }
+    }
+  }
 
   const upperCommanderIdentity = commanderColorIdentity.map((c) => c.toUpperCase());
   const illegalColors = cardIdentity.filter((c) => !upperCommanderIdentity.includes(c.toUpperCase()));
@@ -630,7 +662,9 @@ export function canBePrimaryCommander(card: {
   name?: string;
   type_line?: string;
   oracle_text?: string;
+  card_faces?: any[];
 }): boolean {
+  if (!card) return false;
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
   const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
 
@@ -640,6 +674,14 @@ export function canBePrimaryCommander(card: {
 
   if (typeLine.includes('legendary') && (typeLine.includes('creature') || typeLine.includes('summon'))) {
     return true;
+  }
+
+  if (card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 0) {
+    const front = card.card_faces[0];
+    const frontType = (front.type_line || front.typeLine || '').toLowerCase();
+    const frontOracle = (front.oracle_text || front.oracleText || '').toLowerCase();
+    if (frontOracle.includes('can be your commander')) return true;
+    if (frontType.includes('legendary') && (frontType.includes('creature') || frontType.includes('summon'))) return true;
   }
 
   return false;

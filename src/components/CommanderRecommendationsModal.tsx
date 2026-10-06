@@ -12,7 +12,7 @@ import {
 import { Deck, DeckCategory, ScryfallCard } from '../types/mtg';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-import { getDeckCommander } from '../utils/deckUtils';
+import { getDeckCommander, isCardLegalInCommander, sortWUBRG } from '../utils/deckUtils';
 import { searchCards, getCardImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 
@@ -107,7 +107,11 @@ export const CommanderRecommendationsModal: React.FC<CommanderRecommendationsMod
   const [isLoadingApi, setIsLoadingApi] = useState(false);
 
   const cmdr = useMemo(() => getDeckCommander(deck), [deck]);
-  const cmdrColors = cmdr?.colorIdentity || ['W', 'U', 'B', 'R', 'G'];
+  const cmdrColors = useMemo(() => {
+    if (cmdr?.colorIdentity && cmdr.colorIdentity.length > 0) return cmdr.colorIdentity;
+    if (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0) return sortWUBRG(deck.commanderColorIdentity);
+    return cmdr?.hasCommander ? [] : ['W', 'U', 'B', 'R', 'G'];
+  }, [cmdr, deck.commanderColorIdentity]);
 
   const deckCardNames = useMemo(() => {
     return new Set(deck.cards.map((c) => c.name.toLowerCase().split(' // ')[0].trim()));
@@ -202,6 +206,11 @@ export const CommanderRecommendationsModal: React.FC<CommanderRecommendationsMod
   const allRecommendations = Array.from(combinedMap.values());
 
   const filteredRecommendations = allRecommendations.filter((card) => {
+    if (cmdrColors.length > 0) {
+      if (!isCardLegalInCommander(card, cmdrColors, { allowBanned: true }).isLegal) {
+        return false;
+      }
+    }
     if (selectedTag !== 'all' && card.categoryTag !== selectedTag) return false;
     if (searchFilter.trim()) {
       const q = searchFilter.toLowerCase().trim();

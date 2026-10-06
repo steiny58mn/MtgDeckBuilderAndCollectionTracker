@@ -4,7 +4,6 @@ import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
-  ArrowLeft,
   GitCompare,
   Save,
   RotateCcw,
@@ -58,7 +57,9 @@ import {
   getCardColorGroup,
   detectGamechangers,
   isCardGamechanger,
-  sortWUBRG
+  sortWUBRG,
+  getDeckCommander,
+  isCardLegalInCommander
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -248,6 +249,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       Forest: { typeLine: 'Basic Land — Forest', colors: ['G'] },
     };
 
+    const effectiveRecommended = { ...recommended };
+    if (activeDeck.format === 'commander' && deckColorIdentity.length > 0) {
+      const basicColors: Record<string, string> = {
+        Plains: 'W',
+        Island: 'U',
+        Swamp: 'B',
+        Mountain: 'R',
+        Forest: 'G',
+      };
+      // Filter out basic lands outside the commander's color identity
+      for (const name of Object.keys(effectiveRecommended)) {
+        const color = basicColors[name];
+        if (color && !deckColorIdentity.includes(color)) {
+          delete effectiveRecommended[name];
+        }
+      }
+    }
+
     let updatedCards = [...activeDeck.cards];
     const basicNames = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
     const existingFound = new Set<string>();
@@ -257,7 +276,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const cleanName = c.name.split(' // ')[0].trim();
       if (basicNames.includes(cleanName)) {
         existingFound.add(cleanName);
-        const newQty = recommended[cleanName] !== undefined ? recommended[cleanName] : c.quantity;
+        const newQty = effectiveRecommended[cleanName] !== undefined ? effectiveRecommended[cleanName] : c.quantity;
         return { ...c, quantity: newQty };
       }
       return c;
@@ -270,7 +289,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     });
 
     basicNames.forEach((name) => {
-      const targetQty = recommended[name] || 0;
+      const targetQty = effectiveRecommended[name] || 0;
       if (targetQty > 0 && !existingFound.has(name)) {
         updatedCards.push({
           id: `basic-${name.toLowerCase()}-${Date.now()}`,
@@ -293,6 +312,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   const handleAddRecommendation = (cardName: string, category: DeckCategory) => {
+    if (activeDeck.format === 'commander' && category !== 'commander') {
+      const cmdrColors = deckColorIdentity;
+      if (cmdrColors.length > 0) {
+        const legality = isCardLegalInCommander({ name: cardName }, cmdrColors, { allowBanned: true });
+        if (!legality.isLegal) {
+          setPriceRefreshMessage(`"${cardName}" is outside Commander color identity (${cmdrColors.join('') || 'C'}).`);
+          setTimeout(() => setPriceRefreshMessage(null), 3500);
+          return;
+        }
+      }
+    }
     const existing = activeDeck.cards.find(
       (c) => c.name.toLowerCase().trim() === cardName.toLowerCase().trim() && c.category === category
     );
@@ -927,10 +957,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     : commanderCards[0]?.name || deck.commanderName;
 
   const deckColorIdentity = useMemo(() => {
-    if (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0) {
-      return sortWUBRG(deck.commanderColorIdentity);
-    }
-    const cmdrCards = deck.cards.filter((c) => c.category === 'commander');
+    const cmdrCards = activeDeck.cards.filter((c) => c.category === 'commander');
     if (cmdrCards.length > 0) {
       const pips: string[] = [];
       cmdrCards.forEach((c) => {
@@ -939,13 +966,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       });
       if (pips.length > 0) return sortWUBRG(Array.from(new Set(pips)));
     }
-    const allPips: string[] = [];
-    deck.cards.forEach((c) => {
-      const cols = (c.color_identity || c.colors || []) as unknown[];
-      cols.forEach((col) => { if (typeof col === 'string') allPips.push(col); });
-    });
-    return sortWUBRG(Array.from(new Set(allPips)));
-  }, [deck]);
+    if (activeDeck.commanderColorIdentity && activeDeck.commanderColorIdentity.length > 0) {
+      return sortWUBRG(activeDeck.commanderColorIdentity);
+    }
+    return [];
+  }, [activeDeck.cards, activeDeck.commanderColorIdentity]);
 
   const handleUpdateDeckNameToCommander = () => {
     if (!commanderName) return;
@@ -1135,6 +1160,111 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     DeckService.setDeckHasUnsavedChanges(deck.id, true);
   };
 
+  const handleAssignAsCommander = (cardId: string) => {
+    const existingCards = [...deck.cards];
+    const idx = existingCards.findIndex((c) => c.id === cardId);
+    if (idx === -1) return;
+    const targetCard = existingCards[idx];
+
+    if (!canBePrimaryCommander(targetCard)) {
+      setPriceRefreshMessage('Card must be a Legendary Creature or state "can be your commander".');
+      setTimeout(() => setPriceRefreshMessage(null), 3500);
+      return;
+    }
+
+    // Demote any existing commanders to 'main'
+    for (let i = 0; i < existingCards.length; i++) {
+      if (existingCards[i].category === 'commander' && existingCards[i].id !== cardId) {
+        existingCards[i] = { ...existingCards[i], category: 'main' };
+      }
+    }
+
+    // Promote target card to commander (quantity capped at 1)
+    existingCards[idx] = {
+      ...targetCard,
+      category: 'commander',
+      quantity: 1,
+    };
+
+    const cmdrIdentity = sortWUBRG(
+      targetCard.color_identity && targetCard.color_identity.length > 0
+        ? targetCard.color_identity
+        : (targetCard.colors || [])
+    );
+
+    const updatedDeck: Deck = {
+      ...deck,
+      cards: existingCards,
+      commanderName: targetCard.name,
+      commanderArtUrl: targetCard.imageUrl || deck.commanderArtUrl,
+      commanderId: targetCard.scryfallId,
+      commanderColorIdentity: cmdrIdentity,
+      coverCardUrl: targetCard.imageUrl || deck.coverCardUrl,
+      updatedAt: Date.now(),
+    };
+
+    onUpdateDeck(updatedDeck);
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
+    setPriceRefreshMessage(`Assigned "${targetCard.name}" as Commander.`);
+    setTimeout(() => setPriceRefreshMessage(null), 3000);
+  };
+
+  const handleAssignAsPartner = (cardId: string) => {
+    const existingCards = [...deck.cards];
+    const idx = existingCards.findIndex((c) => c.id === cardId);
+    if (idx === -1) return;
+    const targetCard = existingCards[idx];
+    const currentCmdrs = existingCards.filter((c) => c.category === 'commander' && c.id !== cardId);
+
+    if (currentCmdrs.length === 0) {
+      handleAssignAsCommander(cardId);
+      return;
+    }
+
+    const partnerCheck = canCardsPartnerTogether(currentCmdrs[0], targetCard);
+    if (!partnerCheck.canPartner) {
+      setPriceRefreshMessage(partnerCheck.reason || 'These cards cannot partner together.');
+      setTimeout(() => setPriceRefreshMessage(null), 3500);
+      return;
+    }
+
+    existingCards[idx] = {
+      ...targetCard,
+      category: 'commander',
+      quantity: 1,
+    };
+
+    const updatedCmdrs = [currentCmdrs[0], existingCards[idx]];
+    const combinedIdentity = sortWUBRG(
+      Array.from(
+        new Set(
+          updatedCmdrs.flatMap((c) => {
+            if (c.color_identity && c.color_identity.length > 0) return c.color_identity;
+            if (c.colors && c.colors.length > 0) return c.colors;
+            return [];
+          })
+        )
+      )
+    );
+
+    const updatedDeck: Deck = {
+      ...deck,
+      cards: existingCards,
+      commanderName: updatedCmdrs.map((c) => c.name).join(' // '),
+      commanderArtUrl: currentCmdrs[0]?.imageUrl || targetCard.imageUrl || deck.commanderArtUrl,
+      commanderId: currentCmdrs[0]?.scryfallId || targetCard.scryfallId,
+      commanderColorIdentity: combinedIdentity,
+      updatedAt: Date.now(),
+    };
+
+    onUpdateDeck(updatedDeck);
+    setHasUnsavedChanges(true);
+    DeckService.setDeckHasUnsavedChanges(deck.id, true);
+    setPriceRefreshMessage(`Assigned "${targetCard.name}" as Partner Commander.`);
+    setTimeout(() => setPriceRefreshMessage(null), 3000);
+  };
+
   const handleLivePriceRefresh = async () => {
     setIsRefreshingPrices(true);
     setPriceRefreshMessage(null);
@@ -1206,8 +1336,30 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   };
 
   const handleAppendCardsToDeck = async (cardsToAdd: DeckCard[]) => {
+    let validCardsToAdd = cardsToAdd;
+    if (deck.format === 'commander') {
+      const cmdrInfo = getDeckCommander(deck);
+      const cmdrColors = cmdrInfo.colorIdentity.length > 0
+        ? cmdrInfo.colorIdentity
+        : (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0 ? sortWUBRG(deck.commanderColorIdentity) : []);
+      if (cmdrColors.length > 0) {
+        const filtered = cardsToAdd.filter((card) => {
+          if (card.category === 'commander') return true;
+          return isCardLegalInCommander(card, cmdrColors, { allowBanned: true }).isLegal;
+        });
+        const skippedCount = cardsToAdd.length - filtered.length;
+        if (skippedCount > 0) {
+          setPriceRefreshMessage(`Filtered out ${skippedCount} card(s) outside commander color identity (${cmdrColors.join('') || 'C'})`);
+          setTimeout(() => setPriceRefreshMessage(null), 4000);
+        }
+        validCardsToAdd = filtered;
+      }
+    }
+
+    if (validCardsToAdd.length === 0) return;
+
     // Determine gamechanger status immediately from API property on card objects
-    const preparedCards = cardsToAdd.map((card) => {
+    const preparedCards = validCardsToAdd.map((card) => {
       const isGc = isCardGamechanger(card);
       return {
         ...card,
@@ -1246,6 +1398,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (selectedHistoryId !== 'current') {
       setSelectedHistoryId('current');
       setHistoricalDeck(null);
+    }
+
+    if (deck.format === 'commander' && cardData && cardData.category !== 'commander') {
+      const cmdrInfo = getDeckCommander(deck);
+      const cmdrColors = cmdrInfo.colorIdentity.length > 0
+        ? cmdrInfo.colorIdentity
+        : (deck.commanderColorIdentity && deck.commanderColorIdentity.length > 0 ? sortWUBRG(deck.commanderColorIdentity) : []);
+      if (cmdrColors.length > 0) {
+        const legality = isCardLegalInCommander(cardData, cmdrColors, { allowBanned: true });
+        if (!legality.isLegal) {
+          setPriceRefreshMessage(`"${cardName}" is outside Commander color identity (${cmdrColors.join('') || 'C'}).`);
+          setTimeout(() => setPriceRefreshMessage(null), 3500);
+          return;
+        }
+      }
     }
 
     const existing = deck.cards.find(
@@ -3643,6 +3810,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Right: Other Action Buttons (Category Selectors + Trash) */}
           <div className="flex items-center gap-1 shrink-0 pointer-events-auto">
+            {/* Assign as Commander in Pile View */}
+            {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAssignAsCommander(card.id);
+                }}
+                className="px-1.5 py-0.5 rounded bg-fuchsia-500/30 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/50 text-[9px] font-bold transition-colors cursor-pointer flex items-center gap-0.5 shadow-sm shrink-0"
+                title="Assign as Commander"
+              >
+                <Crown className="w-2.5 h-2.5 text-fuchsia-400" />
+                <span>Assign</span>
+              </button>
+            )}
+
             {/* Category Selector (or Commander Badge) */}
             {isThisCommander ? (
               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/30 shrink-0">
@@ -3969,15 +4152,29 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </span>
                 )}
 
-                {/* Set as Commander / Partner Button */}
-                {canAddAsCommander && (
+                {/* Assign as Commander Button */}
+                {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
                   <button
-                    onClick={() => handleChangeCardCategory(card.id, 'commander')}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 text-[10px] font-bold transition-colors shadow-sm cursor-pointer"
-                    title={commanderCards.length === 1 ? 'Set as Partner Commander' : 'Set as Commander'}
+                    type="button"
+                    onClick={() => handleAssignAsCommander(card.id)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                    title="Assign this card as Commander"
                   >
                     <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
-                    <span>{commanderCards.length === 1 ? '+ Partner' : 'Set Commander'}</span>
+                    <span>Assign as Commander</span>
+                  </button>
+                )}
+
+                {/* Assign as Partner Button */}
+                {!isThisCommander && deck.format === 'commander' && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
+                  <button
+                    type="button"
+                    onClick={() => handleAssignAsPartner(card.id)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white border border-fuchsia-400/40 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                    title={`Assign ${card.name} as Partner Commander`}
+                  >
+                    <Crown className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Assign as Partner</span>
                   </button>
                 )}
               </div>
@@ -4197,6 +4394,32 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </button>
               )}
             </div>
+          )}
+
+          {/* Dedicated Assign as Commander button in Grid View */}
+          {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
+            <button
+              type="button"
+              onClick={() => handleAssignAsCommander(card.id)}
+              className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-bold transition-all shadow-sm cursor-pointer mt-1"
+              title="Assign this card as Commander"
+            >
+              <Crown className="w-3 h-3 text-fuchsia-400" />
+              <span>Assign as Commander</span>
+            </button>
+          )}
+
+          {/* Dedicated Assign as Partner button in Grid View */}
+          {!isThisCommander && deck.format === 'commander' && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
+            <button
+              type="button"
+              onClick={() => handleAssignAsPartner(card.id)}
+              className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white border border-fuchsia-400/40 text-[10px] font-bold transition-all shadow-sm cursor-pointer mt-1"
+              title={`Assign ${card.name} as Partner Commander`}
+            >
+              <Crown className="w-3 h-3 text-amber-300" />
+              <span>Assign as Partner</span>
+            </button>
           )}
         </div>
       </div>

@@ -545,13 +545,19 @@ export default function App() {
     // Check Commander rules
     if (latestActiveDeck.format === 'commander') {
       const commanderInfo = getDeckCommander(latestActiveDeck);
+      const cmdrColors = commanderInfo.colorIdentity.length > 0
+        ? commanderInfo.colorIdentity
+        : (latestActiveDeck.commanderColorIdentity && latestActiveDeck.commanderColorIdentity.length > 0
+          ? sortWUBRG(latestActiveDeck.commanderColorIdentity)
+          : []);
+      const hasCmdr = Boolean(commanderInfo.hasCommander || cmdrColors.length > 0 || latestActiveDeck.commanderName);
 
       // If adding as regular card (not designating commander), check color identity against existing commander
-      if (category !== 'commander' && commanderInfo.hasCommander) {
-        const legality = isCardLegalInCommander(card, commanderInfo.colorIdentity, { allowBanned: true });
+      if (category !== 'commander' && hasCmdr && cmdrColors.length > 0) {
+        const legality = isCardLegalInCommander(card, cmdrColors, { allowBanned: true });
         if (!legality.isLegal) {
           showToast(
-            `Illegal Card: "${card.name}" color identity does not fit Commander ${commanderInfo.commanderName || 'commander'} (${commanderInfo.colorIdentity.join('') || 'C'})`,
+            `Illegal Card: "${card.name}" color identity does not fit Commander ${commanderInfo.commanderName || latestActiveDeck.commanderName || 'commander'} (${cmdrColors.join('') || 'C'})`,
             'info'
           );
           return;
@@ -666,8 +672,27 @@ export default function App() {
 
     const latestActiveDeck = DeckService.getLocalDecks().find(d => d.id === activeDeck.id) || activeDeck;
 
-    // Commander singleton check
+    // Commander singleton and color identity check
     if (latestActiveDeck.format === 'commander') {
+      const commanderInfo = getDeckCommander(latestActiveDeck);
+      const cmdrColors = commanderInfo.colorIdentity.length > 0
+        ? commanderInfo.colorIdentity
+        : (latestActiveDeck.commanderColorIdentity && latestActiveDeck.commanderColorIdentity.length > 0
+          ? sortWUBRG(latestActiveDeck.commanderColorIdentity)
+          : []);
+      const hasCmdr = Boolean(commanderInfo.hasCommander || cmdrColors.length > 0 || latestActiveDeck.commanderName);
+
+      if (hasCmdr && cmdrColors.length > 0) {
+        const legality = isCardLegalInCommander(item, cmdrColors, { allowBanned: true });
+        if (!legality.isLegal) {
+          showToast(
+            `Illegal Card: "${item.name}" color identity does not fit Commander ${commanderInfo.commanderName || latestActiveDeck.commanderName || 'commander'} (${cmdrColors.join('') || 'C'})`,
+            'info'
+          );
+          return;
+        }
+      }
+
       const isUnlimited = canHaveAnyNumberOfCopies(item);
       if (!isUnlimited) {
         const cleanName = item.name.split(' // ')[0].trim().toLowerCase();
@@ -967,16 +992,6 @@ export default function App() {
                 setActiveTab('search');
               }}
               onSelectCard={(c) => setInspectedCard(c)}
-              onBackToDashboard={async () => {
-                if (activeBinder && AuthService.isLoggedIn()) {
-                  await DeckService.saveBinder({ ...activeBinder, updatedAt: Date.now() });
-                }
-                if (window.history.length > 1 && (window.history.state?.binderId || new URLSearchParams(window.location.search).has('binder'))) {
-                  window.history.back();
-                } else {
-                  setActiveBinder(null);
-                }
-              }}
             />
           ) : (
             <BinderList 

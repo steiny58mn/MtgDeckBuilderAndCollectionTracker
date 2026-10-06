@@ -126,16 +126,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
   const commanderInfo = activeDeck?.format === 'commander' ? getDeckCommander(activeDeck) : null;
   const isCommanderFormat = activeDeck?.format === 'commander';
-  const hasCommander = Boolean(commanderInfo?.hasCommander);
+  const cmdrColors = commanderInfo?.colorIdentity?.length
+    ? commanderInfo.colorIdentity
+    : (activeDeck?.commanderColorIdentity || []);
+  const hasCommander = Boolean(commanderInfo?.hasCommander || cmdrColors.length > 0 || activeDeck?.commanderName);
 
   // Check legality if activeDeck is commander format and card is NOT being assigned to commander slot
   const commanderLegality = (isCommanderFormat && hasCommander && deckCategory !== 'commander' && displayCard)
-    ? isCardLegalInCommander(displayCard, commanderInfo!.colorIdentity)
+    ? isCardLegalInCommander(displayCard, cmdrColors)
     : { isLegal: true };
 
   const handleDeckAdd = (targetCategory: DeckCategory) => {
     if (isCommanderFormat && hasCommander && targetCategory !== 'commander' && displayCard) {
-      const legality = isCardLegalInCommander(displayCard, commanderInfo!.colorIdentity);
+      const legality = isCardLegalInCommander(displayCard, cmdrColors);
       if (!legality.isLegal) return;
     }
     if (onAddCardToDeck && displayCard) {
@@ -421,11 +424,11 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeckAdd('commander')}
-                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/40 cursor-pointer shadow-sm active:scale-95"
-                            title="Add as Commander / Partner"
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 cursor-pointer shadow-sm active:scale-95"
+                            title="Assign as Commander / Partner"
                           >
-                            <Crown className="w-3.5 h-3.5" />
-                            <span>Cmdr</span>
+                            <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
+                            <span>Assign as Commander</span>
                           </button>
                         )}
                       </div>

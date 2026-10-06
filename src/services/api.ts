@@ -313,6 +313,16 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     if (idMatch) queryObj.color_identity = idMatch[1];
     const oMatch = trimmed.match(/\b(?:o|oracle):"([^"]+)"/i) || trimmed.match(/\b(?:o|oracle):([^\s]+)/i);
     if (oMatch) queryObj.oracle = oMatch[1];
+    const rarityMatch = trimmed.match(/\brarity:([a-z0-9_-]+)/i);
+    if (rarityMatch) queryObj.rarity = rarityMatch[1];
+    if (/\bis:commander\b/i.test(trimmed)) {
+      if (!queryObj.type) queryObj.type = 'legendary creature';
+    }
+    const cmcMatch = trimmed.match(/\bcmc([<>=]+)(\d+)/i);
+    if (cmcMatch) {
+      queryObj.cmc = cmcMatch[2];
+      queryObj.cmc_operator = cmcMatch[1];
+    }
     if (order && order !== 'name') queryObj.order = order;
     if (dir && dir !== 'auto') queryObj.dir = dir;
 
@@ -371,7 +381,58 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     }
   }
 
-  // 4. Return matching cached cards if API returned nothing or timed out
+  // 4. Scryfall Direct Search fallback for complex syntax or empty backend search results
+  try {
+    const scryfallOrder = ((order as any) === 'synergy' || (order as any) === 'commander_decks' || (order as any) === 'category') ? 'edhrec' : (order || 'name');
+    const scryfallDir = dir && dir !== 'auto' ? dir : 'auto';
+    const scryfallUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(trimmed)}&page=${page}&order=${scryfallOrder}&dir=${scryfallDir}${unique === 'prints' ? '&unique=prints' : ''}`;
+
+    const scryfallRes = await fetch(scryfallUrl, {
+      signal,
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (scryfallRes.ok) {
+      const sJson = await scryfallRes.json();
+      if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
+        let normalized = sJson.data.map(normalizeFrostpointCard);
+        if (unique !== 'prints') {
+          const seenNames = new Set<string>();
+          normalized = normalized.filter((card: ScryfallCard) => {
+            const clean = (card.name || '').toLowerCase().trim();
+            if (!clean || seenNames.has(clean)) return false;
+            seenNames.add(clean);
+            return true;
+          });
+        }
+        for (const card of normalized) {
+          if (card.name) {
+            localCardCache.set(card.name.toLowerCase().trim(), card);
+            if (card.id) cardByIdCache.set(card.id, card);
+          }
+        }
+        persistLocalCards();
+
+        const result: SearchResult = {
+          data: normalized,
+          total_cards: sJson.total_cards || normalized.length,
+          has_more: Boolean(sJson.has_more),
+          next_page: sJson.next_page,
+        };
+        fallbackCache.set(cacheKey, result);
+        await putToBrowserCache(cacheKey, result);
+        return result;
+      }
+    }
+  } catch (sErr: any) {
+    if (signal?.aborted || sErr?.name === 'AbortError') {
+      // Abort is normal
+    } else {
+      console.warn('[CardService] Scryfall fallback search error:', sErr);
+    }
+  }
+
+  // 5. Return matching cached cards if API returned nothing or timed out
   if (matchingCached.length > 0) {
     const result: SearchResult = {
       data: matchingCached.slice(0, 50),

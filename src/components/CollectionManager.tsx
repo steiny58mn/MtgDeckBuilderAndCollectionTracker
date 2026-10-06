@@ -20,7 +20,6 @@ import {
   Check,
   FolderPlus,
   X,
-  ArrowLeft,
   Swords,
   Zap,
   Shield,
@@ -106,7 +105,6 @@ interface CollectionManagerProps {
   onAddCardToDeck: (card: CollectionCard) => void;
   onOpenSearch: () => void;
   onSelectCard: (card: ScryfallCard) => void;
-  onBackToDashboard?: () => void;
 }
 
 export const CollectionManager: React.FC<CollectionManagerProps> = ({
@@ -122,7 +120,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   onAddCardToDeck,
   onOpenSearch,
   onSelectCard,
-  onBackToDashboard,
 }) => {
   const [selectedBinderFilter, setSelectedBinderFilter] = useState<string>(
     activeBinder ? activeBinder.id : 'all'
@@ -187,20 +184,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       setSelectedBinderFilter('all');
     }
   }, [activeBinder]);
-
-  // Return to all binders and save current binder
-  const handleBackToAllBinders = async () => {
-    if (selectedBinderFilter !== 'all') {
-      const current = binders.find((b) => b.id === selectedBinderFilter);
-      if (current) {
-        await DeckService.saveBinder({ ...current, updatedAt: Date.now() });
-      }
-    }
-    setSelectedBinderFilter('all');
-    if (onSelectBinder) {
-      onSelectBinder(null as any);
-    }
-  };
 
   // Progressive display pagination for high performance
   const INITIAL_PAGE_SIZE = 80;
@@ -698,27 +681,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            {onBackToDashboard ? (
-              <button
-                type="button"
-                onClick={onBackToDashboard}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors shrink-0 cursor-pointer border border-slate-700/80"
-                title="Return to Binders"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Binders</span>
-              </button>
-            ) : selectedBinderFilter !== 'all' && (
-              <button
-                type="button"
-                onClick={handleBackToAllBinders}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors shrink-0 cursor-pointer border border-slate-700/80"
-                title="Return to all binders list and save"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Binders</span>
-              </button>
-            )}
             <Bookmark className="w-4 h-4 text-emerald-400" />
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
               {selectedBinderFilter !== 'all' 
