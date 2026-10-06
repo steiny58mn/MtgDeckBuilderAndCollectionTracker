@@ -672,7 +672,11 @@ export function canBePrimaryCommander(card: {
     return true;
   }
 
-  if (typeLine.includes('legendary') && (typeLine.includes('creature') || typeLine.includes('summon'))) {
+  const isLegendary = typeLine.includes('legendary') ||
+    (Array.isArray((card as any).supertypes) && (card as any).supertypes.some((s: string) => String(s).toLowerCase() === 'legendary'));
+  const isCreature = typeLine.includes('creature') || typeLine.includes('summon');
+
+  if (isLegendary && isCreature) {
     return true;
   }
 

@@ -206,11 +206,58 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     return cachedData;
   }
 
-  // 1. Check localCardCache for fast in-memory matching
-  const matchingCached: ScryfallCard[] = [];
+  // 1. Primary Card Search via Scryfall API (complete, official 30,000+ card database with all 3,500+ legal commanders)
+  try {
+    const scryfallOrder = ((order as any) === 'synergy' || (order as any) === 'commander_decks' || (order as any) === 'category') ? 'edhrec' : (order || 'name');
+    const scryfallDir = dir && dir !== 'auto' ? dir : 'auto';
+    const scryfallUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(trimmed)}&page=${page}&order=${scryfallOrder}&dir=${scryfallDir}${unique === 'prints' ? '&unique=prints' : ''}`;
+
+    const scryfallRes = await fetch(scryfallUrl, {
+      signal,
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (scryfallRes.ok) {
+      const sJson = await scryfallRes.json();
+      if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
+        let normalized = sJson.data.map(normalizeFrostpointCard);
+        if (unique !== 'prints') {
+          const seenNames = new Set<string>();
+          normalized = normalized.filter((card: ScryfallCard) => {
+            const clean = (card.name || '').toLowerCase().trim();
+            if (!clean || seenNames.has(clean)) return false;
+            seenNames.add(clean);
+            return true;
+          });
+        }
+        for (const card of normalized) {
+          if (card.name) {
+            localCardCache.set(card.name.toLowerCase().trim(), card);
+            if (card.id) cardByIdCache.set(card.id, card);
+          }
+        }
+        persistLocalCards();
+
+        const result: SearchResult = {
+          data: normalized,
+          total_cards: sJson.total_cards || normalized.length,
+          has_more: Boolean(sJson.has_more),
+          next_page: sJson.next_page,
+        };
+        fallbackCache.set(cacheKey, result);
+        await putToBrowserCache(cacheKey, result);
+        return result;
+      }
+    }
+  } catch (sErr: any) {
+    if (signal?.aborted || sErr?.name === 'AbortError') {
+      return { data: [], total_cards: 0, has_more: false };
+    }
+    console.warn('[CardService] Scryfall primary search error, falling back to backend:', sErr);
+  }
+
+  // 2. Secondary fallback: Query /deckbuilder/cards/search on remote backend
   const lowerQuery = trimmed.toLowerCase();
-  
-  // Extract clean text search if query has syntax tokens
   const cleanSearchTerm = lowerQuery
     .replace(/\bnot:digital\b/gi, '')
     .replace(/\b\(?f:[a-z0-9_-]+(\s+or\s+banned:[a-z0-9_-]+)?\)?/gi, '')
@@ -226,69 +273,9 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Search local cache
-  if (cleanSearchTerm) {
-    for (const card of localCardCache.values()) {
-      if (card && card.name && card.name.toLowerCase().includes(cleanSearchTerm)) {
-        if (!matchingCached.some((c) => c.id === card.id || c.name.toLowerCase() === card.name.toLowerCase())) {
-          matchingCached.push(card);
-        }
-      }
-    }
-  }
 
-  // 2. Fast Autocomplete + Direct Lookup Path for card names (~1.5s total)
-  if (cleanSearchTerm && cleanSearchTerm.length >= 2) {
-    try {
-      const autoNames = await getAutocomplete(cleanSearchTerm);
-      if (autoNames.length > 0) {
-        const topNames = autoNames.slice(0, 15);
-        const cardPromises = topNames.map(async (name) => {
-          const exact = name.toLowerCase().trim();
-          const front = exact.split(' // ')[0].trim();
-          const cached = localCardCache.get(exact) || localCardCache.get(front);
-          if (cached) return cached;
-          try {
-            const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(name)}`);
-            if (res.ok) {
-              const json = await res.json();
-              if (json.data) {
-                const card = normalizeFrostpointCard(json.data);
-                localCardCache.set(exact, card);
-                localCardCache.set(front, card);
-                if (card.id) cardByIdCache.set(card.id, card);
-                return card;
-              }
-            }
-          } catch {}
-          return null;
-        });
 
-        const resolved = await Promise.all(cardPromises);
-        const fetchedCards: ScryfallCard[] = [];
-        for (const card of resolved) {
-          if (card && !fetchedCards.some((c) => c.id === card.id || c.name.toLowerCase() === card.name.toLowerCase())) {
-            fetchedCards.push(card);
-          }
-        }
-        if (fetchedCards.length > 0) {
-          persistLocalCards();
-          const result: SearchResult = {
-            data: fetchedCards,
-            total_cards: autoNames.length,
-            has_more: autoNames.length > fetchedCards.length,
-          };
-          fallbackCache.set(cacheKey, result);
-          await putToBrowserCache(cacheKey, result);
-          return result;
-        }
-      }
-    } catch (err) {
-      console.warn('[CardService] Fast autocomplete lookup error:', err);
-    }
-  }
-
-  // 3. Query /deckbuilder/cards/search with 12-second timeout and clean structured parameters
+  // 4. Secondary fallback: Query /deckbuilder/cards/search on backend
   try {
     const limit = 50;
     const offset = (page - 1) * limit;
@@ -327,7 +314,7 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     if (dir && dir !== 'auto') queryObj.dir = dir;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timeout);
@@ -375,64 +362,24 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     }
   } catch (err: any) {
     if (signal?.aborted || err?.name === 'AbortError') {
-      // Abort is normal during user typing or navigation
-    } else {
-      console.warn('[CardService] API search timeout or error:', err);
-    }
-  }
-
-  // 4. Scryfall Direct Search fallback for complex syntax or empty backend search results
-  try {
-    const scryfallOrder = ((order as any) === 'synergy' || (order as any) === 'commander_decks' || (order as any) === 'category') ? 'edhrec' : (order || 'name');
-    const scryfallDir = dir && dir !== 'auto' ? dir : 'auto';
-    const scryfallUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(trimmed)}&page=${page}&order=${scryfallOrder}&dir=${scryfallDir}${unique === 'prints' ? '&unique=prints' : ''}`;
-
-    const scryfallRes = await fetch(scryfallUrl, {
-      signal,
-      headers: { 'Accept': 'application/json' },
-    });
-
-    if (scryfallRes.ok) {
-      const sJson = await scryfallRes.json();
-      if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
-        let normalized = sJson.data.map(normalizeFrostpointCard);
-        if (unique !== 'prints') {
-          const seenNames = new Set<string>();
-          normalized = normalized.filter((card: ScryfallCard) => {
-            const clean = (card.name || '').toLowerCase().trim();
-            if (!clean || seenNames.has(clean)) return false;
-            seenNames.add(clean);
-            return true;
-          });
-        }
-        for (const card of normalized) {
-          if (card.name) {
-            localCardCache.set(card.name.toLowerCase().trim(), card);
-            if (card.id) cardByIdCache.set(card.id, card);
-          }
-        }
-        persistLocalCards();
-
-        const result: SearchResult = {
-          data: normalized,
-          total_cards: sJson.total_cards || normalized.length,
-          has_more: Boolean(sJson.has_more),
-          next_page: sJson.next_page,
-        };
-        fallbackCache.set(cacheKey, result);
-        await putToBrowserCache(cacheKey, result);
-        return result;
-      }
-    }
-  } catch (sErr: any) {
-    if (signal?.aborted || sErr?.name === 'AbortError') {
       // Abort is normal
     } else {
-      console.warn('[CardService] Scryfall fallback search error:', sErr);
+      console.warn('[CardService] Backend search error:', err);
     }
   }
 
-  // 5. Return matching cached cards if API returned nothing or timed out
+  // 3. Fallback to localCardCache if both Scryfall and Backend returned nothing
+  const matchingCached: ScryfallCard[] = [];
+  if (cleanSearchTerm) {
+    for (const card of localCardCache.values()) {
+      if (card && card.name && card.name.toLowerCase().includes(cleanSearchTerm)) {
+        if (!matchingCached.some((c) => c.id === card.id || c.name.toLowerCase() === card.name.toLowerCase())) {
+          matchingCached.push(card);
+        }
+      }
+    }
+  }
+
   if (matchingCached.length > 0) {
     const result: SearchResult = {
       data: matchingCached.slice(0, 50),
