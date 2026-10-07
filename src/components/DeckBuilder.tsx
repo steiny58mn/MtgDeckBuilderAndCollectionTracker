@@ -30,6 +30,8 @@ import {
   Swords,
   Search,
   Zap,
+  Flame,
+  ShieldAlert,
   Ban,
   Shield,
   Mountain,
@@ -1550,19 +1552,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const groups: Record<string, DeckCard[]> = {
       'Creatures': [],
       'Planeswalkers': [],
-      'Instants & Sorceries': [],
-      'Artifacts & Enchantments': [],
-      'Other': [],
+      'Instants': [],
+      'Sorceries': [],
+      'Artifacts': [],
+      'Enchantments': [],
+      'Battles': [],
       'Lands': [],
+      'Other': [],
     };
 
     cards.forEach((c) => {
       const t = c.type_line?.toLowerCase() || '';
-      if (t.includes('creature')) groups['Creatures'].push(c);
-      else if (t.includes('instant') || t.includes('sorcery')) groups['Instants & Sorceries'].push(c);
-      else if (t.includes('artifact') || t.includes('enchantment')) groups['Artifacts & Enchantments'].push(c);
+      if (t.includes('creature') || t.includes('summon')) groups['Creatures'].push(c);
       else if (t.includes('planeswalker')) groups['Planeswalkers'].push(c);
+      else if (t.includes('battle')) groups['Battles'].push(c);
+      else if (t.includes('instant')) groups['Instants'].push(c);
+      else if (t.includes('sorcery')) groups['Sorceries'].push(c);
       else if (t.includes('land')) groups['Lands'].push(c);
+      else if (t.includes('artifact')) groups['Artifacts'].push(c);
+      else if (t.includes('enchantment')) groups['Enchantments'].push(c);
       else groups['Other'].push(c);
     });
 
@@ -1587,22 +1595,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       totalPrice: groupedMain['Creatures'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
     },
     {
-      id: 'spells',
-      title: 'Instants & Sorceries',
-      icon: <Zap className="w-4 h-4 text-sky-400" />,
-      cards: groupedMain['Instants & Sorceries'],
-      totalQty: groupedMain['Instants & Sorceries'].reduce((s, c) => s + c.quantity, 0),
-      totalPrice: groupedMain['Instants & Sorceries'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
-    },
-    {
-      id: 'permanents',
-      title: 'Artifacts & Enchantments',
-      icon: <Shield className="w-4 h-4 text-violet-400" />,
-      cards: groupedMain['Artifacts & Enchantments'],
-      totalQty: groupedMain['Artifacts & Enchantments'].reduce((s, c) => s + c.quantity, 0),
-      totalPrice: groupedMain['Artifacts & Enchantments'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
-    },
-    {
       id: 'planeswalkers',
       title: 'Planeswalkers',
       icon: <Sparkles className="w-4 h-4 text-violet-400" />,
@@ -1611,6 +1603,48 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       totalPrice: groupedMain['Planeswalkers'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
     },
     {
+      id: 'instants',
+      title: 'Instants',
+      icon: <Zap className="w-4 h-4 text-sky-400" />,
+      cards: groupedMain['Instants'],
+      totalQty: groupedMain['Instants'].reduce((s, c) => s + c.quantity, 0),
+      totalPrice: groupedMain['Instants'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+    },
+    {
+      id: 'sorceries',
+      title: 'Sorceries',
+      icon: <Flame className="w-4 h-4 text-amber-400" />,
+      cards: groupedMain['Sorceries'],
+      totalQty: groupedMain['Sorceries'].reduce((s, c) => s + c.quantity, 0),
+      totalPrice: groupedMain['Sorceries'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+    },
+    {
+      id: 'artifacts',
+      title: 'Artifacts',
+      icon: <Shield className="w-4 h-4 text-teal-400" />,
+      cards: groupedMain['Artifacts'],
+      totalQty: groupedMain['Artifacts'].reduce((s, c) => s + c.quantity, 0),
+      totalPrice: groupedMain['Artifacts'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+    },
+    {
+      id: 'enchantments',
+      title: 'Enchantments',
+      icon: <Bookmark className="w-4 h-4 text-purple-400" />,
+      cards: groupedMain['Enchantments'],
+      totalQty: groupedMain['Enchantments'].reduce((s, c) => s + c.quantity, 0),
+      totalPrice: groupedMain['Enchantments'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+    },
+    ...(groupedMain['Battles'].length > 0
+      ? [{
+          id: 'battles',
+          title: 'Battles',
+          icon: <ShieldAlert className="w-4 h-4 text-rose-400" />,
+          cards: groupedMain['Battles'],
+          totalQty: groupedMain['Battles'].reduce((s, c) => s + c.quantity, 0),
+          totalPrice: groupedMain['Battles'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+        }]
+      : []),
+    {
       id: 'lands',
       title: 'Lands',
       icon: <Mountain className="w-4 h-4 text-fuchsia-600" />,
@@ -1618,6 +1652,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       totalQty: groupedMain['Lands'].reduce((s, c) => s + c.quantity, 0),
       totalPrice: groupedMain['Lands'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
     },
+
     ...(groupedMain['Other'].length > 0
       ? [{
           id: 'other',
@@ -3290,6 +3325,79 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       {/* 1-Second Delayed Image Hover Popup */}
       <ImageHoverPopup preview={hoverPreview} />
       <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
+
+      {/* Floating Action Dock: Live Card Count, Always-Available Save, and Go to Top */}
+      <div className="fixed bottom-6 right-4 sm:right-6 z-40 flex items-center gap-2 bg-slate-900/95 backdrop-blur-md p-1.5 sm:p-2 rounded-2xl border border-slate-700/80 shadow-2xl shadow-black/80 ring-1 ring-white/10 transition-all">
+        {/* Live Card Count Pill */}
+        <div
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs font-semibold text-slate-200 shadow-xs select-none"
+          title={`Total deck cards: ${stats.totalCards}${isCommanderDeck ? ' / 100' : ''} (Main: ${stats.mainboardCount}, Cmdr: ${commanderCards.length}, Side: ${stats.sideboardCount})`}
+        >
+          <Layers className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+          <span className="text-[11px] text-slate-400 font-medium hidden xs:inline">Cards:</span>
+          <span
+            className={`font-mono font-bold ${
+              isCommanderDeck
+                ? stats.totalCards === 100
+                  ? 'text-emerald-400'
+                  : stats.totalCards > 100
+                  ? 'text-rose-400'
+                  : 'text-fuchsia-300'
+                : 'text-violet-300'
+            }`}
+          >
+            {stats.totalCards}{isCommanderDeck ? '/100' : ''}
+          </span>
+        </div>
+
+        {/* Floating Save Button */}
+        {isHistoricalView ? (
+          <button
+            type="button"
+            onClick={handleRestoreHistoricalIteration}
+            disabled={isSaving}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            title="Restore this historical version as your active deck"
+          >
+            {isSaving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            ) : (
+              <RotateCcw className="w-3.5 h-3.5 text-white" />
+            )}
+            <span>Restore</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleSave()}
+            disabled={isSaving}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer disabled:opacity-50 shrink-0 shadow-md active:scale-95 ${
+              hasUnsavedChanges
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white ring-2 ring-violet-400/80 shadow-indigo-500/30 animate-pulse-subtle'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700'
+            }`}
+            title={hasUnsavedChanges ? 'Save changes to API (Ctrl+S)' : 'Deck saved (Ctrl+S)'}
+          >
+            {isSaving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            ) : (
+              <Save className={`w-3.5 h-3.5 ${hasUnsavedChanges ? 'text-amber-300' : 'text-slate-400'}`} />
+            )}
+            <span>{isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save *' : 'Save'}</span>
+          </button>
+        )}
+
+        {/* Go to Top Button */}
+        <button
+          type="button"
+          onClick={() => scrollToTop({ smooth: true })}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95"
+          title="Scroll back to top of deckbuilder"
+        >
+          <ChevronUp className="w-4 h-4 text-violet-400" />
+          <span className="hidden sm:inline">Top</span>
+        </button>
+      </div>
     </div>
   );
 

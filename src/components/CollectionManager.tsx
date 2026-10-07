@@ -41,6 +41,7 @@ import { scrollToTop } from '../utils/scrollUtils';
 import { getCardColorCategoryRank } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 export function getCardMarketPrice(card: CollectionCard): { price: number; isMedian: boolean } {
   if (card.currentPriceUsd && card.currentPriceUsd > 0) {
@@ -1840,6 +1841,9 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           }
         }}
       />
+
+      {/* Floating Go to Top Button */}
+      <ScrollToTopButton />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { Bookmark, Search, FolderPlus, Trash2, X, ExternalLink, Upload } from 'lucide-react';
 import { Binder } from '../types/mtg';
 import { BinderImportModal } from './BinderImportModal';
+import { ScrollToTopButton } from './ScrollToTopButton';
 import { scrollToTop } from '../utils/scrollUtils';
 
 interface BinderListProps {
@@ -239,6 +240,9 @@ export const BinderList: React.FC<BinderListProps> = ({
           onSelectBinder(importedBinder);
         }}
       />
+
+      {/* Floating Go to Top Button */}
+      <ScrollToTopButton />
     </div>
   );
 };

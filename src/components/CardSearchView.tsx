@@ -31,6 +31,7 @@ import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, Sea
 import { getCommanderData } from '../services/edhrec';
 import { ManaCostBadge } from './ManaCostBadge';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
+import { ScrollToTopButton } from './ScrollToTopButton';
 import { CommanderDeckCount, CardSynergyPercentage } from './EdhrecStats';
 import { 
   getDeckCommander, 
@@ -588,6 +589,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
   // Filter results based on format limit and banned list
   const [hideBannedCards, setHideBannedCards] = useState<boolean>(true);
+  // Scoping results to commander's color identity
+  const [filterCommanderIdentity, setFilterCommanderIdentity] = useState<boolean>(true);
 
   const displayedCards = results.filter((card) => {
     const formatToCheck = activeDeck?.format || selectedFormat;
@@ -756,15 +759,22 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     // ONLY apply deck-specific format/color identity constraints if we are actively searching for the deck
     if (isDeckContext) {
       if (isCommanderDeck) {
-        if (hasCommander || commanderColorIdentity.length > 0) {
-          boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
-          const idString = commanderColorIdentity.length === 0
-            ? 'c'
-            : commanderColorIdentity.map((c) => c.toLowerCase()).join('');
-          boundaryClauses.push(`id<=${idString}`);
-        } else {
+        if (targetDeckCategory === 'commander' || initialPartnerMode) {
           boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
           boundaryClauses.push(hideBannedCards ? 'is:commander' : '(is:commander or (type:legendary (type:creature or o:"can be your commander")))');
+        } else if (hasCommander || commanderColorIdentity.length > 0) {
+          boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
+          if (filterCommanderIdentity && (commanderColorIdentity.length > 0 || commanderCards.length > 0)) {
+            const idString = commanderColorIdentity.length === 0
+              ? 'c'
+              : commanderColorIdentity.map((c) => c.toLowerCase()).join('');
+            boundaryClauses.push(`id<=${idString}`);
+          }
+        } else {
+          boundaryClauses.push(hideBannedCards ? 'f:commander' : '(f:commander or banned:commander)');
+          if (!trimmedSearch) {
+            boundaryClauses.push(hideBannedCards ? 'is:commander' : '(is:commander or (type:legendary (type:creature or o:"can be your commander")))');
+          }
         }
       } else {
         const effectiveFormat = selectedFormat || (activeDeck?.format !== 'commander' ? activeDeck?.format : '');
@@ -832,6 +842,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const searchAbortRef = useRef<AbortController | null>(null);
 
   const executeSearch = async (pageNum = 1, append = false, overrideSearchTerm?: string) => {
+    const effectiveSearch = (overrideSearchTerm !== undefined ? overrideSearchTerm : searchTerm).trim();
     const query = buildQueryString(overrideSearchTerm);
     if (!query.trim()) {
       setResults([]);
@@ -931,20 +942,20 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           return true;
         });
 
-        // When searching for cards in a Commander deck, if a commander is not selected yet, only show cards eligible to be a commander
-        if (isCommanderDeck && !hasCommander) {
+        // When searching specifically for commander cards in a Commander deck, only show cards eligible to be a commander
+        if (isCommanderDeck && !hasCommander && !effectiveSearch && targetDeckCategory === 'commander') {
           processedData = processedData.filter((card) => canBePrimaryCommander(card));
         }
 
         // Sort by name when no commander is selected yet or when sortBy is 'name'
-        if ((isCommanderDeck && !hasCommander) || sortBy === 'name') {
+        if ((isCommanderDeck && !hasCommander && !effectiveSearch) || sortBy === 'name') {
           processedData.sort((a, b) => {
             return sortDir === 'desc' ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
           });
         }
 
         // Filter out cards not legal based on color identity for Commander decks
-        if (isCommanderDeck && (hasCommander || commanderColorIdentity.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
+        if (filterCommanderIdentity && isCommanderDeck && (commanderColorIdentity.length > 0 || commanderCards.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
           processedData = processedData.filter((card) => {
             return isCardLegalInCommander(card, commanderColorIdentity, { allowBanned: true }).isLegal;
           });
@@ -1014,6 +1025,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     selectedRarity,
     selectedFormat,
     hideBannedCards,
+    filterCommanderIdentity,
     scopeBySearchTerm,
     searchTerm,
     sortBy,
@@ -1187,12 +1199,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
               <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[11px] text-slate-300 capitalize font-medium">
                 {activeDeck.format}
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[11px] text-slate-300 font-mono">
-                {activeDeck.cards
-                  .filter((c) => c.category === 'main' || c.category === 'commander')
-                  .reduce((s, c) => s + c.quantity, 0)}
-                {activeDeck.format === 'commander' ? '/100' : ''} cards
-              </span>
             </div>
           )}
 
@@ -1233,6 +1239,25 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   </span>
                 )}
               </label>
+
+              {/* Commander Color Identity Scoping Toggle */}
+              {isCommanderDeck && (hasCommander || commanderColorIdentity.length > 0) && (
+                <label
+                  className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
+                  title="Limit search results to commander's color identity"
+                >
+                  <input
+                    type="checkbox"
+                    checked={filterCommanderIdentity}
+                    onChange={(e) => setFilterCommanderIdentity(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-800 text-fuchsia-500 focus:ring-fuchsia-500/20 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <span>Commander CI</span>
+                  <span className="font-mono text-[10px] px-1 py-0.2 rounded bg-slate-800 text-fuchsia-300 font-semibold">
+                    {commanderColorIdentity.length > 0 ? commanderColorIdentity.join('') : 'C'}
+                  </span>
+                </label>
+              )}
 
               {/* Commander Status Badge */}
               {isCommanderDeck && (
@@ -2240,22 +2265,18 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                   </div>
 
                   {/* Quantity In Deck Overlay Badge */}
-                  {isDeckContext && activeDeck && (
+                  {isDeckContext && activeDeck && deckCopies > 0 && (
                     <div
                       className={`absolute top-1.5 left-1.5 z-10 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-md flex items-center gap-1 ${
                         isAtLimit
                           ? 'bg-fuchsia-500 text-slate-950 border border-fuchsia-400 font-extrabold'
-                          : deckCopies > 0
-                            ? 'bg-slate-900/95 text-fuchsia-300 border border-fuchsia-500/50 backdrop-blur-xs'
-                            : 'bg-slate-950/85 text-slate-400 border border-slate-800'
+                          : 'bg-slate-900/95 text-fuchsia-300 border border-fuchsia-500/50 backdrop-blur-xs'
                       }`}
                       title={`${deckCopies} in deck (Format limit: ${deckLimit < 999 ? deckLimit : 'No limit'})`}
                     >
                       <Layers className="w-2.5 h-2.5" />
                       <span>
-                        {deckCopies > 0
-                          ? `${deckCopies}${deckLimit < 999 ? `/${deckLimit}` : ''} in deck`
-                          : '0 in deck'}
+                        {deckCopies}${deckLimit < 999 ? `/${deckLimit}` : ''} in deck
                       </span>
                     </div>
                   )}
@@ -2617,6 +2638,9 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
       {/* Dual Click Card Popup Modal */}
       <DualClickCardModal card={peekCard} onClose={() => setPeekCard(null)} />
+
+      {/* Floating Go to Top Button */}
+      <ScrollToTopButton />
     </div>
   );
 };
