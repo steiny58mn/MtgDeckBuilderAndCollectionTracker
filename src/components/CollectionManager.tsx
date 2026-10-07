@@ -32,7 +32,8 @@ import {
   ArrowDown,
   BarChart3,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Camera
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
@@ -106,6 +107,7 @@ interface CollectionManagerProps {
   onAddCardToDeck: (card: CollectionCard) => void;
   onOpenSearch: () => void;
   onSelectCard: (card: ScryfallCard) => void;
+  onOpenScanner?: () => void;
 }
 
 export const CollectionManager: React.FC<CollectionManagerProps> = ({
@@ -121,6 +123,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   onAddCardToDeck,
   onOpenSearch,
   onSelectCard,
+  onOpenScanner,
 }) => {
   const [selectedBinderFilter, setSelectedBinderFilter] = useState<string>(
     activeBinder ? activeBinder.id : 'all'
@@ -710,6 +713,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>+ Add Cards to Binder</span>
             </button>
+            {onOpenScanner && (
+              <button
+                type="button"
+                onClick={onOpenScanner}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                title="Scan card with camera to add to this binder"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Scan Card</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1088,6 +1102,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             <Plus className="w-4 h-4" />
             <span>+ Add Cards to Binder</span>
           </button>
+          {onOpenScanner && (
+            <button
+              type="button"
+              onClick={onOpenScanner}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors shadow-lg shadow-violet-900/20 shrink-0 cursor-pointer"
+              title="Scan card with camera to add to this binder"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Scan Card</span>
+            </button>
+          )}
         </div>
 
         {/* Filters Row */}

@@ -22,6 +22,7 @@ import { DeckBuilder } from './components/DeckBuilder';
 import { CollectionManager } from './components/CollectionManager';
 import { CardSearchView } from './components/CardSearchView';
 import { CardDetailModal } from './components/CardDetailModal';
+import { CardScannerModal } from './components/CardScannerModal';
 import { BinderList } from './components/BinderList';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
@@ -56,6 +57,7 @@ export default function App() {
   
   // Modals & Notifications
   const [inspectedCard, setInspectedCard] = useState<ScryfallCard | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [globalToast, setGlobalToast] = useState<{
     message: string;
     type: 'success' | 'info';
@@ -762,13 +764,16 @@ export default function App() {
     quantity: number = 1,
     isFoil: boolean = false,
     condition: CardCondition = 'NM',
-    acquiredPrice?: number
+    acquiredPrice?: number,
+    targetBinderIdParam?: string
   ) => {
-    if (!requireAuth('Please sign in or create an account to save cards to your collection binder!', () => handleAddCardToCollection(card, quantity, isFoil, condition, acquiredPrice))) {
+    if (!requireAuth('Please sign in or create an account to save cards to your collection binder!', () => handleAddCardToCollection(card, quantity, isFoil, condition, acquiredPrice, targetBinderIdParam))) {
       return;
     }
 
-    let targetBinder = activeBinder;
+    let targetBinder = targetBinderIdParam
+      ? (binders.find(b => b.id === targetBinderIdParam) || activeBinder)
+      : activeBinder;
 
     // Auto-create a binder with a generic name if none exists
     if (!targetBinder) {
@@ -968,6 +973,7 @@ export default function App() {
           setAuthModalOpen(true);
         }}
         onLogout={handleLogout}
+        onOpenScanner={() => setIsScannerOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -1011,6 +1017,7 @@ export default function App() {
               onCreateNewDeck={handleCreateNewDeckFromExisting}
               onImportAsNewDeck={handleImportAsNewDeck}
               onBatchImportCompleted={handleBatchImportCompleted}
+              onOpenScanner={() => setIsScannerOpen(true)}
             />
           ) : (
             <DeckList
@@ -1052,6 +1059,7 @@ export default function App() {
                 setActiveTab('search');
               }}
               onSelectCard={(c) => setInspectedCard(c)}
+              onOpenScanner={() => setIsScannerOpen(true)}
             />
           ) : (
             <BinderList 
@@ -1089,6 +1097,17 @@ export default function App() {
           />
         </div>
       </main>
+
+      {/* Mobile Card Scanner Modal */}
+      <CardScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        binders={binders}
+        activeBinder={activeBinder}
+        onAddCardToBinder={async (card, qty, isFoil, targetBinderId) => {
+          await handleAddCardToCollection(card, qty, isFoil, 'NM', undefined, targetBinderId);
+        }}
+      />
 
       {/* Card Detail Modal */}
       <CardDetailModal

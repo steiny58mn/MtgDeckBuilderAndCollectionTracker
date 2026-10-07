@@ -45,7 +45,8 @@ import {
   Check,
   Boxes,
   Upload,
-  ExternalLink
+  ExternalLink,
+  Camera
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
@@ -96,6 +97,7 @@ interface DeckBuilderProps {
   onCreateNewDeck?: (currentDeckToSave: Deck) => Promise<void> | void;
   onImportAsNewDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
+  onOpenScanner?: () => void;
 }
 
 export const DeckBuilder: React.FC<DeckBuilderProps> = ({
@@ -109,6 +111,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   onCreateNewDeck,
   onImportAsNewDeck: onImportAsNewDeckProp,
   onBatchImportCompleted,
+  onOpenScanner,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [title, setTitle] = useState(deck.name);
@@ -2919,6 +2922,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <Plus className="w-3.5 h-3.5" />
             <span>Add Cards</span>
           </button>
+          {onOpenScanner && (
+            <button
+              type="button"
+              onClick={onOpenScanner}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer bg-slate-800 hover:bg-slate-700 text-violet-300 border border-violet-500/30 hover:border-violet-500/60"
+              title="Scan card with camera to add to binder"
+            >
+              <Camera className="w-3.5 h-3.5 text-violet-400" />
+              <span className="hidden sm:inline">Scan to Binder</span>
+              <span className="sm:hidden">Scan</span>
+            </button>
+          )}
         </div>
       </div>
 
