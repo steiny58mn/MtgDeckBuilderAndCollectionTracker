@@ -129,7 +129,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title="Scan card with camera to add to binder"
               >
                 <Camera className="w-3.5 h-3.5 text-violet-400" />
-                <span>Scan Card</span>
+                <span>Scan Cards</span>
               </button>
             )}
 
@@ -229,10 +229,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onOpenScanner}
               className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold text-violet-400 hover:text-violet-300"
-              title="Scan Card to Binder"
+              title="Scan Cards to Binder"
             >
               <Camera className="w-4 h-4" />
-              <span>Scan</span>
+              <span>Scan Cards</span>
             </button>
           )}
 

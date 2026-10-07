@@ -718,10 +718,10 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                 type="button"
                 onClick={onOpenScanner}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
-                title="Scan card with camera to add to this binder"
+                title="Scan cards with camera to add to this binder"
               >
                 <Camera className="w-3.5 h-3.5" />
-                <span>Scan Card</span>
+                <span>Scan Cards</span>
               </button>
             )}
           </div>
@@ -1107,10 +1107,10 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               type="button"
               onClick={onOpenScanner}
               className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors shadow-lg shadow-violet-900/20 shrink-0 cursor-pointer"
-              title="Scan card with camera to add to this binder"
+              title="Scan cards with camera to add to this binder"
             >
               <Camera className="w-4 h-4" />
-              <span>Scan Card</span>
+              <span>Scan Cards</span>
             </button>
           )}
         </div>

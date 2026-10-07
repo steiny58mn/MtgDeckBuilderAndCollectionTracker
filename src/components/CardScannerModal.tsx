@@ -17,8 +17,11 @@ import {
   Minus,
   RefreshCw,
   ExternalLink,
-  SlidersHorizontal,
-  Volume2
+  Volume2,
+  Layers,
+  ChevronUp,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { 
@@ -33,6 +36,14 @@ import { playScanSuccessSound, playScanErrorSound, unlockAudio } from '../utils/
 import { getCardImageUrl, getAutocomplete, fetchCardPrints } from '../services/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+
+export interface BatchScannedCard {
+  id: string;
+  card: ScryfallCard;
+  quantity: number;
+  isFoil: boolean;
+  timestamp: number;
+}
 
 interface CardScannerModalProps {
   isOpen: boolean;
@@ -62,7 +73,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Scanner state
+  // Scanner stream state
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -88,10 +99,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [cardQuantity, setCardQuantity] = useState<number>(1);
   const [overrideFoil, setOverrideFoil] = useState<boolean | null>(null); // null = auto-detect
 
-  // Result state
-  const [lastScanResult, setLastScanResult] = useState<CardScanResult | null>(null);
-  const [lastCapturedImage, setLastCapturedImage] = useState<string | null>(null);
+  // Batch Session state (accumulates all cards scanned while camera stays open)
+  const [scannedBatchCards, setScannedBatchCards] = useState<BatchScannedCard[]>([]);
+  const [recentToast, setRecentToast] = useState<{
+    card: ScryfallCard;
+    quantity: number;
+    isFoil: boolean;
+  } | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [showBatchDrawer, setShowBatchDrawer] = useState(false);
 
   // API Key Settings Modal
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -99,9 +115,28 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
   // Manual fallback search
+  const [manualSearchOpen, setManualSearchOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
   const [manualSuggestions, setManualSuggestions] = useState<string[]>([]);
   const [isSearchingManual, setIsSearchingManual] = useState(false);
+
+  // Auto-dismiss success toast after 4 seconds
+  useEffect(() => {
+    if (!recentToast) return;
+    const timer = setTimeout(() => {
+      setRecentToast(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [recentToast]);
+
+  // Auto-dismiss scan error after 4 seconds
+  useEffect(() => {
+    if (!scanError) return;
+    const timer = setTimeout(() => {
+      setScanError(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [scanError]);
 
   // Initialize camera stream
   const startCamera = useCallback(async () => {
@@ -143,9 +178,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setCameraActive(false);
       let msg = 'Could not access camera.';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        msg = 'Camera permission was denied. Please allow camera access in your browser or upload a photo.';
+        msg = 'Camera permission was denied. Please allow camera access in your browser or upload photos.';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        msg = 'No camera device found. Please upload a photo instead.';
+        msg = 'No camera device found. Please upload photos instead.';
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
         msg = 'Camera is in use by another application.';
       }
@@ -172,10 +207,11 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       startCamera();
     } else {
       stopCamera();
-      setLastScanResult(null);
-      setLastCapturedImage(null);
+      setScannedBatchCards([]);
+      setRecentToast(null);
       setScanError(null);
       setIsProcessing(false);
+      setShowBatchDrawer(false);
     }
     return () => {
       stopCamera();
@@ -204,7 +240,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
-  // Process and analyze image
+  // Process and analyze image in continuous batch mode
   const handleProcessImage = async (imageSource: Blob | File | HTMLVideoElement) => {
     unlockAudio();
     setIsProcessing(true);
@@ -212,48 +248,64 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     setStatusMessage('Optimizing photo...');
 
     try {
-      const { dataUrl, base64Only } = await optimizeCardImage(imageSource);
-      setLastCapturedImage(dataUrl);
+      const { base64Only } = await optimizeCardImage(imageSource);
 
       const apiKey = getStoredGeminiApiKey();
       if (!apiKey) {
-        setStatusMessage('Gemini API key missing');
+        setStatusMessage('');
         setIsProcessing(false);
         playScanErrorSound();
         setShowApiKeyModal(true);
-        setScanError('Please configure your free Gemini API key to enable instant card recognition.');
+        setScanError('Please enter your free Gemini API key to enable card recognition.');
         return;
       }
 
-      setStatusMessage('Analyzing card with Gemini Vision...');
+      setStatusMessage('Identifying card...');
       const scanResult = await identifyCardFromImage(base64Only, apiKey);
 
       const finalIsFoil = overrideFoil !== null ? overrideFoil : scanResult.isFoil;
-      setStatusMessage(`Found "${scanResult.card.name}"! Adding to binder...`);
+      setStatusMessage(`Found "${scanResult.card.name}"!`);
 
-      // Automatically add to collection binder!
+      // Automatically add card to the chosen binder!
       await onAddCardToBinder(scanResult.card, cardQuantity, finalIsFoil, selectedBinderId);
 
-      // Play success chime
+      // Play success chime!
       playScanSuccessSound();
-      setLastScanResult({
-        ...scanResult,
+
+      // Add to accumulated batch list
+      const batchItem: BatchScannedCard = {
+        id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        card: scanResult.card,
+        quantity: cardQuantity,
+        isFoil: finalIsFoil,
+        timestamp: Date.now(),
+      };
+
+      setScannedBatchCards((prev) => [batchItem, ...prev]);
+      setRecentToast({
+        card: scanResult.card,
+        quantity: cardQuantity,
         isFoil: finalIsFoil,
       });
+
+      // Keep camera live and clear status message for next card immediately!
       setStatusMessage('');
       setIsProcessing(false);
     } catch (err: any) {
-      console.error('[CardScanner] Scan error:', err);
+      console.error('[CardScanner] Batch scan error:', err);
       playScanErrorSound();
-      setScanError(err?.message || 'Could not recognize card. Please ensure the card is in focus and well-lit.');
+      setScanError(err?.message || 'Could not recognize card. Ensure the card is in focus with good lighting.');
       setStatusMessage('');
       setIsProcessing(false);
     }
   };
 
-  // Capture current video frame
+  // Capture current live video frame
   const handleCaptureFrame = () => {
     if (!videoRef.current || isProcessing) return;
+    try {
+      navigator.vibrate?.(40);
+    } catch {}
     handleProcessImage(videoRef.current);
   };
 
@@ -263,18 +315,6 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     if (file) {
       handleProcessImage(file);
       e.target.value = '';
-    }
-  };
-
-  // Reset to scan next card
-  const handleScanNext = () => {
-    setLastScanResult(null);
-    setLastCapturedImage(null);
-    setScanError(null);
-    setCardQuantity(1);
-    setOverrideFoil(null);
-    if (!cameraActive) {
-      startCamera();
     }
   };
 
@@ -303,13 +343,22 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         const isFoil = overrideFoil ?? false;
         await onAddCardToBinder(cardToAdd, cardQuantity, isFoil, selectedBinderId);
         playScanSuccessSound();
-        setLastScanResult({
+        const batchItem: BatchScannedCard = {
+          id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           card: cardToAdd,
+          quantity: cardQuantity,
           isFoil,
-          confidence: 'high',
+          timestamp: Date.now(),
+        };
+        setScannedBatchCards((prev) => [batchItem, ...prev]);
+        setRecentToast({
+          card: cardToAdd,
+          quantity: cardQuantity,
+          isFoil,
         });
         setManualQuery('');
         setManualSuggestions([]);
+        setManualSearchOpen(false);
       } else {
         playScanErrorSound();
         setScanError(`Could not find "${name}" on Scryfall.`);
@@ -328,25 +377,30 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white overflow-hidden animate-in fade-in duration-200">
-      {/* Top Navigation & Controls Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-20">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center">
+      {/* Top Header: Controls, Binder Selector & Batch Counter */}
+      <div className="flex items-center justify-between px-3.5 sm:px-4 py-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-30">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
             <Camera className="w-4 h-4" />
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
-              Card Scanner
-              <span className="text-[10px] px-1.5 py-0.2 bg-violet-500/20 text-violet-300 rounded font-medium border border-violet-500/30">
-                AI Vision
-              </span>
-            </h2>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs sm:text-sm font-bold text-white truncate">
+                Scan Cards to Binder
+              </h2>
+              {/* Batch counter badge */}
+              {scannedBatchCards.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[11px] border border-emerald-500/40 shrink-0 animate-in zoom-in-95">
+                  {scannedBatchCards.length} Added
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
               <select
                 value={selectedBinderId}
                 onChange={(e) => setSelectedBinderId(e.target.value)}
-                className="bg-transparent text-slate-300 font-medium hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[150px] sm:max-w-[200px]"
+                className="bg-transparent text-slate-300 font-medium hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[150px] sm:max-w-[220px]"
                 title="Target Binder"
               >
                 {binders.map((b) => (
@@ -359,8 +413,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Gemini API Key Button */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* API Key Config Button */}
           <button
             type="button"
             onClick={() => setShowApiKeyModal(true)}
@@ -390,335 +444,384 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             <Volume2 className="w-4 h-4" />
           </button>
 
-          {/* Close Modal Button */}
+          {/* Done / Close Button */}
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Close Scanner"
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1"
+            title="Finish scanning and return to binder"
           >
-            <X className="w-5 h-5" />
+            <Check className="w-3.5 h-3.5" />
+            <span>Done</span>
           </button>
         </div>
       </div>
 
-      {/* Main Viewport Area */}
+      {/* Main Viewport Area (Camera remains continuously active!) */}
       <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
-        {/* Live Camera Viewfinder */}
-        {!lastScanResult && (
-          <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-cover"
-            />
+        {/* Live Continuous Camera Viewfinder */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="absolute inset-0 w-full h-full object-cover"
+        />
 
-            {/* Card Alignment Reticle Frame */}
-            <div className="relative z-10 w-[82vw] max-w-[320px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3">
-              {/* Corner brackets */}
-              <div className="flex justify-between">
-                <div className="w-7 h-7 border-t-3 border-l-3 border-violet-500 rounded-tl-lg shadow-sm" />
-                <div className="w-7 h-7 border-t-3 border-r-3 border-violet-500 rounded-tr-lg shadow-sm" />
-              </div>
-
-              {/* Set & Number Highlight Region */}
-              <div className="w-full flex items-end justify-between">
-                <div className="bg-violet-900/70 border border-violet-400/60 rounded px-2 py-1 text-[10px] text-violet-200 font-mono shadow-sm backdrop-blur-xs flex items-center gap-1">
-                  <span>SET & # \u2193</span>
-                </div>
-                <div className="w-7 h-7 border-b-3 border-r-3 border-violet-500 rounded-br-lg shadow-sm" />
-              </div>
-              <div className="absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 border-violet-500 rounded-bl-lg shadow-sm" />
-
-              {/* Scanning animation line */}
-              {isProcessing && (
-                <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-violet-400 to-transparent shadow-[0_0_12px_rgba(167,139,250,0.8)] animate-pulse" />
-              )}
-            </div>
-
-            {/* Viewfinder Instructions Banner */}
-            <div className="absolute top-4 inset-x-4 z-10 flex justify-center pointer-events-none">
-              <div className="bg-slate-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700/60 text-xs text-slate-200 text-center shadow-lg">
-                Center card in frame &bull; Keep set code in bottom-left visible
-              </div>
-            </div>
-
-            {/* Camera Floating Controls (Torch & Flip) */}
-            <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
-              {hasTorch && (
-                <button
-                  type="button"
-                  onClick={toggleTorch}
-                  className={`p-2.5 rounded-full shadow-lg backdrop-blur-md transition-colors cursor-pointer ${
-                    torchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-900/80 text-white hover:bg-slate-800'
-                  }`}
-                  title={torchOn ? 'Turn off flash' : 'Turn on flash'}
-                >
-                  {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={toggleFacingMode}
-                className="p-2.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white shadow-lg backdrop-blur-md transition-colors cursor-pointer"
-                title="Switch camera"
-              >
-                <RotateCw className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Camera Error / Permission Fallback */}
-            {cameraError && (
-              <div className="absolute inset-0 z-20 bg-slate-950/90 p-6 flex flex-col items-center justify-center text-center">
-                <AlertCircle className="w-12 h-12 text-amber-400 mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">Camera Notice</h3>
-                <p className="text-xs text-slate-300 max-w-sm mb-4">{cameraError}</p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startCamera()}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Retry Camera
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    Upload Photo
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* Card Alignment Reticle Frame */}
+        <div className="relative z-10 w-[82vw] max-w-[320px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3">
+          {/* Corner brackets */}
+          <div className="flex justify-between">
+            <div className="w-7 h-7 border-t-3 border-l-3 border-violet-500 rounded-tl-lg shadow-sm" />
+            <div className="w-7 h-7 border-t-3 border-r-3 border-violet-500 rounded-tr-lg shadow-sm" />
           </div>
-        )}
 
-        {/* Processing Spinner Overlay */}
-        {isProcessing && (
-          <div className="absolute inset-0 z-30 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center p-4">
-            <Loader2 className="w-10 h-10 text-violet-400 animate-spin mb-3" />
-            <p className="text-sm font-semibold text-white">{statusMessage || 'Processing card image...'}</p>
-            <p className="text-xs text-slate-400 mt-1">Extracting set code and collector number...</p>
+          {/* Set & Number Highlight Region */}
+          <div className="w-full flex items-end justify-between">
+            <div className="bg-violet-900/70 border border-violet-400/60 rounded px-2 py-1 text-[10px] text-violet-200 font-mono shadow-sm backdrop-blur-xs flex items-center gap-1">
+              <span>SET & # \u2193</span>
+            </div>
+            <div className="w-7 h-7 border-b-3 border-r-3 border-violet-500 rounded-br-lg shadow-sm" />
           </div>
-        )}
+          <div className="absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 border-violet-500 rounded-bl-lg shadow-sm" />
 
-        {/* Success Card Recognition Result View */}
-        {lastScanResult && (
-          <div className="relative z-20 w-full max-w-md p-4 flex flex-col items-center justify-center animate-in zoom-in-95 duration-200">
-            {/* Success Banner */}
-            <div className="w-full bg-emerald-950/90 border border-emerald-500/50 rounded-xl p-3 mb-4 shadow-xl flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-emerald-200">Successfully Added to Binder!</h4>
-                  <p className="text-[11px] text-emerald-300/80">
-                    {cardQuantity}x copy added to <strong>{currentBinder?.name || 'Binder'}</strong>
+          {/* Continuous Scanning Active Light */}
+          {isProcessing && (
+            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-violet-400 to-transparent shadow-[0_0_12px_rgba(167,139,250,0.8)] animate-pulse" />
+          )}
+        </div>
+
+        {/* Top Hint Bar over live camera */}
+        <div className="absolute top-3 inset-x-4 z-20 flex justify-center pointer-events-none">
+          <div className="bg-slate-900/85 backdrop-blur-md px-3.5 py-1 rounded-full border border-slate-700/60 text-[11px] text-slate-200 text-center shadow-lg">
+            Batch Mode: Center card &bull; Camera stays open for multiple cards
+          </div>
+        </div>
+
+        {/* Floating Controls (Torch & Flip) */}
+        <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
+          {hasTorch && (
+            <button
+              type="button"
+              onClick={toggleTorch}
+              className={`p-2.5 rounded-full shadow-lg backdrop-blur-md transition-colors cursor-pointer ${
+                torchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-900/80 text-white hover:bg-slate-800'
+              }`}
+              title={torchOn ? 'Turn off flash' : 'Turn on flash'}
+            >
+              {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={toggleFacingMode}
+            className="p-2.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white shadow-lg backdrop-blur-md transition-colors cursor-pointer"
+            title="Switch camera"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Floating Success Toast (Appears over live camera without closing it!) */}
+        {recentToast && (
+          <div className="absolute top-12 inset-x-4 z-30 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
+            <div className="bg-emerald-950/95 border border-emerald-500/80 rounded-2xl p-2.5 sm:p-3 shadow-2xl backdrop-blur-md max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <img
+                  src={getCardImageUrl(recentToast.card, 'small')}
+                  alt={recentToast.card.name}
+                  className="w-10 h-14 object-cover rounded shadow border border-emerald-500/40 shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Added {recentToast.quantity}x</span>
+                    {recentToast.isFoil && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5">
+                        <Sparkles className="w-2.5 h-2.5" /> Foil
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-xs font-bold text-white truncate">{recentToast.card.name}</h4>
+                  <p className="text-[10px] text-emerald-200/80 font-mono">
+                    {recentToast.card.set?.toUpperCase()} #{recentToast.card.collector_number} &bull; {currentBinder?.name}
                   </p>
                 </div>
               </div>
-              {lastScanResult.isFoil && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Foil
-                </span>
-              )}
-            </div>
-
-            {/* Scanned Card Details Preview Card */}
-            <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-2xl flex gap-4 items-center">
-              <img
-                src={getCardImageUrl(lastScanResult.card, 'normal')}
-                alt={lastScanResult.card.name}
-                className="w-24 sm:w-28 rounded-lg shadow-md border border-slate-700/60 shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-bold text-white truncate">{lastScanResult.card.name}</h3>
-                <p className="text-xs text-slate-400 truncate mt-0.5">{lastScanResult.card.type_line}</p>
-
-                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                  <span className="px-2 py-0.5 bg-slate-800 rounded text-[11px] font-mono text-violet-300 border border-slate-700 uppercase">
-                    {lastScanResult.card.set?.toUpperCase()}
-                  </span>
-                  <span className="px-2 py-0.5 bg-slate-800 rounded text-[11px] font-mono text-slate-300 border border-slate-700">
-                    #{lastScanResult.card.collector_number}
-                  </span>
-                  <span className="px-2 py-0.5 bg-slate-800 rounded text-[11px] text-slate-300 capitalize border border-slate-700">
-                    {lastScanResult.card.rarity}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Market Price:</span>
-                  <span className="font-semibold text-emerald-400">
-                    ${lastScanResult.isFoil && lastScanResult.card.prices?.usd_foil 
-                      ? lastScanResult.card.prices.usd_foil 
-                      : (lastScanResult.card.prices?.usd || '0.00')}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Action buttons after successful scan */}
-            <div className="w-full flex gap-3 mt-4">
               <button
                 type="button"
-                onClick={handleScanNext}
-                className="flex-1 py-3 px-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-              >
-                <Camera className="w-4 h-4" />
-                Scan Next Card
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Scan Error Banner */}
-        {scanError && !isProcessing && (
-          <div className="absolute bottom-24 inset-x-4 z-20 flex justify-center">
-            <div className="bg-rose-950/95 border border-rose-500/60 rounded-xl p-3 text-xs text-rose-200 shadow-xl max-w-md w-full flex items-center justify-between gap-3 animate-in slide-in-from-bottom-2">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{scanError}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setScanError(null)}
-                className="text-rose-400 hover:text-white font-bold p-1"
+                onClick={() => setRecentToast(null)}
+                className="text-emerald-400 hover:text-white p-1 cursor-pointer shrink-0"
               >
                 &times;
               </button>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Bottom Interactive Toolbar */}
-      {!lastScanResult && (
-        <div className="bg-slate-900 border-t border-slate-800 px-4 py-3 z-20 flex flex-col gap-2">
-          {/* Options Row (Foil & Quantity) */}
-          <div className="flex items-center justify-between text-xs text-slate-300">
-            {/* Foil Toggle */}
-            <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700/60">
+        {/* Floating Error Toast */}
+        {scanError && !isProcessing && (
+          <div className="absolute top-12 inset-x-4 z-30 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
+            <div className="bg-rose-950/95 border border-rose-500/80 rounded-xl p-3 text-xs text-rose-200 shadow-2xl max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto backdrop-blur-md">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="truncate">{scanError}</span>
+              </div>
               <button
                 type="button"
-                onClick={() => setOverrideFoil(null)}
-                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                  overrideFoil === null ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Auto-detect foil status from card image"
+                onClick={() => setScanError(null)}
+                className="text-rose-400 hover:text-white font-bold p-1 cursor-pointer shrink-0"
               >
-                Auto-Foil
-              </button>
-              <button
-                type="button"
-                onClick={() => setOverrideFoil(true)}
-                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer ${
-                  overrideFoil === true ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Force foil printing"
-              >
-                <Sparkles className="w-3 h-3" /> Foil
-              </button>
-              <button
-                type="button"
-                onClick={() => setOverrideFoil(false)}
-                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                  overrideFoil === false ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Force non-foil printing"
-              >
-                Regular
-              </button>
-            </div>
-
-            {/* Quantity Stepper */}
-            <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/60">
-              <span className="text-[11px] text-slate-400">Qty:</span>
-              <button
-                type="button"
-                onClick={() => setCardQuantity((q) => Math.max(1, q - 1))}
-                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
-              >
-                -
-              </button>
-              <span className="font-bold text-white w-4 text-center">{cardQuantity}</span>
-              <button
-                type="button"
-                onClick={() => setCardQuantity((q) => q + 1)}
-                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
-              >
-                +
+                &times;
               </button>
             </div>
           </div>
+        )}
 
-          {/* Shutter Capture Bar */}
-          <div className="flex items-center justify-between gap-4 pt-1">
-            {/* File upload hidden input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
+        {/* Processing Indicator Overlay (Subtle spinner, camera stays visible behind) */}
+        {isProcessing && (
+          <div className="absolute inset-0 z-25 bg-slate-950/40 backdrop-blur-xs flex flex-col items-center justify-center p-4">
+            <div className="bg-slate-900/90 border border-violet-500/40 rounded-2xl px-5 py-4 flex flex-col items-center shadow-2xl">
+              <Loader2 className="w-8 h-8 text-violet-400 animate-spin mb-2" />
+              <p className="text-xs font-bold text-white">{statusMessage || 'Analyzing card...'}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Camera Permission / Device Error */}
+        {cameraError && (
+          <div className="absolute inset-0 z-30 bg-slate-950/95 p-6 flex flex-col items-center justify-center text-center">
+            <AlertCircle className="w-12 h-12 text-amber-400 mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">Camera Notice</h3>
+            <p className="text-xs text-slate-300 max-w-sm mb-4">{cameraError}</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => startCamera()}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Retry Camera
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Upload Photo
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Batch Scanned History Tray (Collapsible strip showing all cards added this session) */}
+      {scannedBatchCards.length > 0 && (
+        <div className="bg-slate-900 border-t border-slate-800 z-20">
+          <div
+            onClick={() => setShowBatchDrawer(!showBatchDrawer)}
+            className="flex items-center justify-between px-4 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-slate-300 text-xs font-medium cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Layers className="w-3.5 h-3.5 text-violet-400" />
+              <span>Current Batch: <strong>{scannedBatchCards.length} card{scannedBatchCards.length === 1 ? '' : 's'}</strong> added</span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] text-slate-400">
+              <span>{showBatchDrawer ? 'Hide' : 'View List'}</span>
+              {showBatchDrawer ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+            </div>
+          </div>
+
+          {/* Drawer content: horizontal carousel of scanned cards */}
+          {showBatchDrawer && (
+            <div className="p-3 overflow-x-auto flex gap-3 max-h-44 scrollbar-thin">
+              {scannedBatchCards.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex-shrink-0 w-24 bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-center shadow flex flex-col items-center"
+                >
+                  <img
+                    src={getCardImageUrl(item.card, 'small')}
+                    alt={item.card.name}
+                    className="w-20 h-28 object-cover rounded shadow-xs mb-1"
+                  />
+                  <span className="text-[10px] font-bold text-white truncate w-full block">
+                    {item.card.name}
+                  </span>
+                  <div className="flex items-center justify-center gap-1 mt-0.5 text-[9px] text-slate-400 font-mono">
+                    <span>{item.card.set?.toUpperCase()}</span>
+                    <span>#{item.card.collector_number}</span>
+                    {item.isFoil && <Sparkles className="w-2.5 h-2.5 text-amber-300" />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bottom Interactive Toolbar: Foil, Quantity & Continuous Shutter Button */}
+      <div className="bg-slate-900 border-t border-slate-800 px-4 py-2.5 z-20 flex flex-col gap-2">
+        {/* Options Row (Foil & Quantity) */}
+        <div className="flex items-center justify-between text-xs text-slate-300">
+          {/* Foil Mode Toggle */}
+          <div className="flex items-center gap-1 bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Upload photo from device"
-            >
-              <Upload className="w-5 h-5" />
-            </button>
-
-            {/* Shutter Button */}
-            <button
-              type="button"
-              disabled={isProcessing}
-              onClick={handleCaptureFrame}
-              className={`w-16 h-16 rounded-full border-4 border-violet-500/40 p-1 flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer ${
-                isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'
+              onClick={() => setOverrideFoil(null)}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                overrideFoil === null ? 'bg-violet-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
-              title="Capture card photo"
+              title="Auto-detect foil finish from camera"
             >
-              <div className="w-full h-full rounded-full bg-white hover:bg-slate-200 transition-colors shadow-inner flex items-center justify-center">
-                <Camera className="w-6 h-6 text-slate-900" />
-              </div>
+              Auto-Foil
             </button>
-
-            {/* Quick manual search fallback button */}
             <button
               type="button"
-              onClick={() => {
-                const query = prompt('Enter Card Name to search Scryfall:');
-                if (query) {
-                  handleSelectManualCard(query);
-                }
-              }}
-              className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Manual Name Search"
+              onClick={() => setOverrideFoil(true)}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer ${
+                overrideFoil === true ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Force foil printing"
             >
-              <Search className="w-5 h-5" />
+              <Sparkles className="w-3 h-3" /> Foil
             </button>
+            <button
+              type="button"
+              onClick={() => setOverrideFoil(false)}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                overrideFoil === false ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Force regular printing"
+            >
+              Regular
+            </button>
+          </div>
+
+          {/* Quantity Stepper */}
+          <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-lg border border-slate-700/60">
+            <span className="text-[11px] text-slate-400">Qty:</span>
+            <button
+              type="button"
+              onClick={() => setCardQuantity((q) => Math.max(1, q - 1))}
+              className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+            >
+              -
+            </button>
+            <span className="font-bold text-white w-4 text-center">{cardQuantity}</span>
+            <button
+              type="button"
+              onClick={() => setCardQuantity((q) => q + 1)}
+              className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Shutter & Actions Bar */}
+        <div className="flex items-center justify-between gap-4 pt-0.5">
+          {/* File upload hidden input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="Upload photo from device"
+          >
+            <Upload className="w-5 h-5" />
+          </button>
+
+          {/* Large Continuous Shutter Button */}
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={handleCaptureFrame}
+            className={`w-16 h-16 rounded-full border-4 border-violet-500/50 p-1 flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer ${
+              isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'
+            }`}
+            title="Snap card & add to binder (camera stays live for next card!)"
+          >
+            <div className="w-full h-full rounded-full bg-white hover:bg-slate-200 transition-colors shadow-inner flex items-center justify-center">
+              <Camera className="w-6 h-6 text-slate-900" />
+            </div>
+          </button>
+
+          {/* Quick manual search fallback button */}
+          <button
+            type="button"
+            onClick={() => setManualSearchOpen(true)}
+            className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="Search by card name if camera cannot read card"
+          >
+            <Search className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Manual Search Fallback Drawer */}
+      {manualSearchOpen && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Search className="w-4 h-4 text-violet-400" />
+                Manual Card Lookup
+              </h3>
+              <button
+                type="button"
+                onClick={() => setManualSearchOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">
+              Type the card name to add it to <strong>{currentBinder?.name}</strong>:
+            </p>
+            <div className="relative mb-3">
+              <input
+                type="text"
+                autoFocus
+                value={manualQuery}
+                onChange={(e) => setManualQuery(e.target.value)}
+                placeholder="e.g. Birds of Paradise, Sol Ring..."
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500"
+              />
+              {isSearchingManual && (
+                <Loader2 className="w-4 h-4 text-violet-400 animate-spin absolute right-3 top-2.5" />
+              )}
+            </div>
+
+            {/* Suggestions list */}
+            {manualSuggestions.length > 0 && (
+              <div className="space-y-1 max-h-48 overflow-y-auto mb-3">
+                {manualSuggestions.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => handleSelectManualCard(name)}
+                    className="w-full text-left px-3 py-2 bg-slate-800/70 hover:bg-violet-900/40 rounded-lg text-xs text-slate-200 hover:text-white transition-colors flex items-center justify-between cursor-pointer"
+                  >
+                    <span>{name}</span>
+                    <Plus className="w-3.5 h-3.5 text-violet-400" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Gemini API Key Configuration Drawer / Modal */}
+      {/* Gemini API Key Configuration Modal */}
       {showApiKeyModal && (
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl">
@@ -737,7 +840,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             </div>
 
             <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-              Google Gemini Vision powers the instant recognition of card titles, set codes, and collector numbers directly from your camera.
+              Google Gemini Vision powers the instant recognition of card titles, set codes, and collector numbers directly from your camera in batch.
             </p>
 
             <div className="mb-3">

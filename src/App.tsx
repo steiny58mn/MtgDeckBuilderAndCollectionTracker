@@ -1017,7 +1017,6 @@ export default function App() {
               onCreateNewDeck={handleCreateNewDeckFromExisting}
               onImportAsNewDeck={handleImportAsNewDeck}
               onBatchImportCompleted={handleBatchImportCompleted}
-              onOpenScanner={() => setIsScannerOpen(true)}
             />
           ) : (
             <DeckList
