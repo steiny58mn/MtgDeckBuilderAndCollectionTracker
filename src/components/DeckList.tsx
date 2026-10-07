@@ -12,7 +12,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Deck, MTGFormat, CollectionCard } from '../types/mtg';
-import { calculateDeckStats } from '../utils/deckUtils';
+import { calculateDeckStats, buildCollectionLookup, calculateDeckCompletion } from '../utils/deckUtils';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckService } from '../services/deckService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -54,29 +54,13 @@ export const DeckList: React.FC<DeckListProps> = ({
     return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
   }, []);
 
-  const collectionMap = React.useMemo(() => {
-    const map = new Map<string, number>();
-    collectionCards.forEach((c) => {
-      const name = c.name.toLowerCase().trim();
-      map.set(name, (map.get(name) || 0) + (c.quantity || 1));
-    });
-    return map;
+  const collectionLookup = React.useMemo(() => {
+    return buildCollectionLookup(collectionCards);
   }, [collectionCards]);
 
   const getDeckCompletion = React.useCallback((d: Deck) => {
-    let owned = 0;
-    let total = 0;
-    (d.cards || []).forEach((c) => {
-      if (c.category === 'main' || c.category === 'commander') {
-        const qty = c.quantity || 1;
-        total += qty;
-        const inCol = collectionMap.get(c.name.toLowerCase().trim()) || 0;
-        owned += Math.min(qty, inCol);
-      }
-    });
-    const pct = total > 0 ? Math.round((owned / total) * 100) : 0;
-    return { owned, total, pct };
-  }, [collectionMap]);
+    return calculateDeckCompletion(d, collectionLookup);
+  }, [collectionLookup]);
 
   // New deck form state
   const [newDeckName, setNewDeckName] = useState('');

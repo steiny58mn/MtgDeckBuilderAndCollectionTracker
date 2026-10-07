@@ -43,6 +43,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Check,
+  Boxes,
   Upload,
   ExternalLink
 } from 'lucide-react';
@@ -186,7 +187,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [cardFilterQuery, setCardFilterQuery] = useState<string>('');
   const [statsScope, setStatsScope] = useState<'main' | 'all'>('main');
   const [cardToSwap, setCardToSwap] = useState<DeckCard | null>(null);
-  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'owned' | 'unowned'>('all');
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'owned' | 'unowned' | 'in-use'>('all');
+  const [showInUseDetails, setShowInUseDetails] = useState<boolean>(false);
+
+  // Subscribe to all decks for cross-deck collection usage tracking
+  const [allDecks, setAllDecks] = useState<Deck[]>(() => DeckService.getLocalDecks());
+  useEffect(() => {
+    return DeckService.subscribeDecks((decks) => setAllDecks(decks));
+  }, []);
+
+
   const [missingCardsCopied, setMissingCardsCopied] = useState<boolean>(false);
 
   const cycleOwnershipFilter = () => {
@@ -473,6 +483,102 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   }, [activeDeck.cards, getCardOwnedQuantity]);
   const missingCount = Math.max(0, ownershipStats.needed - ownershipStats.owned);
   const ownedCount = ownershipStats.owned;
+
+  interface DeckUsageEntry {
+    deckId: string;
+    deckName: string;
+    quantity: number;
+  }
+
+  interface CrossDeckUsage {
+    cardName: string;
+    totalUsed: number;
+    decks: DeckUsageEntry[];
+  }
+
+  // Cross-deck usage demand calculation
+  const crossDeckUsageMap = useMemo(() => {
+    const map = new Map<string, CrossDeckUsage>();
+    const effectiveDecks = [...allDecks];
+    const activeIdx = effectiveDecks.findIndex((d) => d.id === activeDeck.id);
+    if (activeIdx !== -1) {
+      effectiveDecks[activeIdx] = activeDeck;
+    } else {
+      effectiveDecks.push(activeDeck);
+    }
+
+    effectiveDecks.forEach((d) => {
+      (d.cards || []).forEach((c) => {
+        const cat = (c.category || 'main').toLowerCase();
+        // Maybeboard is not part of the active deck and does not claim collection copies
+        if (cat === 'maybeboard') return;
+        // Basic lands have unlimited availability and should not trigger in-use warnings
+        if (canHaveAnyNumberOfCopies(c)) return;
+
+        const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        if (!cleanName) return;
+
+        const qty = c.quantity || 1;
+        const existing = map.get(cleanName);
+        if (existing) {
+          existing.totalUsed += qty;
+          const deckEntry = existing.decks.find((de) => de.deckId === d.id);
+          if (deckEntry) {
+            deckEntry.quantity += qty;
+          } else {
+            existing.decks.push({ deckId: d.id, deckName: d.name || 'Untitled Deck', quantity: qty });
+          }
+        } else {
+          map.set(cleanName, {
+            cardName: c.name,
+            totalUsed: qty,
+            decks: [{ deckId: d.id, deckName: d.name || 'Untitled Deck', quantity: qty }],
+          });
+        }
+      });
+    });
+
+    return map;
+  }, [allDecks, activeDeck]);
+
+  // Cards in the current deck where collection copies are exceeded across all decks
+  const overcommittedCards = useMemo(() => {
+    const list: {
+      card: DeckCard;
+      cleanName: string;
+      ownedInCollection: number;
+      totalUsedAcrossDecks: number;
+      deficit: number;
+      decks: DeckUsageEntry[];
+    }[] = [];
+
+    const seen = new Set<string>();
+
+    (activeDeck.cards || []).forEach((c) => {
+      const cat = (c.category || 'main').toLowerCase();
+      if (cat === 'maybeboard') return;
+      if (canHaveAnyNumberOfCopies(c)) return;
+
+      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      if (!cleanName || seen.has(cleanName)) return;
+
+      const inCol = getCardOwnedQuantity(c);
+      const cross = crossDeckUsageMap.get(cleanName);
+      if (inCol > 0 && cross && cross.totalUsed > inCol) {
+        seen.add(cleanName);
+        list.push({
+          card: c,
+          cleanName,
+          ownedInCollection: inCol,
+          totalUsedAcrossDecks: cross.totalUsed,
+          deficit: cross.totalUsed - inCol,
+          decks: cross.decks,
+        });
+      }
+    });
+
+    return list;
+  }, [activeDeck.cards, getCardOwnedQuantity, crossDeckUsageMap]);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -814,6 +920,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     };
   }, [selectedHistoryId, deck.id, historyList]);
 
+  const currentDeckCardCount = useMemo(() => {
+    return (deck.cards || [])
+      .filter((c) => (c.category || 'main').toLowerCase() !== 'maybeboard')
+      .reduce((sum, c) => sum + (c.quantity || 1), 0);
+  }, [deck.cards]);
+
   const formatIterationLabel = (item: DeckHistoryItem, idx?: number): string => {
     const ts = parseTimestamp(item.archivedAt);
     const d = new Date(ts);
@@ -826,9 +938,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         })
       : `Iteration #${idx !== undefined ? historyList.length - idx : ''}`;
     const cardsSum = Array.isArray(item.cards) && item.cards.length > 0
-      ? item.cards.reduce((sum, c) => sum + (c.quantity || 1), 0)
+      ? item.cards
+          .filter((c) => (c.category || 'main').toLowerCase() !== 'maybeboard')
+          .reduce((sum, c) => sum + (c.quantity || 1), 0)
       : undefined;
-    const count = item.cardCount ?? cardsSum ?? (item as any).totalCards ?? 0;
+    const count = cardsSum ?? item.cardCount ?? (item as any).totalCards ?? 0;
     const prefix = idx !== undefined ? `Iteration #${historyList.length - idx} • ` : '';
     return `${prefix}${dateStr} (${count} cards)`;
   };
@@ -1548,6 +1662,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       return inCol < (c.quantity || 1);
     }
 
+    if (ownershipFilter === 'in-use') {
+      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const inCol = getCardOwnedQuantity(c);
+      const cross = crossDeckUsageMap.get(cleanName);
+      return !canHaveAnyNumberOfCopies(c) && inCol > 0 && Boolean(cross && cross.totalUsed > inCol);
+    }
+
     return true;
   };
 
@@ -1713,6 +1834,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const toScryfallCard = (card: DeckCard): ScryfallCard => ({
     id: card.scryfallId,
+    deckCardId: card.id,
     name: card.name,
     set: card.set,
     collector_number: card.collector_number || '',
@@ -2169,8 +2291,90 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <AlertCircle className={`w-3.5 h-3.5 shrink-0 ${ownershipFilter === 'unowned' ? 'text-amber-400' : 'text-amber-500/80'}`} />
                   <span>Missing:</span>
                   <span className="font-mono font-bold">{missingCount}</span>
-
                 </button>
+
+                {/* In Use / Overcommitted Across Decks Badge */}
+                <div className="relative z-30">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (overcommittedCards.length > 0) {
+                        setShowInUseDetails(!showInUseDetails);
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+                      ownershipFilter === 'in-use'
+                        ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-500/40'
+                        : overcommittedCards.length > 0
+                        ? 'bg-amber-950/40 border-amber-700/60 text-amber-300 hover:text-amber-200 hover:border-amber-500/70'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                    title={
+                      overcommittedCards.length > 0
+                        ? `${overcommittedCards.length} cards in this deck have all collection copies in use across your decks. Click for details or to filter.`
+                        : 'All cards in this deck have sufficient collection copies across all decks.'
+                    }
+                  >
+                    <Boxes className={`w-3.5 h-3.5 shrink-0 ${overcommittedCards.length > 0 ? 'text-amber-400' : 'text-slate-500'}`} />
+                    <span>In Use:</span>
+                    <span className="font-mono font-bold">{overcommittedCards.length}</span>
+                    {overcommittedCards.length > 0 && (
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showInUseDetails ? 'rotate-180' : ''}`} />
+                    )}
+                  </button>
+
+                  {showInUseDetails && overcommittedCards.length > 0 && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40 bg-transparent"
+                        onClick={() => setShowInUseDetails(false)}
+                      />
+                      <div className="absolute left-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-amber-500/50 shadow-2xl z-50 p-3 max-h-[360px] overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                            <Boxes className="w-4 h-4 text-amber-400" />
+                            <span>Copies In Use Across Decks ({overcommittedCards.length})</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOwnershipFilter((prev) => (prev === 'in-use' ? 'all' : 'in-use'));
+                              setShowInUseDetails(false);
+                            }}
+                            className="text-[10px] font-bold text-amber-400 hover:underline cursor-pointer"
+                          >
+                            {ownershipFilter === 'in-use' ? 'Show All Cards' : 'Filter Deck'}
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mb-2 leading-relaxed">
+                          These cards are in your collection, but the total copies required across all your decks exceeds what you own in your binder. An extra copy may need to be acquired.
+                        </p>
+                        <div className="space-y-1.5">
+                          {overcommittedCards.map((item) => (
+                            <div
+                              key={item.cleanName}
+                              className="p-2 rounded-xl bg-slate-950/70 border border-slate-800/90 text-xs"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-bold text-slate-200 truncate">{item.card.name}</span>
+                                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-950 border border-amber-700/60 text-amber-300 shrink-0">
+                                  +{item.deficit} needed
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1 font-mono">
+                                <span>Owned in binder: <strong className="text-emerald-400">{item.ownedInCollection}</strong></span>
+                                <span>Used across decks: <strong className="text-amber-300">{item.totalUsedAcrossDecks}</strong></span>
+                              </div>
+                              <div className="mt-1 text-[10px] text-slate-500 truncate" title={item.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ')}>
+                                Used in: {item.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ')}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
 
                 {/* Watchlist Dropdown Badge (Encompassing Gamechangers & Banned Cards) */}
                 <div className="relative z-30">
@@ -2425,7 +2629,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     title="Select historical iteration to view"
                   >
                     <option value="current" className="bg-slate-900 text-slate-200 py-1">
-                      Current Version {historyList.length === 0 ? '(No History)' : '(Live Draft)'}
+                      Current Version (${currentDeckCardCount} cards) {historyList.length === 0 ? '(No History)' : '(Live Draft)'}
                     </option>
                     {historyList.map((item, idx) => {
                       const hId = item.id || item.historyId;
@@ -2737,6 +2941,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {ownershipFilter === 'in-use' && (
+              <div className="flex items-center justify-between gap-3 text-xs text-amber-200 w-full">
+                <div className="flex items-center gap-2">
+                  <Boxes className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Filtering deck: Showing <strong className="text-amber-300">All Copies In Use</strong> ({overcommittedCards.length} cards where total deck usage exceeds your binder collection).
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOwnershipFilter('all')}
+                  className="text-[11px] underline text-amber-400 hover:text-amber-200 cursor-pointer shrink-0"
+                >
+                  Show All Cards
+                </button>
+              </div>
+            )}
             {ownershipFilter === 'unowned' && ownershipStats.missingList.length > 0 && (
               <button
                 type="button"
@@ -4155,6 +4376,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               )}
               {(() => {
                 const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
+                const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+                const cross = crossDeckUsageMap.get(cleanName);
+                const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
+
+                if (isOvercommitted) {
+                  const deckListSummary = cross.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ');
+                  return (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 text-[10px] font-mono font-semibold"
+                      title={`All ${inCol} copies in collection are in use across ${cross.decks.length} deck${cross.decks.length === 1 ? '' : 's'} (${deckListSummary}). Total used: ${cross.totalUsed}. Another copy may be required.`}
+                    >
+                      <Boxes className="w-2.5 h-2.5 text-amber-400" />
+                      <span>In Use (${cross.totalUsed}/${inCol})</span>
+                    </span>
+                  );
+                }
+
                 if (inCol >= card.quantity) {
                   return (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono font-semibold" title={`Owned in collection (${inCol} copies)`}>
@@ -4391,6 +4629,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <div className="absolute bottom-1.5 right-1.5 z-10">
             {(() => {
               const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
+              const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+              const cross = crossDeckUsageMap.get(cleanName);
+              const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
+
+              if (isOvercommitted) {
+                const deckListSummary = cross.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ');
+                return (
+                  <span
+                    className="bg-amber-950/95 border border-amber-500/80 rounded px-1.5 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-xs backdrop-blur-xs"
+                    title={`All ${inCol} collection copies in use across ${cross.decks.length} deck${cross.decks.length === 1 ? '' : 's'} (${deckListSummary}). Total used: ${cross.totalUsed}. Another copy may be required.`}
+                  >
+                    <Boxes className="w-2.5 h-2.5 text-amber-400" />
+                    <span>In Use (${cross.totalUsed}/${inCol})</span>
+                  </span>
+                );
+              }
+
               if (inCol >= card.quantity) {
                 return (
                   <span className="bg-emerald-950/90 border border-emerald-500/60 rounded px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 flex items-center gap-0.5 shadow-xs backdrop-blur-xs" title={`Owned in collection (${inCol} copies)`}>

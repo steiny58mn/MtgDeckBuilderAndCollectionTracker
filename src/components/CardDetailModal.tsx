@@ -29,6 +29,7 @@ interface CardDetailModalProps {
   onSelectBinder?: (binder: Binder) => void;
   onAddCardToDeck?: (card: ScryfallCard, category: DeckCategory, quantity: number, isFoil: boolean) => void;
   onAddCardToCollection?: (card: ScryfallCard, quantity: number, isFoil: boolean, condition: CardCondition, acquiredPrice?: number) => void;
+  onUpdateCardPrinting?: (targetCard: ScryfallCard, newPrinting: ScryfallCard) => void;
 }
 
 export const CardDetailModal: React.FC<CardDetailModalProps> = ({
@@ -42,6 +43,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   onSelectBinder,
   onAddCardToDeck,
   onAddCardToCollection,
+  onUpdateCardPrinting,
 }) => {
   const [displayCard, setDisplayCard] = useState<ScryfallCard | null>(card);
   const [isLoadingFull, setIsLoadingFull] = useState(false);
@@ -61,6 +63,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [showPrintings, setShowPrintings] = useState(false);
   const [printingsList, setPrintingsList] = useState<ScryfallCard[]>([]);
   const [isLoadingPrintings, setIsLoadingPrintings] = useState(false);
+  const [printingToast, setPrintingToast] = useState<string | null>(null);
 
   const handleLoadPrintings = async () => {
     if (!displayCard) return;
@@ -85,14 +88,36 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     }
   };
 
+  const handleSelectPrinting = (newPrinting: ScryfallCard) => {
+    const preserveDeckCardId = (displayCard as any)?.deckCardId;
+    const updatedWithDeckCardId: ScryfallCard = {
+      ...newPrinting,
+      deckCardId: preserveDeckCardId,
+    } as any;
+    setDisplayCard(updatedWithDeckCardId);
+    setShowBackFace(false);
+    if (onUpdateCardPrinting && displayCard) {
+      onUpdateCardPrinting(displayCard, newPrinting);
+    }
+    const label = `${(newPrinting.set || '').toUpperCase()} #${newPrinting.collector_number || ''}`;
+    setPrintingToast(`Selected art: ${newPrinting.set_name || label}`);
+    setTimeout(() => setPrintingToast(null), 3000);
+  };
+
   // Whenever `card` changes or modal opens, initialize displayCard and fetch complete card record if needed
   useEffect(() => {
     if (!card) {
       setDisplayCard(null);
+      setPrintingsList([]);
+      setShowPrintings(false);
+      setPrintingToast(null);
       return;
     }
     setDisplayCard(card);
     setShowBackFace(false);
+    setPrintingsList([]);
+    setShowPrintings(false);
+    setPrintingToast(null);
 
     const cardId = card.id || (card as any).scryfallId;
     if (cardId && (!card.oracle_text || !card.image_uris?.large)) {
@@ -213,10 +238,14 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           <button
             type="button"
             onClick={handleLoadPrintings}
-            className="w-full max-w-[320px] mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 transition-colors cursor-pointer"
+            className={`w-full max-w-[320px] mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+              showPrintings
+                ? 'bg-violet-950/80 border-violet-500/70 text-violet-200'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
+            }`}
           >
             <Layers className="w-3.5 h-3.5 text-violet-400" />
-            <span>{showPrintings ? 'Hide Printings' : 'View All Printings & Art'}</span>
+            <span>{showPrintings ? 'Hide Printings (Show Details)' : 'View All Printings & Art'}</span>
             {isLoadingPrintings && <Loader2 className="w-3 h-3 animate-spin text-violet-400 ml-1" />}
           </button>
 
@@ -275,49 +304,189 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Oracle Text */}
-            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 text-sm leading-relaxed text-slate-300 whitespace-pre-line font-serif">
-              {activeFace?.oracle_text || displayCard.oracle_text || 'No rules text.'}
-              {activeFace?.power && activeFace?.toughness && (
-                <div className="mt-3 text-right font-sans font-bold text-slate-100 text-base">
-                  {activeFace.power} / {activeFace.toughness}
-                </div>
-              )}
-              {activeFace?.loyalty && (
-                <div className="mt-3 text-right font-sans font-bold text-fuchsia-400 text-base">
-                  Loyalty: {activeFace.loyalty}
-                </div>
-              )}
-            </div>
-
-            {/* Format Legalities */}
-            <div>
-              <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 block mb-2">
-                Format Legalities
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {majorFormats.map((fmt) => {
-                  const status = displayCard.legalities?.[fmt];
-                  const isLegal = status === 'legal';
-                  const isRestricted = status === 'restricted';
-                  const isBanned = status === 'banned';
-
-                  let badgeColor = 'bg-slate-800 text-slate-500 border-slate-700';
-                  if (isLegal) badgeColor = 'bg-emerald-950/60 text-emerald-300 border-emerald-800/50';
-                  if (isRestricted) badgeColor = 'bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800/50';
-                  if (isBanned) badgeColor = 'bg-rose-950/60 text-rose-400 border-rose-800/50 line-through';
-
-                  return (
-                    <span
-                      key={fmt}
-                      className={`text-[11px] font-medium px-2 py-0.5 rounded-md border capitalize ${badgeColor}`}
-                    >
-                      {fmt}: {status ? status.replace('_', ' ') : 'not legal'}
+            {/* View Switcher Tabs (Card Rules vs All Printings & Art) */}
+            <div className="flex items-center justify-between pt-1 pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setShowPrintings(false)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    !showPrintings
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Card Details & Rules
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!showPrintings) handleLoadPrintings();
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    showPrintings
+                      ? 'bg-violet-900/70 text-violet-200 border border-violet-500/50 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-violet-400" />
+                  <span>All Printings & Art</span>
+                  {printingsList.length > 0 && (
+                    <span className="font-mono text-[10px] px-1.5 py-0.2 bg-violet-950 rounded-full text-violet-300 border border-violet-800/60">
+                      {printingsList.length}
                     </span>
-                  );
-                })}
+                  )}
+                </button>
               </div>
+
+              {printingToast && (
+                <div className="text-[11px] text-emerald-400 flex items-center gap-1 font-bold animate-fadeIn">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{printingToast}</span>
+                </div>
+              )}
             </div>
+
+            {showPrintings ? (
+              /* Printings & Art Gallery */
+              <div className="space-y-3">
+                <div className="p-2.5 rounded-xl bg-violet-950/30 border border-violet-800/40 text-xs text-violet-300 flex items-center justify-between gap-2">
+                  <span>
+                    Select any printing or artwork below to change the card art in your deck.
+                  </span>
+                  {isLoadingPrintings && (
+                    <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
+                  )}
+                </div>
+
+                {isLoadingPrintings && printingsList.length === 0 ? (
+                  <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-400">
+                    <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+                    <span className="text-xs">Fetching all available printings and alternate arts...</span>
+                  </div>
+                ) : printingsList.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-400">
+                    No alternate printings found for this card.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {printingsList.map((p) => {
+                      const pId = p.id || (p as any).scryfallId;
+                      const curId = displayCard.id || (displayCard as any).scryfallId;
+                      const isCurrent = pId === curId;
+                      const pImg = getCardImageUrl(p, 'small') || getCardImageUrl(p, 'normal');
+                      const pPriceUsd = p.prices?.usd ? parseFloat(p.prices.usd) : null;
+                      const pPriceFoil = p.prices?.usd_foil ? parseFloat(p.prices.usd_foil) : null;
+
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => handleSelectPrinting(p)}
+                          className={`p-2 rounded-xl border flex items-center gap-2.5 transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-violet-950/50 border-violet-500/80 ring-1 ring-violet-500/40 shadow-md shadow-violet-950/40'
+                              : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <img
+                            src={pImg}
+                            alt={p.name}
+                            className="w-12 h-16 object-cover rounded-lg border border-slate-800 shrink-0"
+                            loading="lazy"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-xs text-white truncate" title={p.set_name || p.set.toUpperCase()}>
+                                {p.set_name || p.set.toUpperCase()}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase shrink-0">
+                                #{p.collector_number}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+                              <span className="capitalize">{p.rarity}</span>
+                              {pPriceUsd !== null && (
+                                <span className="text-emerald-400 font-mono font-bold">${pPriceUsd.toFixed(2)}</span>
+                              )}
+                              {pPriceFoil !== null && (
+                                <span className="text-fuchsia-400 font-mono flex items-center gap-0.5">
+                                  <Sparkles className="w-2.5 h-2.5" /> ${pPriceFoil.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1.5 flex items-center justify-end">
+                              {isCurrent ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-500/40 px-2 py-0.5 rounded">
+                                  <Check className="w-3 h-3" />
+                                  <span>Current Art</span>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSelectPrinting(p);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-300 hover:text-white bg-violet-900/60 hover:bg-violet-600 px-2.5 py-1 rounded-lg border border-violet-500/40 transition-colors cursor-pointer"
+                                >
+                                  <span>Use This Art</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Oracle Text */}
+                <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 text-sm leading-relaxed text-slate-300 whitespace-pre-line font-serif">
+                  {activeFace?.oracle_text || displayCard.oracle_text || 'No rules text.'}
+                  {activeFace?.power && activeFace?.toughness && (
+                    <div className="mt-3 text-right font-sans font-bold text-slate-100 text-base">
+                      {activeFace.power} / {activeFace.toughness}
+                    </div>
+                  )}
+                  {activeFace?.loyalty && (
+                    <div className="mt-3 text-right font-sans font-bold text-fuchsia-400 text-base">
+                      Loyalty: {activeFace.loyalty}
+                    </div>
+                  )}
+                </div>
+
+                {/* Format Legalities */}
+                <div>
+                  <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 block mb-2">
+                    Format Legalities
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {majorFormats.map((fmt) => {
+                      const status = displayCard.legalities?.[fmt];
+                      const isLegal = status === 'legal';
+                      const isRestricted = status === 'restricted';
+                      const isBanned = status === 'banned';
+
+                      let badgeColor = 'bg-slate-800 text-slate-500 border-slate-700';
+                      if (isLegal) badgeColor = 'bg-emerald-950/60 text-emerald-300 border-emerald-800/50';
+                      if (isRestricted) badgeColor = 'bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800/50';
+                      if (isBanned) badgeColor = 'bg-rose-950/60 text-rose-400 border-rose-800/50 line-through';
+
+                      return (
+                        <span
+                          key={fmt}
+                          className={`text-[11px] font-medium px-2 py-0.5 rounded-md border capitalize ${badgeColor}`}
+                        >
+                          {fmt}: {status ? status.replace('_', ' ') : 'not legal'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Action Sections */}
@@ -331,49 +500,53 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       .reduce((sum, c) => sum + c.quantity, 0)
                   : 0;
 
-                const isSingleton = ['commander', 'oathbreaker', 'brawl', 'duel', 'gladiator', 'historicbrawl', 'predh'].includes(
-                  activeDeck.format.toLowerCase()
-                );
-
-                const isBasicOrUnlimited = canHaveAnyNumberOfCopies(displayCard);
-                const deckLimit = isBasicOrUnlimited ? 999 : (isSingleton ? 1 : 4);
-                const isAtDeckLimit = deckLimit < 999 && deckCopies >= deckLimit;
+                const isUnlimited = canHaveAnyNumberOfCopies(displayCard);
+                const deckLimit = isUnlimited ? Infinity : (isCommanderFormat ? 1 : 4);
+                const isAtDeckLimit = deckCopies >= deckLimit;
 
                 return (
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-fuchsia-400" />
-                          Add to Deck: <strong className="text-white truncate max-w-[180px]">{activeDeck.name}</strong>
+                      <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5 text-fuchsia-400" />
+                        Add to Deck: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{activeDeck.name}</strong>
+                      </span>
+                      {deckCopies > 0 && (
+                        <span className="text-[11px] font-mono text-fuchsia-400 font-bold bg-fuchsia-950/80 px-2 py-0.5 rounded-md border border-fuchsia-800/60">
+                          {deckCopies} in deck {isCommanderFormat && !isUnlimited ? '(Limit 1)' : ''}
                         </span>
-                        <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 text-slate-400">
-                          {deckCopies}/{deckLimit < 999 ? deckLimit : '∞'} in deck
-                        </span>
-                      </div>
-                      <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={deckIsFoil}
-                          onChange={(e) => setDeckIsFoil(e.target.checked)}
-                          className="rounded border-slate-700 bg-slate-800 text-fuchsia-500 focus:ring-0"
-                        />
-                        <span>Foil</span>
-                      </label>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 shrink-0">
-                        <span className="text-xs text-slate-400 mr-1.5">Qty:</span>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Quantity Selector */}
+                      <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+                        <span className="text-xs text-slate-400 mr-1.5 font-medium">Qty:</span>
                         <input
                           type="number"
                           min={1}
-                          max={deckLimit < 999 ? Math.max(1, deckLimit - deckCopies) : 99}
+                          max={isUnlimited ? 99 : (isCommanderFormat ? 1 : Math.max(1, 4 - deckCopies))}
                           value={deckQuantity}
                           onChange={(e) => setDeckQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                          className="w-10 bg-transparent text-xs text-white font-bold focus:outline-none text-center"
+                          className="w-8 bg-transparent text-xs text-white font-bold focus:outline-none text-center"
                         />
                       </div>
 
+                      {/* Foil Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setDeckIsFoil(!deckIsFoil)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                          deckIsFoil
+                            ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300'
+                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                        <span>Foil</span>
+                      </button>
+
+                      {/* Add Buttons */}
                       <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
                         <button
                           type="button"
@@ -382,7 +555,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                           className={`flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
                             !commanderLegality.isLegal || isAtDeckLimit
                               ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
-                              : 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white cursor-pointer shadow-sm active:scale-95'
+                              : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white cursor-pointer shadow-md shadow-indigo-500/20 active:scale-95'
                           }`}
                           title={isAtDeckLimit ? `At limit (${deckCopies}/${deckLimit})` : 'Add to Mainboard'}
                         >
@@ -479,22 +652,24 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                           </option>
                         ))}
                       </select>
-                    ) : (
-                      <strong className="text-white text-xs">Main Binder</strong>
-                    )}
+                    ) : null}
                   </div>
-                  <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={colIsFoil}
-                      onChange={(e) => setColIsFoil(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-800 text-fuchsia-500 focus:ring-0"
-                    />
-                    <span>Foil</span>
-                  </label>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setColIsFoil(!colIsFoil)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                      colIsFoil
+                        ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                    <span>Foil</span>
+                  </button>
+
                   <select
                     value={colCondition}
                     onChange={(e) => setColCondition(e.target.value as CardCondition)}

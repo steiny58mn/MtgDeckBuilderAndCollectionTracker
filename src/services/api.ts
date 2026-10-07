@@ -481,6 +481,24 @@ export async function fetchCardPrints(cardNameOrId: string): Promise<ScryfallCar
     console.warn('[CardService] Prints error:', err);
   }
 
+  // Fallback to direct Scryfall prints search
+  try {
+    const scryUrl = 'https://api.scryfall.com/cards/search?q=%21%22' + encodeURIComponent(clean) + '%22&unique=prints&order=released&dir=desc';
+    const sRes = await fetch(scryUrl, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (sRes.ok) {
+      const sJson = await sRes.json();
+      if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
+        const list = sJson.data.map(normalizeFrostpointCard);
+        printsCache.set(cacheKey, list);
+        return list;
+      }
+    }
+  } catch (sErr) {
+    console.warn('[CardService] Scryfall direct prints fallback error:', sErr);
+  }
+
   const existing = localCardCache.get(clean.toLowerCase());
   return existing ? [existing] : [];
 }

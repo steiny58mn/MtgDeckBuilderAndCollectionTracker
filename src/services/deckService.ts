@@ -598,8 +598,8 @@ export function normalizeHistoryItem(item: any): DeckHistoryItem {
     commanderColorIdentity: item.commanderColorIdentity ?? item.CommanderColorIdentity ?? [],
     cardCount: (() => {
       const rawCards = item.cards ?? item.Cards;
-      const sum = Array.isArray(rawCards) ? rawCards.reduce((s: number, c: any) => s + (c.quantity || c.Quantity || 1), 0) : undefined;
-      return item.cardCount ?? item.CardCount ?? item.totalCards ?? item.TotalCards ?? sum;
+      const sum = Array.isArray(rawCards) ? rawCards.filter((c: any) => ((c.category || c.Category || 'main').toLowerCase()) !== 'maybeboard').reduce((s: number, c: any) => s + (c.quantity || c.Quantity || 1), 0) : undefined;
+      return sum ?? item.cardCount ?? item.CardCount ?? item.totalCards ?? item.TotalCards;
     })(),
     changeSummary: item.changeSummary ?? item.ChangeSummary,
     cards: (Array.isArray(item.cards ?? item.Cards) ? (item.cards ?? item.Cards).map(normalizeCard) : []),
@@ -1977,7 +1977,7 @@ export class DeckService {
           commanderColorIdentity: existing.commanderColorIdentity,
           coverCardUrl: existing.coverCardUrl,
           mtgNexusEditThreadUrl: existing.mtgNexusEditThreadUrl,
-          totalCards: (existing.cards || []).reduce((s, c) => s + (c.quantity || 1), 0),
+          totalCards: (existing.cards || []).filter((c) => (c.category || 'main').toLowerCase() !== 'maybeboard').reduce((s, c) => s + (c.quantity || 1), 0),
           createdAt: existing.createdAt,
           updatedAt: existing.updatedAt,
           archivedAt: Date.now(),

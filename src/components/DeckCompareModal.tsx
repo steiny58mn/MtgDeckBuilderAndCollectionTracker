@@ -157,7 +157,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
   };
 
   // Total cards accounting for individual card quantities (e.g. basic lands or playsets)
-  const currentTotalCards = (deck.cards || []).reduce((sum, c) => sum + (c.quantity || 1), 0);
+  const currentTotalCards = (deck.cards || []).filter((c) => (c.category || 'main').toLowerCase() !== 'maybeboard').reduce((sum, c) => sum + (c.quantity || 1), 0);
 
   // Helper to format date label
   const formatIterationLabel = (item: DeckHistoryItem, idx: number): string => {
@@ -172,7 +172,7 @@ export const DeckCompareModal: React.FC<DeckCompareModalProps> = ({
         })
       : `Iteration #${historyList.length - idx}`;
     const cardsSum = Array.isArray(item.cards) && item.cards.length > 0
-      ? item.cards.reduce((sum, c) => sum + (c.quantity || 1), 0)
+      ? item.cards.filter((c) => (c.category || 'main').toLowerCase() !== 'maybeboard').reduce((sum, c) => sum + (c.quantity || 1), 0)
       : undefined;
     const count = item.cardCount ?? cardsSum ?? item.totalCards ?? 0;
     return `${dateStr} (${count} cards)`;

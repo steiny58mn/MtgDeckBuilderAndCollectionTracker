@@ -25,7 +25,7 @@ import { CardDetailModal } from './components/CardDetailModal';
 import { BinderList } from './components/BinderList';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
-import { getCardImageUrl } from './services/api';
+import { getCardImageUrl, getCardBackImageUrl } from './services/api';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
@@ -870,6 +870,67 @@ export default function App() {
   };
 
   // Top-level tab change handler:
+  // Update the printing / artwork of a card in the active deck
+  const handleUpdateCardPrinting = (targetCard: ScryfallCard, newPrinting: ScryfallCard) => {
+    if (!activeDeck) return;
+    const targetScryfallId = targetCard.id || (targetCard as any).scryfallId;
+    const targetDeckCardId = (targetCard as any).deckCardId;
+    const targetName = (targetCard.name || '').trim().toLowerCase();
+
+    const newImageUrl = getCardImageUrl(newPrinting, 'large') || getCardImageUrl(newPrinting, 'normal');
+    const newBackImageUrl = getCardBackImageUrl(newPrinting);
+
+    let updatedAny = false;
+    const updatedCards = (activeDeck.cards || []).map((c) => {
+      const isMatch = targetDeckCardId
+        ? c.id === targetDeckCardId
+        : (c.scryfallId && targetScryfallId && c.scryfallId === targetScryfallId) ||
+          (c.name.trim().toLowerCase() === targetName);
+
+      if (!isMatch) return c;
+      updatedAny = true;
+      return {
+        ...c,
+        scryfallId: newPrinting.id,
+        set: newPrinting.set,
+        set_name: newPrinting.set_name,
+        setName: newPrinting.set_name,
+        collector_number: newPrinting.collector_number,
+        collectorNumber: newPrinting.collector_number,
+        rarity: newPrinting.rarity || c.rarity,
+        imageUrl: newImageUrl || c.imageUrl,
+        backImageUrl: newBackImageUrl || c.backImageUrl,
+        priceUsd: newPrinting.prices?.usd ? parseFloat(newPrinting.prices.usd) : c.priceUsd,
+        priceUsdFoil: newPrinting.prices?.usd_foil ? parseFloat(newPrinting.prices.usd_foil) : c.priceUsdFoil,
+      };
+    });
+
+    if (updatedAny) {
+      let newCommanderArt = activeDeck.commanderArtUrl;
+      let newCommanderId = activeDeck.commanderId;
+      let newCoverCard = activeDeck.coverCardUrl;
+
+      const cmdrCard = updatedCards.find((c) => c.category === 'commander');
+      if (cmdrCard && (cmdrCard.id === targetDeckCardId || cmdrCard.name.trim().toLowerCase() === targetName)) {
+        newCommanderArt = newImageUrl;
+        newCommanderId = newPrinting.id;
+        newCoverCard = newImageUrl;
+      }
+
+      const updatedDeck: Deck = {
+        ...activeDeck,
+        cards: updatedCards,
+        commanderArtUrl: newCommanderArt,
+        commanderId: newCommanderId,
+        coverCardUrl: newCoverCard,
+        updatedAt: Date.now(),
+      };
+      handleUpdateDeck(updatedDeck, true);
+      showToast('Updated printing for "' + targetCard.name + '" to ' + (newPrinting.set || '').toUpperCase() + ' #' + newPrinting.collector_number, 'success');
+    }
+  };
+
+  // Top-level tab change handler:
   const handleTabChange = async (tab: 'decks' | 'collection' | 'search' | 'login') => {
     if (tab === 'decks') {
       setActiveDeck(null);
@@ -1044,6 +1105,9 @@ export default function App() {
         }}
         onAddCardToCollection={(card, qty, foil, cond, price) => {
           handleAddCardToCollection(card, qty, foil, cond, price);
+        }}
+        onUpdateCardPrinting={(targetCard, newPrinting) => {
+          handleUpdateCardPrinting(targetCard, newPrinting);
         }}
       />
 

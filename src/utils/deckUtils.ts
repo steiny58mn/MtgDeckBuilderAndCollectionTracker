@@ -71,10 +71,11 @@ import {
   compareDecks,
   CompareDecks
 } from '../services/deckService';
-import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem } from '../types/mtg';
+import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard } from '../types/mtg';
 
 /**
- * Standard basic land card names for fallback matching
+ * Standard basic land card names for fallback matching (11 canonical MTG basic lands and variants):
+ * Plains, Island, Swamp, Mountain, Forest, their Snow-Covered variants, and Wastes.
  */
 export const BASIC_LAND_NAMES = new Set([
   'plains',
@@ -89,25 +90,110 @@ export const BASIC_LAND_NAMES = new Set([
   'snow-covered mountain',
   'snow-covered forest',
   'snow-covered wastes',
+  'snow covered plains',
+  'snow covered island',
+  'snow covered swamp',
+  'snow covered mountain',
+  'snow covered forest',
+  'snow covered wastes',
+  'snowcovered plains',
+  'snowcovered island',
+  'snowcovered swamp',
+  'snowcovered mountain',
+  'snowcovered forest',
+  'snowcovered wastes',
 ]);
+
+/**
+ * Normalizes a card name and checks if it matches one of the 11 MTG basic lands:
+ * Plains, Island, Swamp, Mountain, Forest, the Snow-Covered variants of those 5, and Wastes.
+ */
+export function isBasicLandName(name: string | null | undefined): boolean {
+  if (!name || typeof name !== 'string') return false;
+
+  // 1. Separate front face if double-faced (split by '//')
+  let clean = name.split('//')[0];
+
+  // 2. Remove parenthetical or bracketed info (e.g. (MH1), (NEO), [2X2], etc.)
+  clean = clean.replace(/\s*[\(\[].*?[\)\]]/g, ' ');
+
+  // 3. Remove trailing foil tags, collector numbers, set codes, hashtags (e.g. #251, 251, *F*)
+  clean = clean.replace(/\*f\*/gi, ' ');
+  clean = clean.replace(/#\s*\d+.*$/i, ' ');
+  clean = clean.replace(/\b\d+[a-z]?\b.*$/i, ' ');
+
+  // 4. Standardize dashes (en-dash, em-dash, hyphens) and collapse whitespace
+  clean = clean.replace(/[\u2013\u2014]/g, '-').trim().toLowerCase();
+
+  if (BASIC_LAND_NAMES.has(clean)) {
+    return true;
+  }
+
+  // Regex fallback matching all 11 basic lands:
+  // Swamp, Island, Forest, Mountain, Plains, the Snow-Covered Variants of those 5, and Wastes
+  return /^(snow[- ]?covered\s+)?(plains|island|swamp|mountain|forest|wastes)$/i.test(clean);
+}
 
 /**
  * Checks if a card has the "Basic" supertype (e.g. Basic Land, Basic Snow Land, etc.).
  * Anything with the Basic Supertype can have any number of cards in the deck.
+ * Guaranteed to match the 11 canonical MTG basic lands:
+ * Plains, Island, Swamp, Mountain, Forest, their Snow-Covered variants, and Wastes.
  */
-export function hasBasicSupertype(card: { name?: string; type_line?: string; typeLine?: string } | null | undefined): boolean {
+export function hasBasicSupertype(card: {
+  name?: string;
+  type_line?: string;
+  typeLine?: string;
+  supertypes?: string[];
+  card_faces?: any[];
+  [key: string]: any;
+} | null | undefined): boolean {
   if (!card) return false;
-  const typeLine = (card.type_line || (card as any).typeLine || '').trim();
-  
-  // Check for the "Basic" supertype word anywhere in type line or before the subtype dash
-  const mainTypePart = typeLine.split('—')[0].split('//')[0];
-  if (/\bBasic\b/i.test(mainTypePart) || /\bBasic\b/i.test(typeLine)) {
+
+  // 1. Direct name check (handles cards lacking type_line such as plain text imports)
+  if (card.name && isBasicLandName(card.name)) {
     return true;
   }
-  
-  // Fallback check against known basic card names (e.g. Plains, Island, Swamp, Mountain, Forest, Wastes, Snow-Covered...)
-  const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
-  return BASIC_LAND_NAMES.has(cleanName);
+
+  // 2. Check supertypes array if present
+  const supertypes = (card as any).supertypes || (card as any).superTypes;
+  if (Array.isArray(supertypes)) {
+    if (supertypes.some((s: string) => typeof s === 'string' && s.trim().toLowerCase() === 'basic')) {
+      return true;
+    }
+  }
+
+  // 3. Check type_line / typeLine / type / TypeLine
+  const typeLine = (
+    card.type_line ||
+    (card as any).typeLine ||
+    (card as any).TypeLine ||
+    (card as any).type ||
+    ''
+  ).trim();
+
+  if (typeLine) {
+    // Check for the "Basic" supertype word anywhere in type line or before the subtype dash
+    const mainTypePart = typeLine.split('—')[0].split('-')[0].split('//')[0];
+    if (/\bBasic\b/i.test(mainTypePart) || /\bBasic\b/i.test(typeLine)) {
+      return true;
+    }
+  }
+
+  // 4. Check card faces for double-faced / split cards
+  if (Array.isArray(card.card_faces) && card.card_faces.length > 0) {
+    for (const face of card.card_faces) {
+      if (face?.name && isBasicLandName(face.name)) {
+        return true;
+      }
+      const faceType = (face?.type_line || face?.typeLine || face?.TypeLine || face?.type || '').trim();
+      if (faceType && /\bBasic\b/i.test(faceType)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -117,12 +203,181 @@ export function hasBasicSupertype(card: { name?: string; type_line?: string; typ
 export function canHaveAnyNumberOfCopies(card: any): boolean {
   if (!card) return false;
   if (hasBasicSupertype(card)) return true;
-  
+
   const oracleText = card.oracle_text || card.card_faces?.[0]?.oracle_text || (card as any).oracleText || '';
   if (/A deck can have any number of/i.test(oracleText)) {
     return true;
   }
   return false;
+}
+
+export interface CollectionLookup {
+  idMap: Map<string, number>;
+  nameMap: Map<string, number>;
+  getQuantity: (card: { name?: string; scryfallId?: string } | string | null | undefined) => number;
+}
+
+/**
+ * Builds a comprehensive normalized lookup structure for collection cards.
+ * Indexes by scryfallId, exact name, normalized quotes, front face of split/DFC cards,
+ * and cleaned name (stripped set codes and collector numbers).
+ */
+export function buildCollectionLookup(collectionCards: CollectionCard[]): CollectionLookup {
+  const idMap = new Map<string, number>();
+  const nameMap = new Map<string, number>();
+
+  (collectionCards || []).forEach((c) => {
+    if (!c) return;
+    const qty = c.quantity || 1;
+    if (c.scryfallId) {
+      idMap.set(c.scryfallId, (idMap.get(c.scryfallId) || 0) + qty);
+    }
+    const rawName = (c.name || '').toLowerCase().trim();
+    if (!rawName) return;
+
+    const keys = new Set<string>();
+    keys.add(rawName);
+
+    // Front face of double-faced cards or split cards
+    const cleanFront = rawName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    if (cleanFront) keys.add(cleanFront);
+
+    // Normalized quotes / apostrophes
+    const normalizedQuotes = rawName.replace(/['’`"]/g, "'");
+    if (normalizedQuotes) keys.add(normalizedQuotes);
+
+    // Front face without quotes
+    const cleanFrontNoQuotes = cleanFront ? cleanFront.replace(/['’`"]/g, "'") : '';
+    if (cleanFrontNoQuotes) keys.add(cleanFrontNoQuotes);
+
+    // Front face without numbers/collector codes (e.g. "Urza 75" or "Urza #75")
+    const cleanNoNum = cleanFrontNoQuotes ? cleanFrontNoQuotes.replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').trim() : '';
+    if (cleanNoNum) keys.add(cleanNoNum);
+
+    keys.forEach((key) => {
+      nameMap.set(key, (nameMap.get(key) || 0) + qty);
+    });
+  });
+
+  const getQuantity = (card: { name?: string; scryfallId?: string } | string | null | undefined): number => {
+    if (!card) return 0;
+    if (typeof card === 'object') {
+      if (card.scryfallId && idMap.has(card.scryfallId)) {
+        return idMap.get(card.scryfallId)!;
+      }
+    }
+    const cardName = typeof card === 'string' ? card : (card.name || '');
+    if (!cardName) return 0;
+
+    const lower = cardName.toLowerCase().trim();
+    if (nameMap.has(lower)) return nameMap.get(lower)!;
+
+    const normQuotes = lower.replace(/['’`"]/g, "'");
+    if (nameMap.has(normQuotes)) return nameMap.get(normQuotes)!;
+
+    const cleanFront = lower.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    if (nameMap.has(cleanFront)) return nameMap.get(cleanFront)!;
+
+    const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
+    if (nameMap.has(cleanFrontNoQuotes)) return nameMap.get(cleanFrontNoQuotes)!;
+
+    const cleanNoNum = cleanFrontNoQuotes.replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').trim();
+    if (nameMap.has(cleanNoNum)) return nameMap.get(cleanNoNum)!;
+
+    return 0;
+  };
+
+  return { idMap, nameMap, getQuantity };
+}
+
+export interface DeckCompletionResult {
+  owned: number;
+  total: number;
+  pct: number;
+  unownedCardsCount: number;
+}
+
+/**
+ * Calculates deck collection completion percentage.
+ * Handles:
+ * - Commander inclusion across card categories (even if placed in sideboard or missing from cards array)
+ * - Non-commander singleton and playset cards
+ * - When there are NO unowned cards in the deck, guarantees 100% owned.
+ */
+export function calculateDeckCompletion(
+  deck: Deck,
+  collectionLookup: CollectionLookup | ((card: any) => number)
+): DeckCompletionResult {
+  const getOwnedQty = typeof collectionLookup === 'function'
+    ? collectionLookup
+    : collectionLookup.getQuantity;
+
+  let owned = 0;
+  let total = 0;
+  let unownedCardsCount = 0;
+
+  const cards = deck.cards || [];
+  const commanderName = (deck.commanderName || '').trim().toLowerCase();
+  const commanderId = deck.commanderId || '';
+
+  // Track if any commander cards are present in the cards array
+  let foundCommanderCard = false;
+
+  cards.forEach((c) => {
+    const cat = (c.category || 'main').toLowerCase();
+    const cName = (c.name || '').trim().toLowerCase();
+
+    // Check if this card is explicitly the commander or designated commander
+    const isCmdr =
+      cat === 'commander' ||
+      Boolean(commanderId && c.scryfallId === commanderId) ||
+      Boolean(commanderName && (cName === commanderName || cName.split('//')[0].trim() === commanderName.split('//')[0].trim()));
+
+    if (isCmdr) {
+      foundCommanderCard = true;
+    }
+
+    // Include mainboard and commander cards (ignore sideboard & maybeboard UNLESS it is the designated commander)
+    if (cat === 'sideboard' || cat === 'maybeboard') {
+      if (!isCmdr) return;
+    }
+
+    const qty = c.quantity || 1;
+    total += qty;
+    const inCol = getOwnedQty(c);
+    const ownedCopies = Math.min(qty, inCol);
+    owned += ownedCopies;
+    if (ownedCopies < qty) {
+      unownedCardsCount += (qty - ownedCopies);
+    }
+  });
+
+  // If this is a commander deck (or has a commander specified) but no commander card was designated in cards
+  if (!foundCommanderCard && (deck.format === 'commander' || commanderName || commanderId)) {
+    if (commanderName || commanderId) {
+      total += 1;
+      const cmdrInCol = getOwnedQty({ name: deck.commanderName, scryfallId: deck.commanderId });
+      const cmdrOwned = Math.min(1, cmdrInCol);
+      owned += cmdrOwned;
+      if (cmdrOwned < 1) {
+        unownedCardsCount += 1;
+      }
+    }
+  }
+
+  // Exact percentage calculation:
+  // When there are no unowned cards in the deck, it MUST say 100% owned!
+  let pct = 0;
+  if (total > 0) {
+    if (unownedCardsCount === 0 || owned >= total) {
+      pct = 100;
+    } else {
+      // If there are unowned cards, never round up to 100% (e.g. 99 out of 100 is 99%, not 100%)
+      pct = Math.min(99, Math.floor((owned / total) * 100));
+    }
+  }
+
+  return { owned, total, pct, unownedCardsCount };
 }
 
 export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): DeckStats {
@@ -626,8 +881,23 @@ export function isCardLegalInCommander(
         swamp: 'B',
         mountain: 'R',
         forest: 'G',
+        'snow-covered plains': 'W',
+        'snow-covered island': 'U',
+        'snow-covered swamp': 'B',
+        'snow-covered mountain': 'R',
+        'snow-covered forest': 'G',
+        'snow covered plains': 'W',
+        'snow covered island': 'U',
+        'snow covered swamp': 'B',
+        'snow covered mountain': 'R',
+        'snow covered forest': 'G',
+        'snowcovered plains': 'W',
+        'snowcovered island': 'U',
+        'snowcovered swamp': 'B',
+        'snowcovered mountain': 'R',
+        'snowcovered forest': 'G',
       };
-      const cleanName = card.name.split(' // ')[0].toLowerCase().trim();
+      const cleanName = card.name.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
       if (basicMap[cleanName]) {
         cardIdentity = [basicMap[cleanName]];
       }
