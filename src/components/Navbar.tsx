@@ -7,8 +7,7 @@ import {
   LogIn, 
   LogOut, 
   KeyRound, 
-  ChevronDown,
-  Camera
+  ChevronDown
 } from 'lucide-react';
 import { Deck, CollectionCard, Binder } from '../types/mtg';
 import { UserDto } from '../services/authService';
@@ -25,7 +24,6 @@ interface NavbarProps {
   user?: UserDto | null;
   onOpenAuth: (mode?: AuthMode) => void;
   onLogout: () => void;
-  onOpenScanner?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -39,7 +37,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   user,
   onOpenAuth,
   onLogout,
-  onOpenScanner,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -122,16 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Section: Scanner shortcut & Authentication State */}
           <div className="flex items-center gap-3">
-            {onOpenScanner && (
-              <button
-                onClick={onOpenScanner}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-950/60 hover:bg-violet-900/80 text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-400/60 text-xs font-bold transition-all cursor-pointer shadow-sm"
-                title="Scan card with camera to add to binder"
-              >
-                <Camera className="w-3.5 h-3.5 text-violet-400" />
-                <span>Scan Cards</span>
-              </button>
-            )}
+
 
             {user ? (
               <div className="relative" ref={dropdownRef}>
@@ -225,16 +213,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Binders ({binders.length})</span>
           </button>
 
-          {onOpenScanner && (
-            <button
-              onClick={onOpenScanner}
-              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold text-violet-400 hover:text-violet-300"
-              title="Scan Cards to Binder"
-            >
-              <Camera className="w-4 h-4" />
-              <span>Scan Cards</span>
-            </button>
-          )}
+
 
           <button
             onClick={() => onTabChange('search')}

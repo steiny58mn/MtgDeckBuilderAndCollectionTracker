@@ -973,7 +973,6 @@ export default function App() {
           setAuthModalOpen(true);
         }}
         onLogout={handleLogout}
-        onOpenScanner={() => setIsScannerOpen(true)}
       />
 
       {/* Main Content Area */}

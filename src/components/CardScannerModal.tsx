@@ -1,6 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  X, 
   Camera, 
   Sparkles, 
   Upload, 
@@ -14,14 +13,14 @@ import {
   Key, 
   BookOpen, 
   Plus, 
-  Minus,
   RefreshCw,
   ExternalLink,
   Volume2,
   Layers,
   ChevronUp,
   ChevronDown,
-  Check
+  Check,
+  X
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { 
@@ -29,8 +28,6 @@ import {
   identifyCardFromImage, 
   getStoredGeminiApiKey, 
   setStoredGeminiApiKey,
-  lookupExactScryfallCard,
-  CardScanResult
 } from '../services/cardScannerService';
 import { playScanSuccessSound, playScanErrorSound, unlockAudio } from '../utils/soundUtils';
 import { getCardImageUrl, getAutocomplete, fetchCardPrints } from '../services/api';
@@ -99,6 +96,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [cardQuantity, setCardQuantity] = useState<number>(1);
   const [overrideFoil, setOverrideFoil] = useState<boolean | null>(null); // null = auto-detect
 
+  // Automatic Crosshairs Detection State
+  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
+  const [isCrosshairLocked, setIsCrosshairLocked] = useState<boolean>(false);
+  const prevFrameLumaRef = useRef<Float32Array | null>(null);
+  const steadyCountRef = useRef<number>(0);
+  const lastScannedLumaRef = useRef<Float32Array | null>(null);
+  const lastScanTimestampRef = useRef<number>(0);
+
   // Batch Session state (accumulates all cards scanned while camera stays open)
   const [scannedBatchCards, setScannedBatchCards] = useState<BatchScannedCard[]>([]);
   const [recentToast, setRecentToast] = useState<{
@@ -129,7 +134,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     return () => clearTimeout(timer);
   }, [recentToast]);
 
-  // Auto-dismiss scan error after 4 seconds
+  // Auto-dismiss scan error after 4.5 seconds
   useEffect(() => {
     if (!scanError) return;
     const timer = setTimeout(() => {
@@ -199,6 +204,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
     setCameraActive(false);
     setTorchOn(false);
+    setIsCrosshairLocked(false);
   }, []);
 
   // Lifecycle
@@ -212,6 +218,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setScanError(null);
       setIsProcessing(false);
       setShowBatchDrawer(false);
+      setIsCrosshairLocked(false);
     }
     return () => {
       stopCamera();
@@ -254,6 +261,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       if (!apiKey) {
         setStatusMessage('');
         setIsProcessing(false);
+        setIsCrosshairLocked(false);
         playScanErrorSound();
         setShowApiKeyModal(true);
         setScanError('Please enter your free Gemini API key to enable card recognition.');
@@ -288,15 +296,17 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         isFoil: finalIsFoil,
       });
 
-      // Keep camera live and clear status message for next card immediately!
+      lastScanTimestampRef.current = Date.now();
       setStatusMessage('');
       setIsProcessing(false);
+      setIsCrosshairLocked(false);
     } catch (err: any) {
       console.error('[CardScanner] Batch scan error:', err);
       playScanErrorSound();
       setScanError(err?.message || 'Could not recognize card. Ensure the card is in focus with good lighting.');
       setStatusMessage('');
       setIsProcessing(false);
+      setIsCrosshairLocked(false);
     }
   };
 
@@ -308,6 +318,128 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     } catch {}
     handleProcessImage(videoRef.current);
   };
+
+  // =========================================================================
+  // Automatic Crosshairs Card Detection Effect
+  // Automatically detects when a card is positioned steadily within the crosshairs
+  // =========================================================================
+  useEffect(() => {
+    if (!cameraActive || !autoScanEnabled || isProcessing) return;
+
+    const sampleW = 60;
+    const sampleH = 84;
+    const canvas = document.createElement('canvas');
+    canvas.width = sampleW;
+    canvas.height = sampleH;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    let isMounted = true;
+
+    const interval = setInterval(() => {
+      if (!isMounted || isProcessing || !videoRef.current) return;
+      const video = videoRef.current;
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+      // Cooldown: 2.2 seconds between automatic scans
+      if (Date.now() - lastScanTimestampRef.current < 2200) return;
+
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+
+      // Crop crosshairs reticle zone
+      const cropW = Math.round(vw * 0.55);
+      const cropH = Math.round(cropW * 1.4);
+      const cropX = Math.max(0, Math.round((vw - cropW) / 2));
+      const cropY = Math.max(0, Math.round((vh - cropH) / 2));
+
+      ctx.drawImage(video, cropX, cropY, cropW, Math.min(cropH, vh - cropY), 0, 0, sampleW, sampleH);
+      const imgData = ctx.getImageData(0, 0, sampleW, sampleH);
+      const d = imgData.data;
+
+      const count = sampleW * sampleH;
+      const currLuma = new Float32Array(count);
+      let sum = 0;
+
+      for (let i = 0; i < count; i++) {
+        const idx = i * 4;
+        const y = 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2];
+        currLuma[i] = y;
+        sum += y;
+      }
+
+      const mean = sum / count;
+      // Skip if lighting is too dark or pure glare
+      if (mean < 35 || mean > 230) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        return;
+      }
+
+      // Contrast / standard deviation check
+      let varianceSum = 0;
+      for (let i = 0; i < count; i++) {
+        const diff = currLuma[i] - mean;
+        varianceSum += diff * diff;
+      }
+      const stdDev = Math.sqrt(varianceSum / count);
+
+      // MTG cards have high contrast (borders, art, text boxes)
+      if (stdDev < 18) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        return;
+      }
+
+      // Motion / stability check
+      if (prevFrameLumaRef.current) {
+        let diffSum = 0;
+        for (let i = 0; i < count; i++) {
+          diffSum += Math.abs(currLuma[i] - prevFrameLumaRef.current[i]);
+        }
+        const motion = diffSum / count;
+
+        if (motion > 12) {
+          // Hand/card still moving into position
+          steadyCountRef.current = 0;
+          setIsCrosshairLocked(false);
+        } else {
+          // Stable within the crosshairs!
+          steadyCountRef.current += 1;
+        }
+      }
+
+      prevFrameLumaRef.current = currLuma;
+
+      // When stable for 2 consecutive intervals (~600ms):
+      if (steadyCountRef.current >= 2) {
+        // Prevent re-scanning the same card if user is still holding it
+        if (lastScannedLumaRef.current) {
+          let diffFromLast = 0;
+          for (let i = 0; i < count; i++) {
+            diffFromLast += Math.abs(currLuma[i] - lastScannedLumaRef.current[i]);
+          }
+          const diffAvg = diffFromLast / count;
+          if (diffAvg < 16) {
+            // Same card still resting in frame, wait for card to swap
+            return;
+          }
+        }
+
+        // New card detected & held steady! Trigger auto-scan!
+        setIsCrosshairLocked(true);
+        steadyCountRef.current = 0;
+        lastScannedLumaRef.current = currLuma;
+        lastScanTimestampRef.current = Date.now();
+        handleCaptureFrame();
+      }
+    }, 300);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [cameraActive, autoScanEnabled, isProcessing]);
 
   // File upload input change
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -468,33 +600,79 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           className="absolute inset-0 w-full h-full object-cover"
         />
 
-        {/* Card Alignment Reticle Frame */}
-        <div className="relative z-10 w-[82vw] max-w-[320px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3">
-          {/* Corner brackets */}
+        {/* Card Alignment Reticle Frame with Auto-Scan Lock-On Glow */}
+        <div
+          className={`relative z-10 w-[82vw] max-w-[320px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3 transition-all duration-200 ${
+            isCrosshairLocked || isProcessing
+              ? 'scale-102 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
+              : ''
+          }`}
+        >
+          {/* Corner brackets (turn emerald green when card is locked in!) */}
           <div className="flex justify-between">
-            <div className="w-7 h-7 border-t-3 border-l-3 border-violet-500 rounded-tl-lg shadow-sm" />
-            <div className="w-7 h-7 border-t-3 border-r-3 border-violet-500 rounded-tr-lg shadow-sm" />
+            <div
+              className={`w-7 h-7 border-t-3 border-l-3 rounded-tl-lg shadow-sm transition-colors duration-200 ${
+                isCrosshairLocked || isProcessing
+                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                  : 'border-violet-500'
+              }`}
+            />
+            <div
+              className={`w-7 h-7 border-t-3 border-r-3 rounded-tr-lg shadow-sm transition-colors duration-200 ${
+                isCrosshairLocked || isProcessing
+                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                  : 'border-violet-500'
+              }`}
+            />
           </div>
 
           {/* Set & Number Highlight Region */}
           <div className="w-full flex items-end justify-between">
-            <div className="bg-violet-900/70 border border-violet-400/60 rounded px-2 py-1 text-[10px] text-violet-200 font-mono shadow-sm backdrop-blur-xs flex items-center gap-1">
-              <span>SET & # \u2193</span>
+            <div
+              className={`border rounded px-2 py-1 text-[10px] font-mono shadow-sm backdrop-blur-xs flex items-center gap-1 transition-colors ${
+                isCrosshairLocked || isProcessing
+                  ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200'
+                  : 'bg-violet-900/70 border-violet-400/60 text-violet-200'
+              }`}
+            >
+              <span>{isCrosshairLocked ? 'CARD LOCKED IN' : 'SET & # ↓'}</span>
             </div>
-            <div className="w-7 h-7 border-b-3 border-r-3 border-violet-500 rounded-br-lg shadow-sm" />
+            <div
+              className={`w-7 h-7 border-b-3 border-r-3 rounded-br-lg shadow-sm transition-colors duration-200 ${
+                isCrosshairLocked || isProcessing
+                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                  : 'border-violet-500'
+              }`}
+            />
           </div>
-          <div className="absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 border-violet-500 rounded-bl-lg shadow-sm" />
+          <div
+            className={`absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 rounded-bl-lg shadow-sm transition-colors duration-200 ${
+              isCrosshairLocked || isProcessing
+                ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                : 'border-violet-500'
+            }`}
+          />
 
           {/* Continuous Scanning Active Light */}
           {isProcessing && (
-            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-violet-400 to-transparent shadow-[0_0_12px_rgba(167,139,250,0.8)] animate-pulse" />
+            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(52,211,153,0.8)] animate-pulse" />
           )}
         </div>
 
         {/* Top Hint Bar over live camera */}
         <div className="absolute top-3 inset-x-4 z-20 flex justify-center pointer-events-none">
-          <div className="bg-slate-900/85 backdrop-blur-md px-3.5 py-1 rounded-full border border-slate-700/60 text-[11px] text-slate-200 text-center shadow-lg">
-            Batch Mode: Center card &bull; Camera stays open for multiple cards
+          <div
+            className={`backdrop-blur-md px-3.5 py-1 rounded-full border text-[11px] text-center shadow-lg transition-colors ${
+              isCrosshairLocked || isProcessing
+                ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200 font-bold'
+                : 'bg-slate-900/85 border-slate-700/60 text-slate-200'
+            }`}
+          >
+            {isCrosshairLocked || isProcessing
+              ? 'Card in crosshairs — analyzing...'
+              : autoScanEnabled
+              ? 'Hold card within crosshairs to auto-scan'
+              : 'Center card & tap camera button'}
           </div>
         </div>
 
@@ -581,8 +759,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         {/* Processing Indicator Overlay (Subtle spinner, camera stays visible behind) */}
         {isProcessing && (
           <div className="absolute inset-0 z-25 bg-slate-950/40 backdrop-blur-xs flex flex-col items-center justify-center p-4">
-            <div className="bg-slate-900/90 border border-violet-500/40 rounded-2xl px-5 py-4 flex flex-col items-center shadow-2xl">
-              <Loader2 className="w-8 h-8 text-violet-400 animate-spin mb-2" />
+            <div className="bg-slate-900/90 border border-emerald-500/40 rounded-2xl px-5 py-4 flex flex-col items-center shadow-2xl">
+              <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mb-2" />
               <p className="text-xs font-bold text-white">{statusMessage || 'Analyzing card...'}</p>
             </div>
           </div>
@@ -661,62 +839,79 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         </div>
       )}
 
-      {/* Bottom Interactive Toolbar: Foil, Quantity & Continuous Shutter Button */}
+      {/* Bottom Interactive Toolbar: Auto-Scan Toggle, Foil, Quantity & Continuous Shutter Button */}
       <div className="bg-slate-900 border-t border-slate-800 px-4 py-2.5 z-20 flex flex-col gap-2">
-        {/* Options Row (Foil & Quantity) */}
-        <div className="flex items-center justify-between text-xs text-slate-300">
-          {/* Foil Mode Toggle */}
-          <div className="flex items-center gap-1 bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60">
-            <button
-              type="button"
-              onClick={() => setOverrideFoil(null)}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                overrideFoil === null ? 'bg-violet-600 text-white font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-              title="Auto-detect foil finish from camera"
-            >
-              Auto-Foil
-            </button>
-            <button
-              type="button"
-              onClick={() => setOverrideFoil(true)}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer ${
-                overrideFoil === true ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-              title="Force foil printing"
-            >
-              <Sparkles className="w-3 h-3" /> Foil
-            </button>
-            <button
-              type="button"
-              onClick={() => setOverrideFoil(false)}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                overrideFoil === false ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-              title="Force regular printing"
-            >
-              Regular
-            </button>
-          </div>
+        {/* Options Row (Auto-Scan, Foil & Quantity) */}
+        <div className="flex items-center justify-between text-xs text-slate-300 flex-wrap gap-2">
+          {/* Auto-Scan Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setAutoScanEnabled(!autoScanEnabled)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+              autoScanEnabled
+                ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 shadow-sm'
+                : 'bg-slate-800/80 border-slate-700/60 text-slate-400 hover:text-white'
+            }`}
+            title="Automatically scan when card is held steady within the crosshairs"
+          >
+            <Zap className={`w-3 h-3 ${autoScanEnabled ? 'text-emerald-400 fill-emerald-400' : ''}`} />
+            <span>Auto-Scan: {autoScanEnabled ? 'ON' : 'OFF'}</span>
+          </button>
 
-          {/* Quantity Stepper */}
-          <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-lg border border-slate-700/60">
-            <span className="text-[11px] text-slate-400">Qty:</span>
-            <button
-              type="button"
-              onClick={() => setCardQuantity((q) => Math.max(1, q - 1))}
-              className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
-            >
-              -
-            </button>
-            <span className="font-bold text-white w-4 text-center">{cardQuantity}</span>
-            <button
-              type="button"
-              onClick={() => setCardQuantity((q) => q + 1)}
-              className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
-            >
-              +
-            </button>
+          <div className="flex items-center gap-2">
+            {/* Foil Mode Toggle */}
+            <div className="flex items-center gap-1 bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => setOverrideFoil(null)}
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  overrideFoil === null ? 'bg-violet-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Auto-detect foil finish from camera"
+              >
+                Auto-Foil
+              </button>
+              <button
+                type="button"
+                onClick={() => setOverrideFoil(true)}
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer ${
+                  overrideFoil === true ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Force foil printing"
+              >
+                <Sparkles className="w-3 h-3" /> Foil
+              </button>
+              <button
+                type="button"
+                onClick={() => setOverrideFoil(false)}
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  overrideFoil === false ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Force regular printing"
+              >
+                Regular
+              </button>
+            </div>
+
+            {/* Quantity Stepper */}
+            <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-lg border border-slate-700/60">
+              <span className="text-[11px] text-slate-400">Qty:</span>
+              <button
+                type="button"
+                onClick={() => setCardQuantity((q) => Math.max(1, q - 1))}
+                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                -
+              </button>
+              <span className="font-bold text-white w-4 text-center">{cardQuantity}</span>
+              <button
+                type="button"
+                onClick={() => setCardQuantity((q) => q + 1)}
+                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                +
+              </button>
+            </div>
           </div>
         </div>
 
@@ -745,13 +940,21 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             type="button"
             disabled={isProcessing}
             onClick={handleCaptureFrame}
-            className={`w-16 h-16 rounded-full border-4 border-violet-500/50 p-1 flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer ${
-              isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'
-            }`}
-            title="Snap card & add to binder (camera stays live for next card!)"
+            className={`w-16 h-16 rounded-full border-4 p-1 flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer ${
+              isCrosshairLocked || isProcessing
+                ? 'border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.5)] scale-105'
+                : 'border-violet-500/50 hover:scale-105'
+            } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title="Snap card & add to binder (Auto-scan also triggers when card is in crosshairs)"
           >
-            <div className="w-full h-full rounded-full bg-white hover:bg-slate-200 transition-colors shadow-inner flex items-center justify-center">
-              <Camera className="w-6 h-6 text-slate-900" />
+            <div
+              className={`w-full h-full rounded-full transition-colors shadow-inner flex items-center justify-center ${
+                isCrosshairLocked || isProcessing
+                  ? 'bg-emerald-400 text-slate-950'
+                  : 'bg-white hover:bg-slate-200 text-slate-900'
+              }`}
+            >
+              <Camera className="w-6 h-6" />
             </div>
           </button>
 
@@ -840,7 +1043,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             </div>
 
             <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-              Google Gemini Vision powers the instant recognition of card titles, set codes, and collector numbers directly from your camera in batch.
+              Google Gemini Vision (gemini-2.0-flash) powers the automatic recognition of card titles, set codes, and collector numbers directly from your camera in batch.
             </p>
 
             <div className="mb-3">

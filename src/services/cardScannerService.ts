@@ -107,7 +107,7 @@ export async function optimizeCardImage(
         processLoadedImage(imageSource);
       } else {
         imageSource.onload = () => processLoadedImage(imageSource);
-        imageSource.onerror = (e) => reject(new Error('Failed to load image element'));
+        imageSource.onerror = (_e) => reject(new Error('Failed to load image element'));
       }
       return;
     }
@@ -120,7 +120,7 @@ export async function optimizeCardImage(
       img.onerror = () => reject(new Error('Failed to parse uploaded image file'));
       img.src = e.target?.result as string;
     };
-    reader.onerror = (e) => reject(new Error('Failed to read image file'));
+    reader.onerror = (_e) => reject(new Error('Failed to read image file'));
     reader.readAsDataURL(imageSource);
   });
 }
@@ -205,6 +205,109 @@ export async function lookupExactScryfallCard(
 }
 
 /**
+ * Execute Gemini Vision API call using standard models (gemini-2.0-flash, gemini-2.0-flash-lite, gemini-1.5-flash-latest)
+ * via direct REST API and GoogleGenAI SDK with complete fallback handling.
+ */
+async function queryGeminiVision(
+  apiKey: string,
+  base64Jpeg: string,
+  prompt: string
+): Promise<string> {
+  const candidateModels = [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-latest',
+    'gemini-2.0-flash-001',
+  ];
+
+  let lastError: any = null;
+
+  // 1. Direct REST API calls (clean, robust across all client environments)
+  for (const model of candidateModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const payload = {
+        contents: [
+          {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: 'image/jpeg',
+                  data: base64Jpeg,
+                },
+              },
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+        },
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          return text;
+        }
+      } else {
+        const errorJson = await res.json().catch(() => null);
+        const errorMsg = errorJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+        console.warn(`[CardScanner] Gemini REST attempt (${model}) returned:`, errorMsg);
+        lastError = new Error(errorMsg);
+      }
+    } catch (err: any) {
+      console.warn(`[CardScanner] Gemini REST attempt (${model}) network error:`, err);
+      lastError = err;
+    }
+  }
+
+  // 2. GoogleGenAI SDK attempt with gemini-2.0-flash
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const sdkResp = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: base64Jpeg,
+              },
+            },
+            {
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    });
+    if (sdkResp && sdkResp.text) {
+      return sdkResp.text;
+    }
+  } catch (sdkErr: any) {
+    console.warn('[CardScanner] GoogleGenAI SDK error:', sdkErr);
+    if (!lastError) lastError = sdkErr;
+  }
+
+  throw lastError || new Error('Failed to analyze card image with Gemini Vision');
+}
+
+/**
  * Uses Gemini Vision model to inspect the card photo and identify its exact printing details.
  */
 export async function identifyCardFromImage(
@@ -217,8 +320,6 @@ export async function identifyCardFromImage(
       'Gemini API key is required for AI card recognition. Please enter your API key in the scanner settings.'
     );
   }
-
-  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `You are a professional Magic: The Gathering (MTG) card scanner.
 Analyze this MTG card photo with extreme precision.
@@ -239,56 +340,7 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
   "confidence": "high"
 }`;
 
-  let rawResponseText = '';
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                mimeType: 'image/jpeg',
-                data: base64Jpeg,
-              },
-            },
-            {
-              text: prompt,
-            },
-          ],
-        },
-      ],
-    });
-
-    rawResponseText = response.text || '';
-  } catch (apiErr: any) {
-    console.warn('[CardScanner] Error calling gemini-2.5-flash, trying gemini-1.5-flash:', apiErr);
-    try {
-      const fallbackResp = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: base64Jpeg,
-                },
-              },
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-      });
-      rawResponseText = fallbackResp.text || '';
-    } catch (secondErr: any) {
-      throw new Error(secondErr?.message || apiErr?.message || 'Gemini Vision API request failed');
-    }
-  }
+  const rawResponseText = await queryGeminiVision(apiKey, base64Jpeg, prompt);
 
   if (!rawResponseText) {
     throw new Error('Gemini Vision did not return any analysis for the image');
