@@ -897,13 +897,18 @@ export function isSplitCard(
     name = cardOrName;
   } else {
     name = cardOrName.name || '';
-    layout = (cardOrName as any).layout || '';
-    hasBackImage = !!(cardOrName as any).backImageUrl;
-    typeLine = (cardOrName as any).type_line || '';
+    layout = (cardOrName as any).layout || (cardOrName as any).Layout || '';
+    hasBackImage = !!((cardOrName as any).backImageUrl || (cardOrName as any).back_image_url);
+    typeLine = (cardOrName as any).type_line || (cardOrName as any).typeLine || '';
   }
 
   // Cards with separate physical back faces (DFCs, MDFCs) are never split cards
   if (hasBackImage) {
+    return false;
+  }
+
+  // Double-faced, adventure, flip, meld layouts are never split cards
+  if (layout === 'modal_dfc' || layout === 'transform' || layout === 'adventure' || layout === 'flip' || layout === 'meld') {
     return false;
   }
 

@@ -1,4 +1,5 @@
 import { Deck, DeckCard } from '../types/mtg';
+import { isSplitCard } from '../services/deckService';
 import {
   exportDeckToText,
   generateDeckPickListLocal,
@@ -201,6 +202,33 @@ export function generateMoxfield(deck: Deck): string {
 }
 
 /**
+ * Resolves the card name for Magic Online (MTGO) export.
+ * If the card has two different names (separated by //):
+ * - If it is listed as a Split card (e.g. Fire // Ice, Wear // Tear), exports the full split card name ("Fire // Ice").
+ * - Otherwise (MDFCs, Transform DFCs, Adventures, Flip cards, etc.), only exports the front face name.
+ */
+export function formatCardNameForMTGO(
+  card: DeckCard | { name?: string; layout?: string; backImageUrl?: string; type_line?: string } | string
+): string {
+  if (!card) return '';
+  const rawName = typeof card === 'string' ? card : (card.name || '');
+  const trimmed = rawName.trim();
+
+  if (!trimmed.includes('//')) {
+    return trimmed;
+  }
+
+  // Split cards keep both names with standard " // " delimiter
+  if (isSplitCard(card)) {
+    return trimmed.replace(/\s*\/\/\s*/g, ' // ');
+  }
+
+  // Non-split multi-faced cards: only export the front face name for MTGO
+  const frontFace = trimmed.split(/\s*\/\/\s*/)[0].trim();
+  return frontFace || trimmed;
+}
+
+/**
  * 4. Magic Online (MTGO) Text
  */
 export function generateMTGOText(deck: Deck): string {
@@ -209,13 +237,13 @@ export function generateMTGOText(deck: Deck): string {
   const mainCards = deck.cards.filter((c) => c.category === 'main');
   const sideCards = deck.cards.filter((c) => c.category === 'sideboard');
 
-  commanderCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
-  mainCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+  commanderCards.forEach((c) => lines.push(`${c.quantity} ${formatCardNameForMTGO(c)}`));
+  mainCards.forEach((c) => lines.push(`${c.quantity} ${formatCardNameForMTGO(c)}`));
 
   if (sideCards.length > 0) {
     lines.push('');
     lines.push('Sideboard');
-    sideCards.forEach((c) => lines.push(`${c.quantity} ${c.name}`));
+    sideCards.forEach((c) => lines.push(`${c.quantity} ${formatCardNameForMTGO(c)}`));
   }
 
   return lines.join('\n');
@@ -257,15 +285,15 @@ export function generateMTGODekXml(deck: Deck): string {
 
   // In MTGO .dek files, Commanders must be designated in the Sideboard (Sideboard="true")
   commanderCards.forEach((c) => {
-    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="true" Name="${escapeXml(c.name)}" Annotation="0"/>`);
+    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="true" Name="${escapeXml(formatCardNameForMTGO(c))}" Annotation="0"/>`);
   });
 
   mainCards.forEach((c) => {
-    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="false" Name="${escapeXml(c.name)}" Annotation="0"/>`);
+    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="false" Name="${escapeXml(formatCardNameForMTGO(c))}" Annotation="0"/>`);
   });
 
   sideCards.forEach((c) => {
-    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="true" Name="${escapeXml(c.name)}" Annotation="0"/>`);
+    lines.push(`  <Cards CatID="0" Quantity="${c.quantity}" Sideboard="true" Name="${escapeXml(formatCardNameForMTGO(c))}" Annotation="0"/>`);
   });
 
   lines.push('</Deck>');
