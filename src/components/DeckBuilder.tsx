@@ -2644,7 +2644,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             title={isHistoricalView ? 'Historical snapshot is read-only' : 'Search and add cards to this deck'}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>+ Add Cards</span>
+            <span>Add Cards</span>
           </button>
         </div>
       </div>
@@ -2756,7 +2756,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {deck.cards.length === 0 && (
             <div className="p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400 space-y-3">
               <Layers className="w-8 h-8 mx-auto text-slate-600" />
-              <p className="text-xs font-medium">Your deck is empty. Click &quot;+ Add Cards&quot; to search or import a complete decklist.</p>
+              <p className="text-xs font-medium">Your deck is empty. Click &quot;Add Cards&quot; to search or import a complete decklist.</p>
               <div className="flex items-center justify-center gap-2.5 flex-wrap pt-1">
                 <button
                   onClick={() => onOpenSearch(activeCategoryTab)}

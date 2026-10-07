@@ -673,7 +673,24 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       }
     }
     if (customSubtype.trim()) {
-      filterClauses.push(`type:${customSubtype.trim()}`);
+      const raw = customSubtype.trim();
+      if (/^["'].+["']$/.test(raw)) {
+        const clean = raw.replace(/^["']|["']$/g, '').trim();
+        filterClauses.push(`type:"${clean}"`);
+      } else {
+        const terms = raw.match(/"[^"]+"|'[^']+'|\S+/g) || [raw];
+        if (terms.length === 1) {
+          const clean = terms[0].replace(/^["']|["']$/g, '');
+          filterClauses.push(terms[0].startsWith('"') || terms[0].startsWith("'") ? `type:"${clean}"` : `type:${clean}`);
+        } else {
+          const clauses = terms.map((t) => {
+            const isQuoted = t.startsWith('"') || t.startsWith("'");
+            const clean = t.replace(/^["']|["']$/g, '');
+            return isQuoted ? `type:"${clean}"` : `type:${clean}`;
+          });
+          filterClauses.push(clauses.join(' '));
+        }
+      }
     }
 
     // 3. Supertypes
@@ -691,8 +708,24 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
     // 4. Oracle / Rules Text
     if (oracleText.trim()) {
-      const clean = oracleText.trim().replace(/"/g, '');
-      filterClauses.push(`o:"${clean}"`);
+      const raw = oracleText.trim();
+      if (/^["'].+["']$/.test(raw)) {
+        const clean = raw.replace(/^["']|["']$/g, '').trim();
+        filterClauses.push(`o:"${clean}"`);
+      } else {
+        const terms = raw.match(/"[^"]+"|'[^']+'|\S+/g) || [raw];
+        if (terms.length === 1) {
+          const clean = terms[0].replace(/^["']|["']$/g, '');
+          filterClauses.push(terms[0].startsWith('"') || terms[0].startsWith("'") ? `o:"${clean}"` : `o:${clean}`);
+        } else {
+          const clauses = terms.map((t) => {
+            const isQuoted = t.startsWith('"') || t.startsWith("'");
+            const clean = t.replace(/^["']|["']$/g, '');
+            return isQuoted ? `o:"${clean}"` : `o:${clean}`;
+          });
+          filterClauses.push(clauses.join(' '));
+        }
+      }
     }
 
     // 5. Mana Cost / CMC
