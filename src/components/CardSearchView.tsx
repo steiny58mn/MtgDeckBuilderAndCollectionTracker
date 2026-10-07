@@ -720,16 +720,12 @@ const displayedCards = useMemo(() => {
       }
     }
 
-    // 2. Card Types
+    // 2. Card Types (always OR among selected types, e.g. Instant OR Sorcery)
     if (selectedTypes.length > 0) {
       if (selectedTypes.length === 1) {
         filterClauses.push(`type:${selectedTypes[0]}`);
       } else {
-        if (filterMatchMode === 'OR') {
-          filterClauses.push(`(${selectedTypes.map((t) => `type:${t}`).join(' or ')})`);
-        } else {
-          selectedTypes.forEach((t) => filterClauses.push(`type:${t}`));
-        }
+        filterClauses.push(`(${selectedTypes.map((t) => `type:${t}`).join(' or ')})`);
       }
     }
     if (customSubtype.trim()) {
@@ -753,16 +749,12 @@ const displayedCards = useMemo(() => {
       }
     }
 
-    // 3. Supertypes
+    // 3. Supertypes (always OR among selected supertypes)
     if (selectedSupertypes.length > 0) {
       if (selectedSupertypes.length === 1) {
         filterClauses.push(`type:${selectedSupertypes[0]}`);
       } else {
-        if (filterMatchMode === 'OR') {
-          filterClauses.push(`(${selectedSupertypes.map((st) => `type:${st}`).join(' or ')})`);
-        } else {
-          selectedSupertypes.forEach((st) => filterClauses.push(`type:${st}`));
-        }
+        filterClauses.push(`(${selectedSupertypes.map((st) => `type:${st}`).join(' or ')})`);
       }
     }
 
@@ -1025,7 +1017,7 @@ const displayedCards = useMemo(() => {
         }
 
         // Strict client-side verification for oracleText (all words must be present in rules text/type/name)
-        if (oracleText.trim()) {
+        if (oracleText.trim() && filterMatchMode === 'AND') {
           const reqWords = oracleText
             .toLowerCase()
             .match(/"[^"]+"|'[^']+'|\S+/g)
@@ -1050,14 +1042,28 @@ const displayedCards = useMemo(() => {
           }
         }
 
+        // Strict client-side card type verification in AND mode (matches at least one selected type)
+        if (selectedTypes.length > 0 && filterMatchMode === 'AND') {
+          processedData = processedData.filter((card) => {
+            const fullTypeLine = (
+              (card.type_line || '') +
+              ' ' +
+              (card.card_faces ? card.card_faces.map((f) => f.type_line || '').join(' ') : '')
+            ).toLowerCase();
+            return selectedTypes.some((t) => {
+              const lower = t.toLowerCase();
+              if (lower === 'kindred') {
+                return fullTypeLine.includes('kindred') || fullTypeLine.includes('tribal');
+              }
+              return fullTypeLine.includes(lower);
+            });
+          });
+        }
+
         // Strict client-side color verification
-        if (selectedColors.length > 0) {
+        if (selectedColors.length > 0 && filterMatchMode === 'AND') {
           if (selectedColors.includes('C')) {
             processedData = processedData.filter((card) => (card.colors || []).length === 0);
-          } else if (filterMatchMode === 'OR') {
-            processedData = processedData.filter((card) =>
-              selectedColors.some((c) => (card.colors || []).includes(c))
-            );
           } else {
             processedData = processedData.filter((card) =>
               selectedColors.every((c) => (card.colors || []).includes(c))
