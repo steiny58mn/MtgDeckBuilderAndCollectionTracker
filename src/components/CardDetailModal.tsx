@@ -124,8 +124,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const priceFoil = displayCard.prices?.usd_foil ? parseFloat(displayCard.prices.usd_foil) : null;
   const priceEur = displayCard.prices?.eur ? parseFloat(displayCard.prices.eur) : null;
 
-  const commanderInfo = activeDeck?.format === 'commander' ? getDeckCommander(activeDeck) : null;
-  const isCommanderFormat = activeDeck?.format === 'commander';
+  const isCommanderFormat = (activeDeck?.format || '').toLowerCase() === 'commander';
+  const commanderInfo = isCommanderFormat ? getDeckCommander(activeDeck) : null;
   const cmdrColors = commanderInfo?.colorIdentity?.length
     ? commanderInfo.colorIdentity
     : (activeDeck?.commanderColorIdentity || []);
@@ -420,7 +420,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                           <span>Maybe</span>
                         </button>
 
-                        {isCommanderFormat && (
+                        {isCommanderFormat && !hasCommander && (
                           <button
                             type="button"
                             onClick={() => handleDeckAdd('commander')}

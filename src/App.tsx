@@ -612,6 +612,7 @@ export default function App() {
         mana_cost: card.mana_cost,
         cmc: card.cmc,
         type_line: card.type_line,
+        oracle_text: card.oracle_text || (card as any).oracleText,
         colors: card.colors,
         color_identity: card.color_identity,
         rarity: card.rarity,

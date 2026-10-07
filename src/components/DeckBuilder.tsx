@@ -59,7 +59,8 @@ import {
   isCardGamechanger,
   sortWUBRG,
   getDeckCommander,
-  isCardLegalInCommander
+  isCardLegalInCommander,
+  matchesScryfallTextSearch
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -955,6 +956,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const commanderName = commanderCards.length > 1
     ? commanderCards.map((c) => c.name).join(' // ')
     : commanderCards[0]?.name || deck.commanderName;
+  const isCommanderDeck = (deck.format || format || '').toLowerCase() === 'commander' || commanderCards.length > 0;
 
   const deckColorIdentity = useMemo(() => {
     const cmdrCards = activeDeck.cards.filter((c) => c.category === 'commander');
@@ -1071,36 +1073,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     if (newCategory === 'commander') {
       const currentCmdrs = existingCards.filter((c) => c.category === 'commander' && c.id !== cardId);
-      if (currentCmdrs.length >= 2) {
-        setPriceRefreshMessage('Commander decks can have at most 2 commanders (Partner/Background).');
-        setTimeout(() => setPriceRefreshMessage(null), 3500);
+      if (currentCmdrs.length === 1 && canCardsPartnerTogether(currentCmdrs[0], existingCards[idx]).canPartner) {
+        handleAssignAsPartner(cardId);
         return;
       }
-
-      if (currentCmdrs.length === 1) {
-        const partnerCheck = canCardsPartnerTogether(currentCmdrs[0], existingCards[idx]);
-        if (!partnerCheck.canPartner) {
-          setPriceRefreshMessage(partnerCheck.reason || 'These cards cannot partner together.');
-          setTimeout(() => setPriceRefreshMessage(null), 4000);
-          return;
-        }
-      } else if (currentCmdrs.length === 0) {
-        if (!canBePrimaryCommander(existingCards[idx])) {
-          const pInfo = getCardPartnerInfo(existingCards[idx]);
-          if (pInfo.partnerType === 'background') {
-            setPriceRefreshMessage('A Background enchantment cannot be your primary commander without a commander that has "Choose a Background".');
-          } else {
-            setPriceRefreshMessage('Card must be a Legendary Creature or a card that says "can be your commander".');
-          }
-          setTimeout(() => setPriceRefreshMessage(null), 4000);
-          return;
-        }
-      }
-
-      // If moving to commander, cap quantity at 1
-      if (existingCards[idx].quantity > 1) {
-        existingCards[idx].quantity = 1;
-      }
+      handleAssignAsCommander(cardId);
+      return;
     }
 
     existingCards[idx] = {
@@ -1166,12 +1144,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (idx === -1) return;
     const targetCard = existingCards[idx];
 
-    if (!canBePrimaryCommander(targetCard)) {
-      setPriceRefreshMessage('Card must be a Legendary Creature or state "can be your commander".');
-      setTimeout(() => setPriceRefreshMessage(null), 3500);
-      return;
-    }
-
     // Demote any existing commanders to 'main'
     for (let i = 0; i < existingCards.length; i++) {
       if (existingCards[i].category === 'commander' && existingCards[i].id !== cardId) {
@@ -1194,6 +1166,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     const updatedDeck: Deck = {
       ...deck,
+      format: 'commander',
       cards: existingCards,
       commanderName: targetCard.name,
       commanderArtUrl: targetCard.imageUrl || deck.commanderArtUrl,
@@ -1203,6 +1176,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       updatedAt: Date.now(),
     };
 
+    setFormat('commander');
     onUpdateDeck(updatedDeck);
     setHasUnsavedChanges(true);
     DeckService.setDeckHasUnsavedChanges(deck.id, true);
@@ -1250,6 +1224,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     const updatedDeck: Deck = {
       ...deck,
+      format: 'commander',
       cards: existingCards,
       commanderName: updatedCmdrs.map((c) => c.name).join(' // '),
       commanderArtUrl: currentCmdrs[0]?.imageUrl || targetCard.imageUrl || deck.commanderArtUrl,
@@ -1258,6 +1233,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       updatedAt: Date.now(),
     };
 
+    setFormat('commander');
     onUpdateDeck(updatedDeck);
     setHasUnsavedChanges(true);
     DeckService.setDeckHasUnsavedChanges(deck.id, true);
@@ -1542,13 +1518,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const matchesCardFilter = (c: DeckCard) => {
     if (cardFilterQuery.trim()) {
-      const q = cardFilterQuery.toLowerCase().trim();
-      const textMatch = (
-        c.name.toLowerCase().includes(q) ||
-        (c.type_line || (c as any).typeLine || '').toLowerCase().includes(q) ||
-        (c.oracle_text || '').toLowerCase().includes(q)
-      );
-      if (!textMatch) return false;
+      if (!matchesScryfallTextSearch(c, cardFilterQuery)) {
+        return false;
+      }
     }
 
     if (ownershipFilter === 'owned') {
@@ -1664,7 +1636,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       totalQty: sideCards.reduce((s, c) => s + c.quantity, 0),
       totalPrice: sideCards.reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
     },
-    ...(maybeCards.length > 0 || deck.format !== 'commander'
+    ...(maybeCards.length > 0 || !isCommanderDeck
       ? [{
           id: 'maybeboard',
           title: 'Maybeboard',
@@ -1700,7 +1672,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   } as any);
 
   const renderCommanderPanel = () => {
-    if (deck.format !== 'commander' && commanderCards.length === 0) return null;
+    if (!isCommanderDeck && commanderCards.length === 0) return null;
 
     const totalCommanderPrice = commanderCards.reduce(
       (s, c) => s + (getCardUnitPrice(c) * c.quantity),
@@ -1842,7 +1814,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-xs text-slate-300 focus:outline-none focus:border-fuchsia-500"
               />
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                {deck.format === 'commander' && commanderName && (
+                {isCommanderDeck && commanderName && (
                   <button
                     type="button"
                     onClick={() => setTitle(commanderName)}
@@ -1913,7 +1885,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   )}
 
                   {/* Commander Badges to the right of the Deck Title */}
-                  {deck.format === 'commander' && commanderCards.length > 0 && (
+                  {isCommanderDeck && commanderCards.length > 0 && (
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       {commanderCards.map((cmdr, cIdx) => (
                         <div
@@ -2548,7 +2520,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Mainboard ({deck.format === 'commander' ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})</span>
+            <span>Mainboard ({isCommanderDeck ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})</span>
           </button>
 
           <button
@@ -2857,7 +2829,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <Layers className="w-8 h-8 mx-auto text-slate-600" />
                   <p className="text-xs font-medium">
                     {commanderCards.length > 0
-                      ? `Commander is set. Add ${deck.format === 'commander' ? (commanderCards.length === 2 ? 98 : 99) : ''} cards to complete your deck.`
+                      ? `Commander is set. Add ${isCommanderDeck ? (commanderCards.length === 2 ? 98 : 99) : ''} cards to complete your deck.`
                       : 'Your deck is empty. Click "+ Add Cards" to search or import a complete decklist.'}
                   </p>
                   <div className="flex items-center justify-center gap-2.5 flex-wrap pt-1">
@@ -3810,22 +3782,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Right: Other Action Buttons (Category Selectors + Trash) */}
           <div className="flex items-center gap-1 shrink-0 pointer-events-auto">
-            {/* Assign as Commander in Pile View */}
-            {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAssignAsCommander(card.id);
-                }}
-                className="px-1.5 py-0.5 rounded bg-fuchsia-500/30 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/50 text-[9px] font-bold transition-colors cursor-pointer flex items-center gap-0.5 shadow-sm shrink-0"
-                title="Assign as Commander"
-              >
-                <Crown className="w-2.5 h-2.5 text-fuchsia-400" />
-                <span>Assign</span>
-              </button>
-            )}
-
             {/* Category Selector (or Commander Badge) */}
             {isThisCommander ? (
               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px] border border-fuchsia-500/30 shrink-0">
@@ -3844,6 +3800,20 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     title="Move to Mainboard"
                   >
                     <Layers className="w-3 h-3 text-violet-400" />
+                  </button>
+                )}
+                {/* Crown in category selector in Pile View */}
+                {(isCommanderDeck || deck.cards.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAssignAsCommander(card.id);
+                    }}
+                    className="p-1 text-center text-fuchsia-400 hover:text-white hover:bg-fuchsia-600/50 transition-colors cursor-pointer"
+                    title="Assign as Commander"
+                  >
+                    <Crown className="w-3 h-3" />
                   </button>
                 )}
                 {card.category !== 'sideboard' && (
@@ -3889,6 +3859,32 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Bottom Action Bar in Pile View: Full-width Assign as Commander Button */}
+        {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
+          <div
+            className={`absolute bottom-1.5 inset-x-1.5 z-30 transition-all duration-150 pointer-events-auto ${
+              isActive ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-1 scale-95 pointer-events-none'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAssignAsCommander(card.id);
+              }}
+              className={`w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-[10px] font-bold shadow-lg transition-all cursor-pointer backdrop-blur-xs border ${
+                canBePrimaryCommander(card)
+                  ? 'bg-fuchsia-600/95 hover:bg-fuchsia-500 text-white border-fuchsia-400/70 shadow-fuchsia-500/25'
+                  : 'bg-slate-900/95 hover:bg-fuchsia-600 text-fuchsia-200 hover:text-white border-slate-700/80'
+              }`}
+              title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
+            >
+              <Crown className="w-3 h-3 text-amber-300" />
+              <span>Assign as Commander</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -3935,13 +3931,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     const isThisCommander = card.category === 'commander';
     const canAddAsCommander =
-      deck.format === 'commander' &&
-      !isThisCommander &&
-      (commanderCards.length === 0
-        ? canBePrimaryCommander(card)
-        : commanderCards.length === 1
-        ? canCardsPartnerTogether(commanderCards[0], card).canPartner
-        : false);
+      (isCommanderDeck || deck.cards.length > 0) &&
+      !isThisCommander;
 
     return (
       <div
@@ -4153,12 +4144,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 )}
 
                 {/* Assign as Commander Button */}
-                {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
+                {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
                   <button
                     type="button"
                     onClick={() => handleAssignAsCommander(card.id)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 text-xs font-bold transition-all shadow-sm cursor-pointer"
-                    title="Assign this card as Commander"
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                      canBePrimaryCommander(card)
+                        ? 'bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20'
+                        : 'bg-slate-800/90 hover:bg-fuchsia-600 hover:text-white text-slate-300 border border-slate-700/70'
+                    }`}
+                    title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
                   >
                     <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
                     <span>Assign as Commander</span>
@@ -4166,7 +4161,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 )}
 
                 {/* Assign as Partner Button */}
-                {!isThisCommander && deck.format === 'commander' && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
+                {!isThisCommander && isCommanderDeck && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
                   <button
                     type="button"
                     onClick={() => handleAssignAsPartner(card.id)}
@@ -4200,13 +4195,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const thumbUrl = card.imageUrl || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=small` : undefined);
     const isThisCommander = card.category === 'commander';
     const canAddAsCommander =
-      deck.format === 'commander' &&
-      !isThisCommander &&
-      (commanderCards.length === 0
-        ? canBePrimaryCommander(card)
-        : commanderCards.length === 1
-        ? canCardsPartnerTogether(commanderCards[0], card).canPartner
-        : false);
+      (isCommanderDeck || deck.cards.length > 0) &&
+      !isThisCommander;
 
     return (
       <div
@@ -4397,27 +4387,31 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           )}
 
           {/* Dedicated Assign as Commander button in Grid View */}
-          {!isThisCommander && deck.format === 'commander' && canBePrimaryCommander(card) && (
+          {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
             <button
               type="button"
               onClick={() => handleAssignAsCommander(card.id)}
-              className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-bold transition-all shadow-sm cursor-pointer mt-1"
-              title="Assign this card as Commander"
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all shadow-sm cursor-pointer mt-1 ${
+                canBePrimaryCommander(card)
+                  ? 'bg-fuchsia-500/25 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20'
+                  : 'bg-slate-950/90 hover:bg-fuchsia-600 hover:text-white text-slate-300 border border-slate-800'
+              }`}
+              title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
             >
-              <Crown className="w-3 h-3 text-fuchsia-400" />
+              <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
               <span>Assign as Commander</span>
             </button>
           )}
 
           {/* Dedicated Assign as Partner button in Grid View */}
-          {!isThisCommander && deck.format === 'commander' && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
+          {!isThisCommander && isCommanderDeck && commanderCards.length === 1 && canCardsPartnerTogether(commanderCards[0], card).canPartner && (
             <button
               type="button"
               onClick={() => handleAssignAsPartner(card.id)}
-              className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white border border-fuchsia-400/40 text-[10px] font-bold transition-all shadow-sm cursor-pointer mt-1"
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-600 hover:from-fuchsia-500 hover:to-amber-500 text-white border border-fuchsia-400/40 text-[10px] font-bold transition-all shadow-sm cursor-pointer mt-1"
               title={`Assign ${card.name} as Partner Commander`}
             >
-              <Crown className="w-3 h-3 text-amber-300" />
+              <Crown className="w-3.5 h-3.5 text-amber-300" />
               <span>Assign as Partner</span>
             </button>
           )}

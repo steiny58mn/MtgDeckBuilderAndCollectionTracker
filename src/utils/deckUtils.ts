@@ -665,8 +665,8 @@ export function canBePrimaryCommander(card: {
   card_faces?: any[];
 }): boolean {
   if (!card) return false;
-  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  const oracle = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
+  const typeLine = (card.type_line || (card as any).typeLine || (card as any).TypeLine || (card as any).type || '').toLowerCase();
+  const oracle = (card.oracle_text || (card as any).oracleText || (card as any).OracleText || '').toLowerCase();
 
   if (oracle.includes('can be your commander')) {
     return true;
@@ -676,16 +676,22 @@ export function canBePrimaryCommander(card: {
     (Array.isArray((card as any).supertypes) && (card as any).supertypes.some((s: string) => String(s).toLowerCase() === 'legendary'));
   const isCreature = typeLine.includes('creature') || typeLine.includes('summon');
 
-  if (isLegendary && isCreature) {
-    return true;
+  if (isLegendary && (isCreature || typeLine.includes('planeswalker') || typeLine.includes('vehicle'))) {
+    if (isCreature) return true;
+    if (oracle.includes('can be your commander')) return true;
   }
 
   if (card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 0) {
     const front = card.card_faces[0];
-    const frontType = (front.type_line || front.typeLine || '').toLowerCase();
-    const frontOracle = (front.oracle_text || front.oracleText || '').toLowerCase();
+    const frontType = (front.type_line || front.typeLine || front.TypeLine || front.type || '').toLowerCase();
+    const frontOracle = (front.oracle_text || front.oracleText || front.OracleText || '').toLowerCase();
     if (frontOracle.includes('can be your commander')) return true;
     if (frontType.includes('legendary') && (frontType.includes('creature') || frontType.includes('summon'))) return true;
+  }
+
+  // Fallback: If typeLine was truncated or missing from upstream cache but name matches famous legend pattern
+  if (isCreature && card.name && card.name.includes(',')) {
+    return true;
   }
 
   return false;
@@ -2203,5 +2209,58 @@ export function detectGamechangers(deck: Deck): GamechangerCardInfo[] {
     const priceB = (b.card.isFoil && b.card.priceUsdFoil) ? b.card.priceUsdFoil : (b.card.priceUsd || 0);
     if (priceB !== priceA) return priceB - priceA;
     return a.card.name.localeCompare(b.card.name);
+  });
+}
+
+/**
+ * Mimics Scryfall text search matching:
+ * 1. Exact match (!"Card Name" or !Card Name): Matches exact card name (case-insensitive)
+ * 2. Exact phrase match ("words in order"): Matches exact phrase in name, type, or rules text
+ * 3. Tokenized words search (e.g. "niv parun" or "parun niv"): Matches when all words exist on the card in any order
+ */
+export function matchesScryfallTextSearch(
+  card: { name?: string; type_line?: string; oracle_text?: string },
+  query: string
+): boolean {
+  if (!query || !query.trim()) return true;
+  if (!card) return false;
+
+  const rawQuery = query.trim();
+  const cardName = (card.name || '').toLowerCase();
+  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
+  const oracleText = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
+  const fullText = `${cardName} ${typeLine} ${oracleText}`;
+
+  // 1. Exact Name Match Syntax: !"Card Name" or !Card Name
+  if (rawQuery.startsWith('!')) {
+    const target = rawQuery.slice(1).replace(/^["']|["']$/g, '').trim().toLowerCase();
+    if (!target) return true;
+    if (cardName === target) return true;
+    // Handle double-faced cards (e.g., "Niv-Mizzet // ..." or "Valki, God of Lies // Tibalt...")
+    if (cardName.includes('//')) {
+      const faces = cardName.split('//').map((f) => f.trim());
+      if (faces.some((f) => f === target)) return true;
+    }
+    return false;
+  }
+
+  // 2. Exact Phrase Match: "some phrase"
+  if (/^["'].+["']$/.test(rawQuery)) {
+    const phrase = rawQuery.replace(/^["']|["']$/g, '').trim().toLowerCase();
+    if (!phrase) return true;
+    return fullText.includes(phrase);
+  }
+
+  // 3. Multi-word search in any order (mimics Scryfall default terms search)
+  // Split query into individual word tokens
+  const words = rawQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+
+  // Check if all words appear in the card
+  return words.every((word) => {
+    // If the word is enclosed in quotes, strip them
+    const cleanWord = word.replace(/^["']|["']$/g, '').trim();
+    if (!cleanWord) return true;
+    return fullText.includes(cleanWord);
   });
 }

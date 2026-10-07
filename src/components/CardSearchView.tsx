@@ -136,8 +136,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   }, [initialTargetCategory]);
   const isBinderContext = searchContext === 'binder';
 
-  const commanderInfo = activeDeck?.format === 'commander' ? getDeckCommander(activeDeck) : null;
-  const isCommanderDeck = activeDeck?.format === 'commander';
+  const isCommanderDeck = (activeDeck?.format || '').toLowerCase() === 'commander';
+  const commanderInfo = isCommanderDeck ? getDeckCommander(activeDeck) : null;
   const commanderColorIdentity = useMemo(() => {
     if (commanderInfo?.colorIdentity && commanderInfo.colorIdentity.length > 0) {
       return commanderInfo.colorIdentity;
@@ -644,7 +644,11 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
 
   // Auto-search query builder
   const buildQueryString = (overrideSearchTerm?: string) => {
-    const trimmedSearch = (overrideSearchTerm !== undefined ? overrideSearchTerm : searchTerm).trim();
+    let trimmedSearch = (overrideSearchTerm !== undefined ? overrideSearchTerm : searchTerm).trim();
+    if (trimmedSearch.startsWith('!')) {
+      const rawTarget = trimmedSearch.slice(1).replace(/^["']|["']$/g, '').trim();
+      trimmedSearch = `!"${rawTarget}"`;
+    }
     const filterClauses: string[] = [];
 
     // 1. Color clause
@@ -2351,7 +2355,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                           const mainCopies = getDeckCopiesByCategory(card, 'main');
                           const sideCopies = getDeckCopiesByCategory(card, 'sideboard');
                           const maybeCopies = getDeckCopiesByCategory(card, 'maybeboard');
-                          const canAlsoAssignAsCommander = isCommanderDeck && canBePrimaryCommander(card);
+                          const canAlsoAssignAsCommander = isCommanderDeck && !hasCommander && canBePrimaryCommander(card);
 
                           return (
                             <div className="flex flex-col gap-1.5 w-full">
