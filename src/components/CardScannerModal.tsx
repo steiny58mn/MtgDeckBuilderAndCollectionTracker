@@ -55,6 +55,14 @@ interface CardScannerModalProps {
     isFoil: boolean, 
     targetBinderId?: string
   ) => Promise<void> | void;
+  onUpdateCardInBinder?: (
+    oldCard: ScryfallCard,
+    oldFoil: boolean,
+    newCard: ScryfallCard,
+    newFoil: boolean,
+    quantity: number,
+    targetBinderId?: string
+  ) => Promise<void> | void;
 }
 
 export const CardScannerModal: React.FC<CardScannerModalProps> = ({
@@ -63,6 +71,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   binders,
   activeBinder,
   onAddCardToBinder,
+  onUpdateCardInBinder,
 }) => {
   useBodyScrollLock(isOpen);
   useEscapeKey(isOpen, onClose);
@@ -137,6 +146,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [manualQuery, setManualQuery] = useState('');
   const [manualSuggestions, setManualSuggestions] = useState<string[]>([]);
   const [isSearchingManual, setIsSearchingManual] = useState(false);
+
+  // Edit Card Version / Finish state
+  const [editingBatchItem, setEditingBatchItem] = useState<BatchScannedCard | null>(null);
+  const [editPrintsList, setEditPrintsList] = useState<ScryfallCard[]>([]);
+  const [isLoadingEditPrints, setIsLoadingEditPrints] = useState<boolean>(false);
+  const [selectedEditCard, setSelectedEditCard] = useState<ScryfallCard | null>(null);
+  const [selectedEditFoil, setSelectedEditFoil] = useState<boolean>(false);
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Auto fade-out timer for quick success/failure notification toast
   useEffect(() => {
@@ -547,6 +564,71 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     return () => clearTimeout(timer);
   }, [manualQuery]);
 
+  // Open Version & Finish Editor for a scanned batch card
+  const handleOpenVersionEditor = async (item: BatchScannedCard) => {
+    setEditingBatchItem(item);
+    setSelectedEditCard(item.card);
+    setSelectedEditFoil(item.isFoil);
+    setEditPrintsList([]);
+    setIsLoadingEditPrints(true);
+
+    try {
+      const cleanName = item.card.name.split(' // ')[0].trim();
+      const prints = await fetchCardPrints(cleanName);
+      if (Array.isArray(prints) && prints.length > 0) {
+        setEditPrintsList(prints);
+      }
+    } catch (err) {
+      console.warn('[CardScanner] Error fetching prints for edit:', err);
+    } finally {
+      setIsLoadingEditPrints(false);
+    }
+  };
+
+  // Save updated version / finish to binder
+  const handleSaveCardEdit = async () => {
+    if (!editingBatchItem || !selectedEditCard) return;
+    setIsSavingEdit(true);
+
+    try {
+      if (onUpdateCardInBinder) {
+        await onUpdateCardInBinder(
+          editingBatchItem.card,
+          editingBatchItem.isFoil,
+          selectedEditCard,
+          selectedEditFoil,
+          editingBatchItem.quantity,
+          selectedBinderId
+        );
+      }
+
+      // Update in local batch state
+      setScannedBatchCards((prev) =>
+        prev.map((item) =>
+          item.id === editingBatchItem.id
+            ? { ...item, card: selectedEditCard, isFoil: selectedEditFoil }
+            : item
+        )
+      );
+
+      // Show quick notification
+      setQuickNotice({
+        type: 'success',
+        title: `Updated: ${selectedEditCard.name}`,
+        detail: `${selectedEditCard.set?.toUpperCase()} #${selectedEditCard.collector_number} · ${selectedEditFoil ? 'Foil' : 'Regular'}`,
+        imageUrl: getCardImageUrl(selectedEditCard, 'small'),
+        isFoil: selectedEditFoil,
+        timestamp: Date.now(),
+      });
+
+      setEditingBatchItem(null);
+    } catch (err) {
+      console.error('[CardScanner] Error updating card:', err);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const handleSelectManualCard = async (name: string) => {
     setIsSearchingManual(true);
     unlockAudio();
@@ -872,6 +954,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                       {quickNotice.detail}
                     </div>
                   )}
+                  {quickNotice.type === 'success' && scannedBatchCards.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
+                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline mt-1 inline-block cursor-pointer"
+                    >
+                      Change version or finish &rarr;
+                    </button>
+                  )}
                   {quickNotice.type === 'failure' && (
                     <div className="flex items-center gap-2 mt-2">
                       <button
@@ -974,14 +1065,28 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               {scannedBatchCards.map((item) => (
                 <div
                   key={item.id}
-                  className="flex-shrink-0 w-24 bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-center shadow flex flex-col items-center"
+                  onClick={() => handleOpenVersionEditor(item)}
+                  className="flex-shrink-0 w-24 bg-slate-950 border border-slate-800 hover:border-violet-500 rounded-lg p-1.5 text-center shadow flex flex-col items-center cursor-pointer group transition-all"
+                  title="Click to change version or finish without deleting"
                 >
-                  <img
-                    src={getCardImageUrl(item.card, 'small')}
-                    alt={item.card.name}
-                    className="w-20 h-28 object-cover rounded shadow-xs mb-1"
-                  />
-                  <span className="text-[10px] font-bold text-white truncate w-full block">
+                  <div className="relative w-20 h-28 mb-1 rounded overflow-hidden">
+                    <img
+                      src={getCardImageUrl(item.card, 'small')}
+                      alt={item.card.name}
+                      className="w-full h-full object-cover rounded shadow-xs group-hover:scale-105 transition-transform"
+                    />
+                    {item.isFoil && (
+                      <div className="absolute top-1 right-1 bg-amber-400/90 text-slate-950 p-0.5 rounded-full shadow">
+                        <Sparkles className="w-2.5 h-2.5" />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-violet-600/0 group-hover:bg-violet-600/30 transition-colors flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 bg-slate-950/85 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow border border-violet-400/50">
+                        Edit
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-white truncate w-full block group-hover:text-violet-300 transition-colors">
                     {item.card.name}
                   </span>
                   <div className="flex items-center justify-center gap-1 mt-0.5 text-[9px] text-slate-400 font-mono">
@@ -1176,6 +1281,164 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Change Version & Finish Modal */}
+      {editingBatchItem && selectedEditCard && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">
+                    Change Version or Finish
+                  </h3>
+                  <p className="text-xs text-slate-400 truncate">
+                    {editingBatchItem.card.name} · Currently {editingBatchItem.card.set?.toUpperCase()} #{editingBatchItem.card.collector_number} ({editingBatchItem.isFoil ? 'Foil' : 'Regular'})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBatchItem(null)}
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              {/* Finish Switcher */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                  Card Finish / Printing Type
+                </label>
+                <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEditFoil(false)}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      !selectedEditFoil
+                        ? 'bg-slate-800 text-white shadow border border-slate-700'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>Regular (Non-foil)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEditFoil(true)}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      selectedEditFoil
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Foil ✨</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Version Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Select Card Printing & Art
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {editPrintsList.length > 0 ? `${editPrintsList.length} printings available` : ''}
+                  </span>
+                </div>
+
+                {isLoadingEditPrints ? (
+                  <div className="p-8 flex flex-col items-center justify-center text-slate-400 gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+                    <span className="text-xs">Loading all printings from Scryfall...</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[46vh] overflow-y-auto pr-1">
+                    {(editPrintsList.length > 0 ? editPrintsList : [editingBatchItem.card]).map((p) => {
+                      const isSelected = p.id === selectedEditCard.id;
+                      const regularPrice = p.prices?.usd ? `${parseFloat(p.prices.usd).toFixed(2)}` : null;
+                      const foilPrice = p.prices?.usd_foil ? `${parseFloat(p.prices.usd_foil).toFixed(2)}` : null;
+
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => setSelectedEditCard(p)}
+                          className={`relative p-2 rounded-xl border text-left cursor-pointer transition-all flex flex-col items-center ${
+                            isSelected
+                              ? 'bg-violet-950/60 border-violet-400 ring-2 ring-violet-500/40 shadow-lg'
+                              : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-950'
+                          }`}
+                        >
+                          <div className="relative w-full aspect-[2.5/3.5] rounded-lg overflow-hidden mb-1.5 bg-slate-900">
+                            <img
+                              src={getCardImageUrl(p, 'small')}
+                              alt={p.name}
+                              loading="lazy"
+                              className="w-full h-full object-cover"
+                            />
+                            {isSelected && (
+                              <div className="absolute top-1 right-1 bg-emerald-500 text-slate-950 rounded-full p-0.5 shadow">
+                                <Check className="w-3 h-3 stroke-[3]" />
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-bold text-white truncate w-full text-center">
+                            {p.set_name || p.set?.toUpperCase()}
+                          </span>
+                          <div className="flex items-center justify-center gap-1.5 text-[9px] text-slate-400 font-mono mt-0.5">
+                            <span className="uppercase font-bold text-slate-300">{p.set}</span>
+                            <span>#{p.collector_number}</span>
+                          </div>
+                          <div className="text-[9px] font-mono text-emerald-400 mt-0.5">
+                            {selectedEditFoil ? (foilPrice || regularPrice || '—') : (regularPrice || foilPrice || '—')}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEditingBatchItem(null)}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingEdit}
+                onClick={handleSaveCardEdit}
+                className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-md cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Updating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Apply Changes</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -844,6 +844,86 @@ export default function App() {
     );
   };
 
+  const handleUpdateCardInBinder = async (
+    oldCard: ScryfallCard,
+    oldFoil: boolean,
+    newCard: ScryfallCard,
+    newFoil: boolean,
+    quantity: number,
+    targetBinderIdParam?: string
+  ) => {
+    const targetBinderId = targetBinderIdParam || activeBinder?.id || 'binder-main';
+    const targetBinder = binders.find((b) => b.id === targetBinderId) || binders[0];
+    if (!targetBinder) return;
+
+    const binderCards = [...(targetBinder.cards || [])];
+
+    // 1. Decrement or remove old card
+    const oldIdx = binderCards.findIndex(
+      (c) => c.scryfallId === oldCard.id && c.isFoil === oldFoil
+    );
+    if (oldIdx >= 0) {
+      if (binderCards[oldIdx].quantity <= quantity) {
+        binderCards.splice(oldIdx, 1);
+      } else {
+        binderCards[oldIdx] = {
+          ...binderCards[oldIdx],
+          quantity: binderCards[oldIdx].quantity - quantity,
+        };
+      }
+    }
+
+    // 2. Add or increment new card
+    const newPriceUsd = newFoil && newCard.prices?.usd_foil
+      ? parseFloat(newCard.prices.usd_foil)
+      : (newCard.prices?.usd ? parseFloat(newCard.prices.usd) : 0);
+
+    const newIdx = binderCards.findIndex(
+      (c) => c.scryfallId === newCard.id && c.isFoil === newFoil
+    );
+    if (newIdx >= 0) {
+      binderCards[newIdx] = {
+        ...binderCards[newIdx],
+        quantity: binderCards[newIdx].quantity + quantity,
+      };
+    } else {
+      const newColCard: CollectionCard = {
+        id: `col-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        scryfallId: newCard.id,
+        binderId: targetBinderId,
+        name: newCard.name,
+        set: newCard.set,
+        setName: newCard.set_name,
+        collectorNumber: newCard.collector_number,
+        quantity,
+        isFoil: newFoil,
+        condition: 'NM',
+        cmc: newCard.cmc,
+        mana_cost: newCard.mana_cost,
+        type_line: newCard.type_line,
+        colors: newCard.colors,
+        color_identity: newCard.color_identity,
+        rarity: newCard.rarity,
+        imageUrl: getCardImageUrl(newCard, 'normal'),
+        acquiredPrice: newPriceUsd,
+        currentPriceUsd: newPriceUsd,
+        addedAt: Date.now(),
+      };
+      binderCards.unshift(newColCard);
+    }
+
+    const updatedBinder: Binder = {
+      ...targetBinder,
+      cards: binderCards,
+      cardCount: binderCards.reduce((acc, c) => acc + c.quantity, 0),
+      updatedAt: Date.now(),
+    };
+
+    await DeckService.saveBinder(updatedBinder);
+    setCollectionCards(DeckService.getLocalCollection());
+    showToast(`Updated to ${newCard.set.toUpperCase()} #${newCard.collector_number} (${newFoil ? 'Foil' : 'Regular'})`);
+  };
+
   const handleCreateBinder = async (name: string, description?: string) => {
     if (!requireAuth(`Please sign in or create an account to save binder "${name}"!`, () => handleCreateBinder(name, description))) {
       return;
@@ -1109,6 +1189,7 @@ export default function App() {
         onAddCardToBinder={async (card, qty, isFoil, targetBinderId) => {
           await handleAddCardToCollection(card, qty, isFoil, 'NM', undefined, targetBinderId);
         }}
+        onUpdateCardInBinder={handleUpdateCardInBinder}
       />
 
       {/* Card Detail Modal */}
