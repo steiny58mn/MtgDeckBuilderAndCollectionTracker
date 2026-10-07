@@ -49,6 +49,7 @@ import {
   Camera
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
+import { getCardNames, getAllCardMatchNames } from '../utils/cardNameUtils';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
 import { 
   calculateDeckStats, 
@@ -219,38 +220,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const collectionCountMap = useMemo(() => {
     const map = new Map<string, number>();
     collectionCards.forEach((c) => {
-      const name = (c.name || '').toLowerCase().trim();
-      if (!name) return;
+      const tokens = getAllCardMatchNames(c);
       const qty = c.quantity || 1;
-      map.set(name, (map.get(name) || 0) + qty);
-      const cleanFront = name.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-      if (cleanFront && cleanFront !== name) {
-        map.set(cleanFront, (map.get(cleanFront) || 0) + qty);
-      }
-      const normalizedQuotes = name.replace(/['’`"]/g, "'");
-      if (normalizedQuotes !== name) {
-        map.set(normalizedQuotes, (map.get(normalizedQuotes) || 0) + qty);
-      }
+      tokens.forEach((token) => {
+        map.set(token, (map.get(token) || 0) + qty);
+      });
     });
     return map;
   }, [collectionCards]);
 
   const getCardOwnedQuantity = useCallback((cardOrName: { name?: string; scryfallId?: string } | string | null | undefined): number => {
     if (!cardOrName) return 0;
-    const rawName = typeof cardOrName === 'string'
-      ? cardOrName
-      : (cardOrName && typeof cardOrName === 'object' && typeof cardOrName.name === 'string')
-        ? cardOrName.name
-        : '';
-    if (!rawName) return 0;
-    const name = rawName.toLowerCase().trim();
-    if (collectionCountMap.has(name)) return collectionCountMap.get(name)!;
-    const cleanFront = name.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-    if (collectionCountMap.has(cleanFront)) return collectionCountMap.get(cleanFront)!;
-    const normalizedQuotes = name.replace(/['’`"]/g, "'");
-    if (collectionCountMap.has(normalizedQuotes)) return collectionCountMap.get(normalizedQuotes)!;
-    const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
-    if (collectionCountMap.has(cleanFrontNoQuotes)) return collectionCountMap.get(cleanFrontNoQuotes)!;
+    const tokens = getAllCardMatchNames(cardOrName);
+    for (const token of tokens) {
+      if (collectionCountMap.has(token)) return collectionCountMap.get(token)!;
+    }
     return 0;
   }, [collectionCountMap]);
 
@@ -2365,7 +2349,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                               className="p-2 rounded-xl bg-slate-950/70 border border-slate-800/90 text-xs"
                             >
                               <div className="flex items-center justify-between gap-1">
-                                <span className="font-bold text-slate-200 truncate">{item.card.name}</span>
+                                {(() => {
+                                  const names = getCardNames(item.card);
+                                  return (
+                                    <div className="min-w-0">
+                                      <span className="font-bold text-slate-200 truncate block">
+                                        {names.actualName}
+                                      </span>
+                                      {names.hasAlternateName && names.subtitle && (
+                                        <span className="text-[10px] text-slate-400 italic truncate block">
+                                          {names.subtitle}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-950 border border-amber-700/60 text-amber-300 shrink-0">
                                   +{item.deficit} needed
                                 </span>
@@ -4373,12 +4371,28 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Info */}
           <div className="min-w-0 flex-1 flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
-              <span
-                onClick={() => onSelectCard(toScryfallCard(card))}
-                className="text-sm font-bold text-slate-200 hover:text-violet-400 cursor-pointer break-words leading-tight"
-              >
-                {card.name}
-              </span>
+              {(() => {
+                const names = getCardNames(card);
+                return (
+                  <div className="flex flex-col min-w-0">
+                    <span
+                      onClick={() => onSelectCard(toScryfallCard(card))}
+                      className="text-sm font-bold text-slate-200 hover:text-violet-400 cursor-pointer break-words leading-tight"
+                      title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                    >
+                      {names.actualName}
+                    </span>
+                    {names.hasAlternateName && names.subtitle && (
+                      <span
+                        className="text-[10px] text-slate-400 italic truncate"
+                        title={`Official Oracle name: ${names.oracleName}`}
+                      >
+                        {names.subtitle}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="shrink-0 flex items-center gap-1.5 mt-0.5">
                 <ManaCostBadge manaCost={card.mana_cost} size="sm" />
               </div>
@@ -4694,13 +4708,28 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
         <div className="p-2.5 flex flex-col justify-between gap-2">
           <div>
-            <h4
-              onClick={() => onSelectCard(toScryfallCard(card))}
-              className="text-xs font-semibold text-slate-200 break-words leading-tight hover:text-violet-400 cursor-pointer"
-              title={card.name}
-            >
-              {card.name}
-            </h4>
+            {(() => {
+              const names = getCardNames(card);
+              return (
+                <div>
+                  <h4
+                    onClick={() => onSelectCard(toScryfallCard(card))}
+                    className="text-xs font-semibold text-slate-200 break-words leading-tight hover:text-violet-400 cursor-pointer"
+                    title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                  >
+                    {names.actualName}
+                  </h4>
+                  {names.hasAlternateName && names.subtitle && (
+                    <div
+                      className="text-[10px] text-slate-400 italic truncate"
+                      title={`Official Oracle name: ${names.oracleName}`}
+                    >
+                      {names.subtitle}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="flex items-center justify-between border-t border-slate-800/60 pt-2">

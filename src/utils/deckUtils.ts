@@ -72,6 +72,7 @@ import {
   CompareDecks
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard } from '../types/mtg';
+import { getAllCardMatchNames } from './cardNameUtils';
 
 /**
  * Standard basic land card names for fallback matching (11 canonical MTG basic lands and variants):
@@ -237,6 +238,7 @@ export function buildCollectionLookup(collectionCards: CollectionCard[]): Collec
 
     const keys = new Set<string>();
     keys.add(rawName);
+    getAllCardMatchNames(c).forEach((m) => keys.add(m));
 
     // Front face of double-faced cards or split cards
     const cleanFront = rawName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
@@ -268,6 +270,11 @@ export function buildCollectionLookup(collectionCards: CollectionCard[]): Collec
     }
     const cardName = typeof card === 'string' ? card : (card.name || '');
     if (!cardName) return 0;
+
+    const tokens = getAllCardMatchNames(card);
+    for (const token of tokens) {
+      if (nameMap.has(token)) return nameMap.get(token)!;
+    }
 
     const lower = cardName.toLowerCase().trim();
     if (nameMap.has(lower)) return nameMap.get(lower)!;

@@ -25,6 +25,7 @@ import {
   Copy
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
+import { getCardNames } from '../utils/cardNameUtils';
 import { 
   optimizeCardImage, 
   identifyCardFromImage, 
@@ -321,11 +322,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
       setScannedBatchCards((prev) => [batchItem, ...prev]);
 
+      const scanNames = getCardNames(scanResult.card);
       // Quick fade-out success notification
       setQuickNotice({
         type: 'success',
-        title: `Added ${cardQuantity}x ${scanResult.card.name}`,
-        detail: `${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
+        title: `Added ${cardQuantity}x ${scanNames.actualName}`,
+        detail: `${scanNames.hasAlternateName && scanNames.subtitle ? `${scanNames.subtitle} · ` : ''}${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
         imageUrl: getCardImageUrl(scanResult.card, 'small'),
         isFoil: finalIsFoil,
         timestamp: Date.now(),
@@ -612,11 +614,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         )
       );
 
+      const editNames = getCardNames(selectedEditCard);
       // Show quick notification
       setQuickNotice({
         type: 'success',
-        title: `Updated: ${selectedEditCard.name}`,
-        detail: `${selectedEditCard.set?.toUpperCase()} #${selectedEditCard.collector_number} · ${selectedEditFoil ? 'Foil' : 'Regular'}`,
+        title: `Updated: ${editNames.actualName}`,
+        detail: `${editNames.hasAlternateName && editNames.subtitle ? `${editNames.subtitle} · ` : ''}${selectedEditCard.set?.toUpperCase()} #${selectedEditCard.collector_number} · ${selectedEditFoil ? 'Foil' : 'Regular'}`,
         imageUrl: getCardImageUrl(selectedEditCard, 'small'),
         isFoil: selectedEditFoil,
         timestamp: Date.now(),
@@ -1087,9 +1090,24 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                       </span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-bold text-white truncate w-full block group-hover:text-violet-300 transition-colors">
-                    {item.card.name}
-                  </span>
+                  {(() => {
+                    const names = getCardNames(item.card);
+                    return (
+                      <div className="w-full text-center">
+                        <span
+                          className="text-[10px] font-bold text-white truncate w-full block group-hover:text-violet-300 transition-colors"
+                          title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                        >
+                          {names.actualName}
+                        </span>
+                        {names.hasAlternateName && names.subtitle && (
+                          <span className="text-[8.5px] text-slate-400 italic truncate w-full block">
+                            {names.subtitle}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center justify-center gap-1 mt-0.5 text-[9px] text-slate-400 font-mono">
                     <span>{item.card.set?.toUpperCase()}</span>
                     <span>#{item.card.collector_number}</span>

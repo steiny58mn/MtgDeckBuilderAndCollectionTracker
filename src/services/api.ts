@@ -87,7 +87,15 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     set_name: c.set_name || '',
     collector_number: String(c.collector_number || ''),
     image_uris,
-    card_faces: Array.isArray(c.card_faces) ? c.card_faces : undefined,
+    printed_name: c.printed_name || c.printedName || c.card_faces?.[0]?.printed_name || undefined,
+    flavor_name: c.flavor_name || c.flavorName || c.card_faces?.[0]?.flavor_name || undefined,
+    card_faces: Array.isArray(c.card_faces)
+      ? c.card_faces.map((f) => ({
+          ...f,
+          printed_name: f.printed_name || f.printedName || undefined,
+          flavor_name: f.flavor_name || f.flavorName || undefined,
+        }))
+      : undefined,
     legalities: c.legalities || {},
     prices: c.prices || {},
     isGamechanger: isGc,

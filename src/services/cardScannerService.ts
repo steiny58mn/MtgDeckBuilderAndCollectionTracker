@@ -565,6 +565,11 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
     );
   }
 
+  // If Scryfall matched under official rules name but image identified a printed/unofficial title (e.g. "Xenk, Paladin Unbroken"), preserve it!
+  if (!matchedCard.printed_name && detectedName && detectedName.toLowerCase() !== matchedCard.name.toLowerCase()) {
+    matchedCard.printed_name = detectedName;
+  }
+
   return {
     card: matchedCard,
     isFoil: detectedFoil,

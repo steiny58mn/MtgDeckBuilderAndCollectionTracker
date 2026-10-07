@@ -37,6 +37,7 @@ import {
   Camera
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
+import { getCardNames } from '../utils/cardNameUtils';
 import { DeckService } from '../services/deckService';
 import { getKnownMedianPrice, toHighResImageUrl } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -66,6 +67,8 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
   return {
     id: card.scryfallId,
     name: card.name,
+    printed_name: card.printed_name || card.printedName,
+    flavor_name: card.flavor_name || card.flavorName,
     set: card.set,
     collector_number: card.collectorNumber,
     cmc: card.cmc,
@@ -221,8 +224,9 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       colors: string[];
     }>();
     for (const c of binderFilteredCollection) {
+      const names = getCardNames(c);
       map.set(c.id, {
-        nameLower: c.name.toLowerCase(),
+        nameLower: `${names.actualName} ${names.oracleName} ${names.unofficialName || ''} ${c.name}`.toLowerCase(),
         setLower: (c.setName || c.set || '').toLowerCase(),
         notesLower: (c.notes || '').toLowerCase(),
         colors: c.colors || c.color_identity || [],
@@ -1331,14 +1335,29 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                 </div>
 
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span
-                                      onClick={() => onSelectCard(cardToScryfallCard(card))}
-                                      className="text-xs font-semibold text-slate-200 hover:text-emerald-400 cursor-pointer break-words leading-tight max-w-[140px] sm:max-w-[180px]"
-                                      title={card.name}
-                                    >
-                                      {card.name}
-                                    </span>
+                                  <div className="flex items-start gap-1.5 flex-wrap">
+                                    {(() => {
+                                      const names = getCardNames(card);
+                                      return (
+                                        <div className="min-w-0 max-w-[150px] sm:max-w-[200px]">
+                                          <span
+                                            onClick={() => onSelectCard(cardToScryfallCard(card))}
+                                            className="text-xs font-semibold text-slate-200 hover:text-emerald-400 cursor-pointer break-words leading-tight block"
+                                            title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                                          >
+                                            {names.actualName}
+                                          </span>
+                                          {names.hasAlternateName && names.subtitle && (
+                                            <span
+                                              className="text-[10px] text-slate-400 italic truncate block"
+                                              title={`Official Oracle name: ${names.oracleName}`}
+                                            >
+                                              {names.subtitle}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                     {card.isFoil && (
                                       <span className="text-violet-400 text-[10px] flex items-center gap-0.5">
                                         <Sparkles className="w-2.5 h-2.5" />
@@ -1501,13 +1520,28 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                       {/* Body & Controls */}
                       <div className="p-2.5 space-y-2">
                         <div>
-                          <h4
-                            onClick={() => onSelectCard(cardToScryfallCard(card))}
-                            className="text-xs font-semibold text-slate-200 break-words leading-tight hover:text-emerald-400 cursor-pointer"
-                            title={card.name}
-                          >
-                            {card.name}
-                          </h4>
+                          {(() => {
+                            const names = getCardNames(card);
+                            return (
+                              <div>
+                                <h4
+                                  onClick={() => onSelectCard(cardToScryfallCard(card))}
+                                  className="text-xs font-semibold text-slate-200 break-words leading-tight hover:text-emerald-400 cursor-pointer"
+                                  title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                                >
+                                  {names.actualName}
+                                </h4>
+                                {names.hasAlternateName && names.subtitle && (
+                                  <div
+                                    className="text-[10px] text-slate-400 italic truncate"
+                                    title={`Official Oracle name: ${names.oracleName}`}
+                                  >
+                                    {names.subtitle}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                           <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
                             <span className="uppercase font-mono">{card.set} · #{card.collectorNumber}</span>
                             {gain !== 0 && (
@@ -1673,16 +1707,34 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           }}
                         >
                           <td className="py-2 px-4">
-                            <div className="inline-flex items-center gap-2 max-w-full">
-                              <span className="font-bold text-slate-200 group-hover/row:text-emerald-400 transition-colors truncate">
-                                {card.name}
-                              </span>
-                              {card.type_line && (
-                                <span className="text-[11px] text-slate-500 hidden md:inline truncate">
-                                  · {card.type_line.split('—')[0].trim()}
-                                </span>
-                              )}
-                            </div>
+                            {(() => {
+                              const names = getCardNames(card);
+                              return (
+                                <div className="flex flex-col min-w-0">
+                                  <div className="inline-flex items-center gap-2 max-w-full">
+                                    <span
+                                      className="font-bold text-slate-200 group-hover/row:text-emerald-400 transition-colors truncate"
+                                      title={names.hasAlternateName ? `${names.actualName} (Oracle: ${names.oracleName})` : names.actualName}
+                                    >
+                                      {names.actualName}
+                                    </span>
+                                    {card.type_line && (
+                                      <span className="text-[11px] text-slate-500 hidden md:inline truncate">
+                                        · {card.type_line.split('—')[0].trim()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {names.hasAlternateName && names.subtitle && (
+                                    <span
+                                      className="text-[10px] text-slate-400 italic truncate"
+                                      title={`Official Oracle name: ${names.oracleName}`}
+                                    >
+                                      {names.subtitle}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="py-2 px-3">
                             <span className="font-mono uppercase text-slate-300 font-semibold">{card.set}</span>

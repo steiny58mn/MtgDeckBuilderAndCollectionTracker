@@ -14,6 +14,8 @@ export type CardRarity = 'common' | 'uncommon' | 'rare' | 'mythic' | 'special' |
 
 export interface ScryfallCardFace {
   name: string;
+  printed_name?: string;
+  flavor_name?: string;
   mana_cost?: string;
   type_line?: string;
   oracle_text?: string;
@@ -41,6 +43,8 @@ export interface ScryfallCardPrices {
 export interface ScryfallCard {
   id: string;
   name: string;
+  printed_name?: string;
+  flavor_name?: string;
   layout?: string;
   oracle_id?: string;
   mana_cost?: string;
@@ -92,6 +96,10 @@ export interface DeckCard {
   id: string; // unique row id
   scryfallId: string;
   name: string;
+  printed_name?: string;
+  printedName?: string;
+  flavor_name?: string;
+  flavorName?: string;
   layout?: string;
   set: string;
   set_name?: string;
@@ -152,6 +160,10 @@ export interface CollectionCard {
   binderId?: string; // which binder this belongs to
   scryfallId: string;
   name: string;
+  printed_name?: string;
+  printedName?: string;
+  flavor_name?: string;
+  flavorName?: string;
   set: string;
   setName: string;
   set_name?: string;
