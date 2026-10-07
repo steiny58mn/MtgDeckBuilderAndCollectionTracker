@@ -47,7 +47,7 @@ export function setStoredGeminiApiKey(apiKey: string): void {
 
 /**
  * Compresses and resizes an image (Blob or HTMLCanvasElement or Image)
- * down to max ~1280px on its longest edge and converts to JPEG.
+ * down to max ~960px on its longest edge and converts to JPEG.
  * Returns a clean base64 data URL and raw base64 string.
  */
 export async function optimizeCardImage(
@@ -55,7 +55,7 @@ export async function optimizeCardImage(
 ): Promise<{ dataUrl: string; base64Only: string }> {
   // If already a pre-cropped canvas, serialize immediately
   if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
-    const dataUrl = imageSource.toDataURL('image/jpeg', 0.80);
+    const dataUrl = imageSource.toDataURL('image/jpeg', 0.82);
     const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
     return { dataUrl, base64Only };
   }
@@ -94,7 +94,7 @@ export async function optimizeCardImage(
           try {
             bitmap.close();
           } catch {}
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
           const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
           return { dataUrl, base64Only };
         }
@@ -144,7 +144,7 @@ export async function optimizeCardImage(
         }
 
         ctx.drawImage(imageEl, 0, 0, targetWidth, targetHeight);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
         const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
 
         resolve({ dataUrl, base64Only });
@@ -326,11 +326,15 @@ export async function lookupExactScryfallCard(
 }
 
 /**
- * Execute Gemini Vision API call using current and standard Flash models:
- * gemini-3.5-flash -> gemini-2.5-flash -> gemini-2.0-flash -> gemini-2.0-flash-lite
- * via direct REST API and GoogleGenAI SDK with complete fallback handling.
+ * Valid current Flash models supported on Google Generative Language v1beta.
+ * Only gemini-2.0-flash and gemini-2.0-flash-lite are active.
  */
-// Cache the verified working model in memory so subsequent scans hit it on attempt #1 with 0ms retry delay
+const SUPPORTED_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+] as const;
+
+// Cache the verified working model in memory so subsequent scans hit it on attempt #1 with 0ms delay
 let cachedWorkingModel: string | null = null;
 
 async function queryGeminiVision(
@@ -338,43 +342,26 @@ async function queryGeminiVision(
   base64Jpeg: string,
   prompt: string
 ): Promise<string> {
-  const baseModels = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-1.5-flash',
-  ];
-
   // Prioritize the known working model from previous scans
   const candidateModels = cachedWorkingModel
-    ? [cachedWorkingModel, ...baseModels.filter((m) => m !== cachedWorkingModel)]
-    : baseModels;
+    ? [cachedWorkingModel, ...SUPPORTED_MODELS.filter((m) => m !== cachedWorkingModel)]
+    : [...SUPPORTED_MODELS];
 
-  let lastError: any = null;
+  let primaryError: Error | null = null;
+  let lastError: Error | null = null;
 
   // 1. Direct REST API calls (clean, robust across all client environments)
   for (const model of candidateModels) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const generationConfig: Record<string, any> = {
-        temperature: 0.1,
-        maxOutputTokens: 200,
-      };
-
-      // Disable thinking tokens for lightning-fast zero-shot recognition (slashes latency by 2-3s)
-      if (!model.includes('2.0')) {
-        generationConfig.thinkingConfig = {
-          thinkingBudget: 0,
-        };
-      }
-
-      const payload: any = {
+      const payload = {
         contents: [
           {
+            role: 'user',
             parts: [
               {
-                inline_data: {
-                  mime_type: 'image/jpeg',
+                inlineData: {
+                  mimeType: 'image/jpeg',
                   data: base64Jpeg,
                 },
               },
@@ -384,29 +371,19 @@ async function queryGeminiVision(
             ],
           },
         ],
-        generationConfig,
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 250,
+        },
       };
 
-      let res = await fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
       });
-
-      // If endpoint rejects thinkingConfig with HTTP 400, retry once without it
-      if (!res.ok && res.status === 400 && generationConfig.thinkingConfig) {
-        delete generationConfig.thinkingConfig;
-        payload.generationConfig = generationConfig;
-        res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-      }
 
       if (res.ok) {
         const json = await res.json();
@@ -417,19 +394,49 @@ async function queryGeminiVision(
         }
       } else {
         const errorJson = await res.json().catch(() => null);
-        const errorMsg =
+        const rawMsg =
           errorJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
-        console.warn(`[CardScanner] Gemini REST attempt (${model}) returned:`, errorMsg);
-        lastError = new Error(errorMsg);
+        console.warn(`[CardScanner] Gemini REST attempt (${model}) error:`, rawMsg);
+
+        // Check for specific actionable errors
+        if (res.status === 400 && (rawMsg.includes('API key not valid') || rawMsg.includes('API_KEY_INVALID'))) {
+          throw new Error('Gemini API key is invalid. Please verify your API key in scanner settings.');
+        }
+
+        if (res.status === 403) {
+          throw new Error(`Gemini API permission denied: ${rawMsg}. Verify your API key has Generative Language API enabled.`);
+        }
+
+        if (res.status === 429 || rawMsg.includes('RESOURCE_EXHAUSTED') || rawMsg.includes('Quota exceeded')) {
+          const quotaErr = new Error(
+            'Gemini free tier quota limit reached (15 scans/min or daily quota). Please wait a moment before scanning.'
+          );
+          if (!primaryError) primaryError = quotaErr;
+          lastError = quotaErr;
+          // Try next model (e.g. gemini-2.0-flash-lite)
+          continue;
+        }
+
+        const modelErr = new Error(`Gemini (${model}): ${rawMsg}`);
+        if (!primaryError) primaryError = modelErr;
+        lastError = modelErr;
       }
     } catch (err: any) {
+      // Re-throw immediately if it's an invalid key or permission denied
+      if (
+        err?.message?.includes('API key is invalid') ||
+        err?.message?.includes('permission denied')
+      ) {
+        throw err;
+      }
       console.warn(`[CardScanner] Gemini REST attempt (${model}) network error:`, err);
+      if (!primaryError) primaryError = err;
       lastError = err;
     }
   }
 
   // 2. GoogleGenAI SDK fallback attempts
-  for (const sdkModel of ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.0-flash']) {
+  for (const sdkModel of SUPPORTED_MODELS) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const sdkResp = await ai.models.generateContent({
@@ -452,15 +459,21 @@ async function queryGeminiVision(
         ],
       });
       if (sdkResp && sdkResp.text) {
+        cachedWorkingModel = sdkModel;
         return sdkResp.text;
       }
     } catch (sdkErr: any) {
       console.warn(`[CardScanner] GoogleGenAI SDK error (${sdkModel}):`, sdkErr);
-      if (!lastError) lastError = sdkErr;
+      const sdkMsg = sdkErr?.message || String(sdkErr);
+      if (sdkMsg.includes('API key not valid') || sdkMsg.includes('API_KEY_INVALID')) {
+        throw new Error('Gemini API key is invalid. Please verify your API key in scanner settings.');
+      }
+      if (!primaryError) primaryError = sdkErr;
+      lastError = sdkErr;
     }
   }
 
-  throw lastError || new Error('Failed to analyze card image with Gemini Vision');
+  throw primaryError || lastError || new Error('Failed to analyze card image with Gemini Vision');
 }
 
 /**
@@ -481,7 +494,7 @@ export async function identifyCardFromImage(
 Analyze THIS SPECIFIC MTG card photo with extreme precision. Do NOT guess or repeat a previous card.
 Examine the following specific card regions:
 1. Card Title (top): Extract the exact official English card name.
-2. Bottom-left footer: Modern MTG cards print "[collector_number]/[total] [rarity] [SET_CODE] • [LANG]" or "[collector_number] [SET_CODE]".
+2. Bottom-left footer: Modern MTG cards print "[collector_number]/[total] [rarity] [SET_CODE] \u2022 [LANG]" or "[collector_number] [SET_CODE]".
    - Extract the 3 to 5 letter set code in UPPERCASE (e.g. "NEO", "OTJ", "MH3", "BLB", "BRO", "MKM", "ONE", "LTR", "DMU", "CLB", "2X2", "SLD", "FDN", etc.).
    - Extract the exact collector number (e.g. "242", "045", "123a", "007", "301", "298").
    - If older card without bottom-left footer, identify the expansion set from the expansion symbol on the middle-right line.

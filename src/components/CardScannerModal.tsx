@@ -158,7 +158,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Auto fade-out timer for quick success/failure notification toast
   useEffect(() => {
     if (!quickNotice) return;
-    const duration = quickNotice.type === 'success' ? 2400 : 3200;
+    if (quickNotice.type === 'failure') return;
+    const duration = 2400;
     const timer = setTimeout(() => {
       setQuickNotice(null);
     }, duration);
