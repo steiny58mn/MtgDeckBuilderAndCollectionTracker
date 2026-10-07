@@ -53,13 +53,63 @@ export function setStoredGeminiApiKey(apiKey: string): void {
 export async function optimizeCardImage(
   imageSource: Blob | File | HTMLImageElement | HTMLVideoElement
 ): Promise<{ dataUrl: string; base64Only: string }> {
-  return new Promise((resolve, reject) => {
-    let img: HTMLImageElement;
+  // 1. Try createImageBitmap for Blob/File (fast, handles EXIF orientation)
+  if (
+    typeof window !== 'undefined' &&
+    'createImageBitmap' in window &&
+    (imageSource instanceof Blob || imageSource instanceof File)
+  ) {
+    try {
+      const bitmap = await createImageBitmap(imageSource);
+      const naturalWidth = bitmap.width;
+      const naturalHeight = bitmap.height;
 
+      if (naturalWidth > 0 && naturalHeight > 0) {
+        const maxDimension = 1280;
+        let targetWidth = naturalWidth;
+        let targetHeight = naturalHeight;
+
+        if (naturalWidth > maxDimension || naturalHeight > maxDimension) {
+          if (naturalWidth > naturalHeight) {
+            targetWidth = maxDimension;
+            targetHeight = Math.round((naturalHeight * maxDimension) / naturalWidth);
+          } else {
+            targetHeight = maxDimension;
+            targetWidth = Math.round((naturalWidth * maxDimension) / naturalHeight);
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+          try {
+            bitmap.close();
+          } catch {}
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+          return { dataUrl, base64Only };
+        }
+      }
+    } catch (bitmapErr) {
+      console.warn('[CardScanner] createImageBitmap fallback to Image element:', bitmapErr);
+    }
+  }
+
+  // 2. Standard HTMLImageElement / FileReader processing
+  return new Promise((resolve, reject) => {
     const processLoadedImage = (imageEl: HTMLImageElement | HTMLVideoElement) => {
       try {
-        const naturalWidth = (imageEl as HTMLImageElement).naturalWidth || (imageEl as HTMLVideoElement).videoWidth || imageEl.width;
-        const naturalHeight = (imageEl as HTMLImageElement).naturalHeight || (imageEl as HTMLVideoElement).videoHeight || imageEl.height;
+        const naturalWidth =
+          (imageEl as HTMLImageElement).naturalWidth ||
+          (imageEl as HTMLVideoElement).videoWidth ||
+          imageEl.width;
+        const naturalHeight =
+          (imageEl as HTMLImageElement).naturalHeight ||
+          (imageEl as HTMLVideoElement).videoHeight ||
+          imageEl.height;
 
         if (!naturalWidth || !naturalHeight) {
           throw new Error('Invalid image dimensions');
@@ -112,16 +162,32 @@ export async function optimizeCardImage(
       return;
     }
 
-    // It's a Blob or File
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      img = new Image();
-      img.onload = () => processLoadedImage(img);
-      img.onerror = () => reject(new Error('Failed to parse uploaded image file'));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = (_e) => reject(new Error('Failed to read image file'));
-    reader.readAsDataURL(imageSource);
+    // Blob or File fallback using URL.createObjectURL
+    try {
+      const objectUrl = URL.createObjectURL(imageSource as Blob);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        processLoadedImage(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        // Fallback to FileReader
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img2 = new Image();
+          img2.onload = () => processLoadedImage(img2);
+          img2.onerror = () =>
+            reject(new Error('Failed to parse uploaded image file.'));
+          img2.src = e.target?.result as string;
+        };
+        reader.onerror = () => reject(new Error('Failed to read image file.'));
+        reader.readAsDataURL(imageSource as Blob);
+      };
+      img.src = objectUrl;
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -205,7 +271,8 @@ export async function lookupExactScryfallCard(
 }
 
 /**
- * Execute Gemini Vision API call using standard models (gemini-2.0-flash, gemini-2.0-flash-lite, gemini-1.5-flash-latest)
+ * Execute Gemini Vision API call using current and standard Flash models:
+ * gemini-3.5-flash -> gemini-2.5-flash -> gemini-2.0-flash -> gemini-2.0-flash-lite
  * via direct REST API and GoogleGenAI SDK with complete fallback handling.
  */
 async function queryGeminiVision(
@@ -214,10 +281,10 @@ async function queryGeminiVision(
   prompt: string
 ): Promise<string> {
   const candidateModels = [
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
-    'gemini-1.5-flash-latest',
-    'gemini-2.0-flash-001',
   ];
 
   let lastError: any = null;
@@ -244,7 +311,6 @@ async function queryGeminiVision(
         ],
         generationConfig: {
           temperature: 0.1,
-          responseMimeType: 'application/json',
         },
       };
 
@@ -264,7 +330,8 @@ async function queryGeminiVision(
         }
       } else {
         const errorJson = await res.json().catch(() => null);
-        const errorMsg = errorJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+        const errorMsg =
+          errorJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
         console.warn(`[CardScanner] Gemini REST attempt (${model}) returned:`, errorMsg);
         lastError = new Error(errorMsg);
       }
@@ -274,34 +341,36 @@ async function queryGeminiVision(
     }
   }
 
-  // 2. GoogleGenAI SDK attempt with gemini-2.0-flash
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const sdkResp = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                mimeType: 'image/jpeg',
-                data: base64Jpeg,
+  // 2. GoogleGenAI SDK fallback attempts
+  for (const sdkModel of ['gemini-3.5-flash', 'gemini-2.0-flash']) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const sdkResp = await ai.models.generateContent({
+        model: sdkModel,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: base64Jpeg,
+                },
               },
-            },
-            {
-              text: prompt,
-            },
-          ],
-        },
-      ],
-    });
-    if (sdkResp && sdkResp.text) {
-      return sdkResp.text;
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      });
+      if (sdkResp && sdkResp.text) {
+        return sdkResp.text;
+      }
+    } catch (sdkErr: any) {
+      console.warn(`[CardScanner] GoogleGenAI SDK error (${sdkModel}):`, sdkErr);
+      if (!lastError) lastError = sdkErr;
     }
-  } catch (sdkErr: any) {
-    console.warn('[CardScanner] GoogleGenAI SDK error:', sdkErr);
-    if (!lastError) lastError = sdkErr;
   }
 
   throw lastError || new Error('Failed to analyze card image with Gemini Vision');
@@ -356,7 +425,7 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
   let parsed: any;
   try {
     parsed = JSON.parse(cleanJsonText);
-  } catch (jsonErr) {
+  } catch (_jsonErr) {
     // Attempt regex extraction if JSON parsing failed
     const nameMatch = rawResponseText.match(/"card_name"\s*:\s*"([^"]+)"/i);
     const setMatch = rawResponseText.match(/"set_code"\s*:\s*"([^"]+)"/i);

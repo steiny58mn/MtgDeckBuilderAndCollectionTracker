@@ -13,14 +13,15 @@ import {
   Key, 
   BookOpen, 
   Plus, 
-  RefreshCw,
-  ExternalLink,
-  Volume2,
-  Layers,
-  ChevronUp,
-  ChevronDown,
-  Check,
-  X
+  RefreshCw, 
+  ExternalLink, 
+  Volume2, 
+  Layers, 
+  ChevronUp, 
+  ChevronDown, 
+  Check, 
+  X,
+  XCircle
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { 
@@ -96,6 +97,20 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [cardQuantity, setCardQuantity] = useState<number>(1);
   const [overrideFoil, setOverrideFoil] = useState<boolean | null>(null); // null = auto-detect
 
+  // Realtime Persistent Counts (Successes & Failures)
+  const [successCount, setSuccessCount] = useState<number>(0);
+  const [failureCount, setFailureCount] = useState<number>(0);
+
+  // Quick Fade-out Notification Toasts
+  const [quickNotice, setQuickNotice] = useState<{
+    type: 'success' | 'failure';
+    title: string;
+    detail?: string;
+    imageUrl?: string;
+    isFoil?: boolean;
+    timestamp: number;
+  } | null>(null);
+
   // Automatic Crosshairs Detection State
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
   const [isCrosshairLocked, setIsCrosshairLocked] = useState<boolean>(false);
@@ -106,12 +121,6 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   // Batch Session state (accumulates all cards scanned while camera stays open)
   const [scannedBatchCards, setScannedBatchCards] = useState<BatchScannedCard[]>([]);
-  const [recentToast, setRecentToast] = useState<{
-    card: ScryfallCard;
-    quantity: number;
-    isFoil: boolean;
-  } | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
   const [showBatchDrawer, setShowBatchDrawer] = useState(false);
 
   // API Key Settings Modal
@@ -125,23 +134,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [manualSuggestions, setManualSuggestions] = useState<string[]>([]);
   const [isSearchingManual, setIsSearchingManual] = useState(false);
 
-  // Auto-dismiss success toast after 4 seconds
+  // Auto fade-out timer for quick success/failure notification toast
   useEffect(() => {
-    if (!recentToast) return;
+    if (!quickNotice) return;
+    const duration = quickNotice.type === 'success' ? 2400 : 3200;
     const timer = setTimeout(() => {
-      setRecentToast(null);
-    }, 4000);
+      setQuickNotice(null);
+    }, duration);
     return () => clearTimeout(timer);
-  }, [recentToast]);
-
-  // Auto-dismiss scan error after 4.5 seconds
-  useEffect(() => {
-    if (!scanError) return;
-    const timer = setTimeout(() => {
-      setScanError(null);
-    }, 4500);
-    return () => clearTimeout(timer);
-  }, [scanError]);
+  }, [quickNotice]);
 
   // Initialize camera stream
   const startCamera = useCallback(async () => {
@@ -214,11 +215,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     } else {
       stopCamera();
       setScannedBatchCards([]);
-      setRecentToast(null);
-      setScanError(null);
+      setQuickNotice(null);
       setIsProcessing(false);
       setShowBatchDrawer(false);
       setIsCrosshairLocked(false);
+      setSuccessCount(0);
+      setFailureCount(0);
     }
     return () => {
       stopCamera();
@@ -251,8 +253,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const handleProcessImage = async (imageSource: Blob | File | HTMLVideoElement) => {
     unlockAudio();
     setIsProcessing(true);
-    setScanError(null);
-    setStatusMessage('Optimizing photo...');
+    setStatusMessage('Analyzing photo...');
 
     try {
       const { base64Only } = await optimizeCardImage(imageSource);
@@ -262,13 +263,19 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         setStatusMessage('');
         setIsProcessing(false);
         setIsCrosshairLocked(false);
+        setFailureCount((c) => c + 1);
         playScanErrorSound();
         setShowApiKeyModal(true);
-        setScanError('Please enter your free Gemini API key to enable card recognition.');
+        setQuickNotice({
+          type: 'failure',
+          title: 'Gemini API Key Required',
+          detail: 'Enter your free Gemini key in settings to enable card scanning.',
+          timestamp: Date.now(),
+        });
         return;
       }
 
-      setStatusMessage('Identifying card...');
+      setStatusMessage('Identifying card with Gemini...');
       const scanResult = await identifyCardFromImage(base64Only, apiKey);
 
       const finalIsFoil = overrideFoil !== null ? overrideFoil : scanResult.isFoil;
@@ -280,7 +287,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       // Play success chime!
       playScanSuccessSound();
 
-      // Add to accumulated batch list
+      // Update realtime success count & batch list
+      setSuccessCount((c) => c + 1);
       const batchItem: BatchScannedCard = {
         id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         card: scanResult.card,
@@ -290,10 +298,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       };
 
       setScannedBatchCards((prev) => [batchItem, ...prev]);
-      setRecentToast({
-        card: scanResult.card,
-        quantity: cardQuantity,
+
+      // Quick fade-out success notification
+      setQuickNotice({
+        type: 'success',
+        title: `Added ${cardQuantity}x ${scanResult.card.name}`,
+        detail: `${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
+        imageUrl: getCardImageUrl(scanResult.card, 'small'),
         isFoil: finalIsFoil,
+        timestamp: Date.now(),
       });
 
       lastScanTimestampRef.current = Date.now();
@@ -301,9 +314,18 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setIsProcessing(false);
       setIsCrosshairLocked(false);
     } catch (err: any) {
-      console.error('[CardScanner] Batch scan error:', err);
+      console.error('[CardScanner] Scan error:', err);
       playScanErrorSound();
-      setScanError(err?.message || 'Could not recognize card. Ensure the card is in focus with good lighting.');
+      setFailureCount((c) => c + 1);
+
+      // Quick fade-out failure notification
+      setQuickNotice({
+        type: 'failure',
+        title: 'Scan Failed',
+        detail: err?.message || 'Could not recognize card. Ensure card is clear, centered, and well-lit.',
+        timestamp: Date.now(),
+      });
+
       setStatusMessage('');
       setIsProcessing(false);
       setIsCrosshairLocked(false);
@@ -441,7 +463,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     };
   }, [cameraActive, autoScanEnabled, isProcessing]);
 
-  // File upload input change
+  // File upload input change (supports all image files without forcing camera)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -475,6 +497,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         const isFoil = overrideFoil ?? false;
         await onAddCardToBinder(cardToAdd, cardQuantity, isFoil, selectedBinderId);
         playScanSuccessSound();
+        setSuccessCount((c) => c + 1);
+
         const batchItem: BatchScannedCard = {
           id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           card: cardToAdd,
@@ -483,21 +507,38 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           timestamp: Date.now(),
         };
         setScannedBatchCards((prev) => [batchItem, ...prev]);
-        setRecentToast({
-          card: cardToAdd,
-          quantity: cardQuantity,
+
+        setQuickNotice({
+          type: 'success',
+          title: `Added ${cardQuantity}x ${cardToAdd.name}`,
+          detail: `${cardToAdd.set?.toUpperCase()} #${cardToAdd.collector_number} · ${currentBinder?.name || 'Binder'}`,
+          imageUrl: getCardImageUrl(cardToAdd, 'small'),
           isFoil,
+          timestamp: Date.now(),
         });
+
         setManualQuery('');
         setManualSuggestions([]);
         setManualSearchOpen(false);
       } else {
         playScanErrorSound();
-        setScanError(`Could not find "${name}" on Scryfall.`);
+        setFailureCount((c) => c + 1);
+        setQuickNotice({
+          type: 'failure',
+          title: 'Card Not Found',
+          detail: `Could not find "${name}" on Scryfall.`,
+          timestamp: Date.now(),
+        });
       }
     } catch (err: any) {
       playScanErrorSound();
-      setScanError(err?.message || 'Failed to fetch card details');
+      setFailureCount((c) => c + 1);
+      setQuickNotice({
+        type: 'failure',
+        title: 'Search Failed',
+        detail: err?.message || 'Failed to fetch card details.',
+        timestamp: Date.now(),
+      });
     } finally {
       setIsSearchingManual(false);
     }
@@ -509,30 +550,22 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white overflow-hidden animate-in fade-in duration-200">
-      {/* Top Header: Controls, Binder Selector & Batch Counter */}
-      <div className="flex items-center justify-between px-3.5 sm:px-4 py-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-30">
+      {/* Top Header: Binder Selector, Persistent Live Counts Badge & Controls */}
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-30">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
             <Camera className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs sm:text-sm font-bold text-white truncate">
-                Scan Cards to Binder
-              </h2>
-              {/* Batch counter badge */}
-              {scannedBatchCards.length > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[11px] border border-emerald-500/40 shrink-0 animate-in zoom-in-95">
-                  {scannedBatchCards.length} Added
-                </span>
-              )}
-            </div>
+            <h2 className="text-xs sm:text-sm font-bold text-white truncate">
+              Scan Cards to Binder
+            </h2>
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
               <select
                 value={selectedBinderId}
                 onChange={(e) => setSelectedBinderId(e.target.value)}
-                className="bg-transparent text-slate-300 font-medium hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[150px] sm:max-w-[220px]"
+                className="bg-transparent text-slate-300 font-medium hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[130px] sm:max-w-[180px]"
                 title="Target Binder"
               >
                 {binders.map((b) => (
@@ -543,6 +576,27 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               </select>
             </div>
           </div>
+        </div>
+
+        {/* Realtime Success & Failure Persistent Badge (Visible at all times!) */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700/80 shadow-inner text-xs font-semibold shrink-0">
+          <span
+            className="flex items-center gap-1 text-emerald-400 font-bold"
+            title="Successful card scans added to binder"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>{successCount}</span>
+            <span className="hidden sm:inline font-normal text-[11px] text-emerald-300/80">Added</span>
+          </span>
+          <span className="text-slate-600 font-normal">|</span>
+          <span
+            className="flex items-center gap-1 text-rose-400 font-bold"
+            title="Failed card lookups"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            <span>{failureCount}</span>
+            <span className="hidden sm:inline font-normal text-[11px] text-rose-300/80">Failed</span>
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -700,55 +754,66 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </button>
         </div>
 
-        {/* Floating Success Toast (Appears over live camera without closing it!) */}
-        {recentToast && (
-          <div className="absolute top-12 inset-x-4 z-30 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
-            <div className="bg-emerald-950/95 border border-emerald-500/80 rounded-2xl p-2.5 sm:p-3 shadow-2xl backdrop-blur-md max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto">
+        {/* Quick Fade-out Notification Toast (Success or Failure) */}
+        {quickNotice && (
+          <div className="absolute top-14 inset-x-4 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
+            <div
+              className={`rounded-2xl p-3 shadow-2xl backdrop-blur-md max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto border transition-all duration-300 ${
+                quickNotice.type === 'success'
+                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100'
+                  : 'bg-rose-950/95 border-rose-500/80 text-rose-100'
+              }`}
+            >
               <div className="flex items-center gap-2.5 min-w-0">
-                <img
-                  src={getCardImageUrl(recentToast.card, 'small')}
-                  alt={recentToast.card.name}
-                  className="w-10 h-14 object-cover rounded shadow border border-emerald-500/40 shrink-0"
-                />
+                {quickNotice.imageUrl ? (
+                  <img
+                    src={quickNotice.imageUrl}
+                    alt="Card"
+                    className="w-10 h-14 object-cover rounded shadow border border-emerald-500/40 shrink-0"
+                  />
+                ) : quickNotice.type === 'success' ? (
+                  <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                )}
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Added {recentToast.quantity}x</span>
-                    {recentToast.isFoil && (
+                  <div className="flex items-center gap-1.5 text-xs font-bold">
+                    {quickNotice.type === 'success' ? (
+                      <span className="text-emerald-300 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        {quickNotice.title}
+                      </span>
+                    ) : (
+                      <span className="text-rose-300 flex items-center gap-1">
+                        <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        {quickNotice.title}
+                      </span>
+                    )}
+                    {quickNotice.isFoil && (
                       <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5">
                         <Sparkles className="w-2.5 h-2.5" /> Foil
                       </span>
                     )}
                   </div>
-                  <h4 className="text-xs font-bold text-white truncate">{recentToast.card.name}</h4>
-                  <p className="text-[10px] text-emerald-200/80 font-mono">
-                    {recentToast.card.set?.toUpperCase()} #{recentToast.card.collector_number} &bull; {currentBinder?.name}
-                  </p>
+                  {quickNotice.detail && (
+                    <p
+                      className={`text-[11px] truncate mt-0.5 ${
+                        quickNotice.type === 'success' ? 'text-emerald-200/90' : 'text-rose-200/90'
+                      }`}
+                    >
+                      {quickNotice.detail}
+                    </p>
+                  )}
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setRecentToast(null)}
-                className="text-emerald-400 hover:text-white p-1 cursor-pointer shrink-0"
-              >
-                &times;
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Floating Error Toast */}
-        {scanError && !isProcessing && (
-          <div className="absolute top-12 inset-x-4 z-30 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
-            <div className="bg-rose-950/95 border border-rose-500/80 rounded-xl p-3 text-xs text-rose-200 shadow-2xl max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto backdrop-blur-md">
-              <div className="flex items-center gap-2 min-w-0">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span className="truncate">{scanError}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setScanError(null)}
-                className="text-rose-400 hover:text-white font-bold p-1 cursor-pointer shrink-0"
+                onClick={() => setQuickNotice(null)}
+                className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 font-bold text-sm"
               >
                 &times;
               </button>
@@ -917,12 +982,11 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
         {/* Shutter & Actions Bar */}
         <div className="flex items-center justify-between gap-4 pt-0.5">
-          {/* File upload hidden input */}
+          {/* File upload hidden input (standard file picker for gallery, photos & storage) */}
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             onChange={handleFileUpload}
             className="hidden"
           />
