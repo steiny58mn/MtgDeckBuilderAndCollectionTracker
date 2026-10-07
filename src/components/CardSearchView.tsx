@@ -592,33 +592,6 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   // Scoping results to commander's color identity
   const [filterCommanderIdentity, setFilterCommanderIdentity] = useState<boolean>(true);
 
-  const displayedCards = results.filter((card) => {
-    const formatToCheck = activeDeck?.format || selectedFormat;
-    if (hideBannedCards && formatToCheck && card.legalities && card.legalities[formatToCheck] === 'banned') {
-      return false;
-    }
-    // When searching for cards in a Commander deck, if a commander is not selected yet, only show cards eligible to be a commander
-    if (isDeckContext && isCommanderDeck && !hasCommander) {
-      if (!canBePrimaryCommander(card)) {
-        return false;
-      }
-    }
-
-    // Filter out cards not legal based on color identity when adding cards to a Commander deck
-    if (isDeckContext && isCommanderDeck && (hasCommander || commanderColorIdentity.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
-      const legality = isCardLegalInCommander(card, commanderColorIdentity, { allowBanned: true });
-      if (!legality.isLegal) {
-        return false;
-      }
-    }
-    if (!isDeckContext || !activeDeck || showCardsAtLimit) return true;
-    const copies = getDeckCopies(card);
-    const limit = getDeckLimit(card);
-    return limit >= 999 || copies < limit;
-  });
-
-  const cardsHiddenAtLimit = results.length - displayedCards.length;
-
   // Filter Match Logic Mode: AND (All must match) vs OR (Any match)
   const [filterMatchMode, setFilterMatchMode] = useState<'AND' | 'OR'>('AND');
 
@@ -642,6 +615,76 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   const [sortDir, setSortDir] = useState<'auto' | 'asc' | 'desc'>('auto');
   const [showSyntaxHelp, setShowSyntaxHelp] = useState(false);
 
+const displayedCards = useMemo(() => {
+    let list = results.filter((card) => {
+      const formatToCheck = activeDeck?.format || selectedFormat;
+      if (hideBannedCards && formatToCheck && card.legalities && card.legalities[formatToCheck] === 'banned') {
+        return false;
+      }
+      // When searching specifically for primary commanders, filter to commanders only if no search query
+      if (isDeckContext && isCommanderDeck && !hasCommander && !searchTerm.trim() && targetDeckCategory === 'commander') {
+        if (!canBePrimaryCommander(card)) {
+          return false;
+        }
+      }
+
+      // Filter out cards not legal based on color identity ONLY when Commander CI filter is active
+      if (filterCommanderIdentity && isDeckContext && isCommanderDeck && (commanderColorIdentity.length > 0 || commanderCards.length > 0) && !initialPartnerMode && targetDeckCategory !== 'commander') {
+        const legality = isCardLegalInCommander(card, commanderColorIdentity, { allowBanned: true });
+        if (!legality.isLegal) {
+          return false;
+        }
+      }
+      if (!isDeckContext || !activeDeck || showCardsAtLimit) return true;
+      const copies = getDeckCopies(card);
+      const limit = getDeckLimit(card);
+      return limit >= 999 || copies < limit;
+    });
+
+    if (sortBy === 'cmc') {
+      list = [...list].sort((a, b) => {
+        const cmcA = a.cmc ?? 0;
+        const cmcB = b.cmc ?? 0;
+        if (cmcA !== cmcB) {
+          return sortDir === 'desc' ? cmcB - cmcA : cmcA - cmcB;
+        }
+        return a.name.localeCompare(b.name);
+      });
+    } else if (sortBy === 'usd') {
+      list = [...list].sort((a, b) => {
+        const priceA = parseFloat(a.prices?.usd || a.prices?.usd_foil || '0') || 0;
+        const priceB = parseFloat(b.prices?.usd || b.prices?.usd_foil || '0') || 0;
+        return sortDir === 'asc' ? priceA - priceB : priceB - priceA;
+      });
+    } else if (sortBy === 'name') {
+      list = [...list].sort((a, b) => {
+        return sortDir === 'desc' ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
+      });
+    }
+
+    return list;
+  }, [
+    results,
+    activeDeck?.format,
+    selectedFormat,
+    hideBannedCards,
+    isDeckContext,
+    isCommanderDeck,
+    hasCommander,
+    searchTerm,
+    targetDeckCategory,
+    filterCommanderIdentity,
+    commanderColorIdentity.join(''),
+    commanderCards.length,
+    initialPartnerMode,
+    showCardsAtLimit,
+    activeDeck?.cards,
+    sortBy,
+    sortDir,
+  ]);
+
+  const cardsHiddenAtLimit = results.length - displayedCards.length;
+
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const autocompleteDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -651,15 +694,29 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     if (trimmedSearch.startsWith('!')) {
       const rawTarget = trimmedSearch.slice(1).replace(/^["']|["']$/g, '').trim();
       trimmedSearch = `!"${rawTarget}"`;
+    } else if (trimmedSearch && !trimmedSearch.startsWith('!') && !/[:><=]/.test(trimmedSearch)) {
+      const words = trimmedSearch.match(/"[^"]+"|'[^']+'|\S+/g) || [];
+      if (words.length > 1) {
+        // Multi-word search: match either card name or all words across rules text
+        const oracleClauses = words.map((w) => {
+          const clean = w.replace(/^["']|["']$/g, '');
+          return w.startsWith('"') || w.startsWith("'") ? `o:"${clean}"` : `o:${clean}`;
+        });
+        trimmedSearch = `((${trimmedSearch}) or (${oracleClauses.join(' ')}))`;
+      }
     }
     const filterClauses: string[] = [];
 
-    // 1. Color clause
+    // 1. Color clause (c>= for all selected colors in AND mode, or c:X or c:Y in OR mode)
     if (selectedColors.length > 0) {
       if (selectedColors.includes('C')) {
         filterClauses.push('color:c');
       } else {
-        filterClauses.push(`color<=${selectedColors.join('')}`);
+        if (filterMatchMode === 'OR') {
+          filterClauses.push(`(${selectedColors.map((c) => `c:${c}`).join(' or ')})`);
+        } else {
+          filterClauses.push(`c>=${selectedColors.join('')}`);
+        }
       }
     }
 
@@ -726,7 +783,8 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
             const clean = t.replace(/^["']|["']$/g, '');
             return isQuoted ? `o:"${clean}"` : `o:${clean}`;
           });
-          filterClauses.push(clauses.join(' '));
+          // Multiple oracle terms must all be present (atomic conjunction)
+          filterClauses.push(`(${clauses.join(' ')})`);
         }
       }
     }
@@ -861,9 +919,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     setError(null);
 
     try {
-      const searchSortOrder = (isCommanderDeck && !hasCommander)
-        ? 'name'
-        : (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category')
+      const searchSortOrder = (sortBy === 'synergy' || sortBy === 'commander_decks' || sortBy === 'category')
         ? 'edhrec'
         : sortBy;
       
@@ -947,11 +1003,66 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
           processedData = processedData.filter((card) => canBePrimaryCommander(card));
         }
 
-        // Sort by name when no commander is selected yet or when sortBy is 'name'
-        if ((isCommanderDeck && !hasCommander && !effectiveSearch) || sortBy === 'name') {
+        if (sortBy === 'name') {
           processedData.sort((a, b) => {
             return sortDir === 'desc' ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
           });
+        } else if (sortBy === 'cmc') {
+          processedData.sort((a, b) => {
+            const cmcA = a.cmc ?? 0;
+            const cmcB = b.cmc ?? 0;
+            if (cmcA !== cmcB) {
+              return sortDir === 'desc' ? cmcB - cmcA : cmcA - cmcB;
+            }
+            return a.name.localeCompare(b.name);
+          });
+        } else if (sortBy === 'usd') {
+          processedData.sort((a, b) => {
+            const priceA = parseFloat(a.prices?.usd || a.prices?.usd_foil || '0') || 0;
+            const priceB = parseFloat(b.prices?.usd || b.prices?.usd_foil || '0') || 0;
+            return sortDir === 'asc' ? priceA - priceB : priceB - priceA;
+          });
+        }
+
+        // Strict client-side verification for oracleText (all words must be present in rules text/type/name)
+        if (oracleText.trim()) {
+          const reqWords = oracleText
+            .toLowerCase()
+            .match(/"[^"]+"|'[^']+'|\S+/g)
+            ?.map((w) => w.replace(/^["']|["']$/g, '').trim())
+            .filter(Boolean) || [];
+
+          if (reqWords.length > 0) {
+            processedData = processedData.filter((card) => {
+              const fullCardText = (
+                (card.name || '') +
+                ' ' +
+                (card.type_line || '') +
+                ' ' +
+                (card.oracle_text || '') +
+                ' ' +
+                (card.card_faces
+                  ? card.card_faces.map((f) => (f.name || '') + ' ' + (f.type_line || '') + ' ' + (f.oracle_text || '')).join(' ')
+                  : '')
+              ).toLowerCase();
+              return reqWords.every((word) => fullCardText.includes(word));
+            });
+          }
+        }
+
+        // Strict client-side color verification
+        if (selectedColors.length > 0) {
+          if (selectedColors.includes('C')) {
+            processedData = processedData.filter((card) => (card.colors || []).length === 0);
+          } else if (filterMatchMode === 'OR') {
+            processedData = processedData.filter((card) =>
+              selectedColors.some((c) => (card.colors || []).includes(c))
+            );
+          } else {
+            processedData = processedData.filter((card) =>
+              selectedColors.every((c) => (card.colors || []).includes(c))
+            );
+          }
         }
 
         // Filter out cards not legal based on color identity for Commander decks
@@ -1065,13 +1176,17 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   }, [searchTerm]);
 
   const isColorDisabledByCommander = (colorKey: string) => {
+    if (!filterCommanderIdentity) return false;
     if (!isCommanderDeck || !hasCommander) return false;
     if (colorKey === 'C') return false;
-    return !commanderColorIdentity.includes(colorKey);
+    return commanderColorIdentity.length > 0 && !commanderColorIdentity.includes(colorKey);
   };
 
   const toggleColor = (c: string) => {
-    if (isColorDisabledByCommander(c)) return;
+    // If selecting a color outside commander identity, automatically toggle off Commander CI restriction so results appear!
+    if (isColorDisabledByCommander(c)) {
+      setFilterCommanderIdentity(false);
+    }
     setSelectedColors((prev) => 
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
     );
@@ -1611,7 +1726,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
                 return (
                   <button
                     key={c.id}
-                    onClick={() => !disabled && toggleColor(c.id)}
+                    onClick={() => toggleColor(c.id)}
                     disabled={disabled}
                     className={`w-6 h-6 rounded-md font-bold text-[11px] transition-all border flex items-center justify-center ${
                       disabled
