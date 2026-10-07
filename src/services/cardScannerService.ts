@@ -15,6 +15,39 @@ export interface CardScanResult {
 }
 
 const STORAGE_KEY_GEMINI_API_KEY = 'mtg_gemini_api_key';
+const STORAGE_KEY_GEMINI_MODEL = 'mtg_gemini_model';
+
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+
+export const POPULAR_GEMINI_MODELS = [
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Latest / Recommended)' },
+  { id: 'gemini-3.8-flash-lite', label: 'Gemini 3.8 Flash Lite (Fastest)' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+] as const;
+
+/**
+ * Retrieves the configured Gemini model, defaulting to gemini-3.8-flash.
+ */
+export function getStoredGeminiModel(): string {
+  if (typeof window === 'undefined') return DEFAULT_GEMINI_MODEL;
+  const localModel = localStorage.getItem(STORAGE_KEY_GEMINI_MODEL)?.trim();
+  if (localModel) return localModel;
+  return DEFAULT_GEMINI_MODEL;
+}
+
+/**
+ * Saves user-configured Gemini model to localStorage.
+ */
+export function setStoredGeminiModel(model: string): void {
+  if (typeof window === 'undefined') return;
+  const clean = model.trim();
+  if (clean) {
+    localStorage.setItem(STORAGE_KEY_GEMINI_MODEL, clean);
+  } else {
+    localStorage.removeItem(STORAGE_KEY_GEMINI_MODEL);
+  }
+}
 
 /**
  * Retrieves the Gemini API key from environment variables or browser localStorage.
@@ -326,10 +359,14 @@ export async function lookupExactScryfallCard(
 }
 
 /**
- * Valid current Flash models supported on Google Generative Language v1beta.
- * Only gemini-2.0-flash and gemini-2.0-flash-lite are active.
+ * Flash models supported on Google Generative Language v1beta.
+ * Primary model is gemini-3.8-flash (as directed by Google API migration notice).
  */
 const SUPPORTED_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.8-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.0-flash-lite',
 ] as const;
@@ -342,10 +379,14 @@ async function queryGeminiVision(
   base64Jpeg: string,
   prompt: string
 ): Promise<string> {
-  // Prioritize the known working model from previous scans
-  const candidateModels = cachedWorkingModel
-    ? [cachedWorkingModel, ...SUPPORTED_MODELS.filter((m) => m !== cachedWorkingModel)]
-    : [...SUPPORTED_MODELS];
+  const preferredModel = getStoredGeminiModel();
+  // Candidate sequence:
+  // 1. User preferred model
+  // 2. Previously cached working model
+  // 3. Other supported models in cascade order
+  const candidateModels = Array.from(
+    new Set([preferredModel, cachedWorkingModel || '', ...SUPPORTED_MODELS])
+  ).filter(Boolean);
 
   let primaryError: Error | null = null;
   let lastError: Error | null = null;
@@ -413,11 +454,18 @@ async function queryGeminiVision(
           );
           if (!primaryError) primaryError = quotaErr;
           lastError = quotaErr;
-          // Try next model (e.g. gemini-2.0-flash-lite)
+          // Try next model in cascade
           continue;
         }
 
         const modelErr = new Error(`Gemini (${model}): ${rawMsg}`);
+
+        // If this model is deprecated, decommissioned or not found, proceed to next candidate without blocking
+        if (rawMsg.includes('no longer available') || rawMsg.includes('not found') || res.status === 404) {
+          lastError = modelErr;
+          continue;
+        }
+
         if (!primaryError) primaryError = modelErr;
         lastError = modelErr;
       }
@@ -436,7 +484,7 @@ async function queryGeminiVision(
   }
 
   // 2. GoogleGenAI SDK fallback attempts
-  for (const sdkModel of SUPPORTED_MODELS) {
+  for (const sdkModel of candidateModels) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const sdkResp = await ai.models.generateContent({
@@ -467,6 +515,9 @@ async function queryGeminiVision(
       const sdkMsg = sdkErr?.message || String(sdkErr);
       if (sdkMsg.includes('API key not valid') || sdkMsg.includes('API_KEY_INVALID')) {
         throw new Error('Gemini API key is invalid. Please verify your API key in scanner settings.');
+      }
+      if (sdkMsg.includes('no longer available') || sdkMsg.includes('not found')) {
+        continue;
       }
       if (!primaryError) primaryError = sdkErr;
       lastError = sdkErr;
