@@ -200,6 +200,7 @@ export async function optimizeCardImage(
 /**
  * Look up exact card printing on Scryfall using set code and collector number,
  * with fallbacks to prints search and fuzzy name search.
+ * Ensures the EXACT printing version (set and collector number) is matched.
  */
 export async function lookupExactScryfallCard(
   cardName: string,
@@ -207,22 +208,28 @@ export async function lookupExactScryfallCard(
   collectorNumber?: string
 ): Promise<ScryfallCard | null> {
   const cleanSet = (setCode || '').trim().toLowerCase();
-  const cleanNum = (collectorNumber || '').trim();
+  const rawNum = (collectorNumber || '').trim();
+  const unpaddedNum = rawNum.replace(/^0+(?=\d)/, ''); // e.g. "045" -> "45"
   const cleanName = (cardName || '').trim();
 
-  // 1. Direct Set + Collector Number lookup (Most accurate MTG identifier)
-  if (cleanSet && cleanNum) {
-    try {
-      const url = `https://api.scryfall.com/cards/${encodeURIComponent(cleanSet)}/${encodeURIComponent(cleanNum.toLowerCase())}`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.id) {
-          return normalizeFrostpointCard(json);
+  // 1. Direct Set + Collector Number lookup on Scryfall (/cards/:set/:number)
+  if (cleanSet && rawNum) {
+    const numCandidates = Array.from(
+      new Set([rawNum.toLowerCase(), unpaddedNum.toLowerCase()])
+    );
+    for (const num of numCandidates) {
+      try {
+        const url = `https://api.scryfall.com/cards/${encodeURIComponent(cleanSet)}/${encodeURIComponent(num)}`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.id) {
+            return normalizeFrostpointCard(json);
+          }
         }
+      } catch (err) {
+        console.warn('[CardScanner] Direct set/collector lookup failed:', err);
       }
-    } catch (err) {
-      console.warn('[CardScanner] Direct set/collector lookup failed:', err);
     }
   }
 
@@ -236,21 +243,63 @@ export async function lookupExactScryfallCard(
         if (Array.isArray(json?.data) && json.data.length > 0) {
           const cards: ScryfallCard[] = json.data.map(normalizeFrostpointCard);
 
-          // Find match with same set or collector number
-          if (cleanSet) {
-            const setMatch = cards.find((c) => (c.set || '').toLowerCase() === cleanSet);
-            if (setMatch) return setMatch;
+          // Priority 1: Match BOTH set code AND exact collector number
+          if (cleanSet && rawNum) {
+            const bothMatch = cards.find((c) => {
+              const setOk = (c.set || '').toLowerCase() === cleanSet;
+              const cNum = (c.collector_number || '').toLowerCase();
+              const numOk =
+                cNum === rawNum.toLowerCase() ||
+                cNum === unpaddedNum.toLowerCase() ||
+                parseInt(cNum, 10) === parseInt(rawNum, 10);
+              return setOk && numOk;
+            });
+            if (bothMatch) return bothMatch;
           }
-          if (cleanNum) {
-            const numMatch = cards.find(
-              (c) =>
-                c.collector_number === cleanNum ||
-                parseInt(c.collector_number, 10) === parseInt(cleanNum, 10)
-            );
+
+          // Priority 2: Match in the specified set if set is known
+          if (cleanSet) {
+            const sameSetCards = cards.filter((c) => (c.set || '').toLowerCase() === cleanSet);
+            if (sameSetCards.length === 1) {
+              return sameSetCards[0];
+            } else if (sameSetCards.length > 1 && rawNum) {
+              // If multiple printings in the same set (e.g. variants, showcase, basics), pick closest number
+              const targetInt = parseInt(rawNum, 10);
+              if (!isNaN(targetInt)) {
+                let closest = sameSetCards[0];
+                let minDiff = Infinity;
+                for (const c of sameSetCards) {
+                  const cInt = parseInt(c.collector_number, 10);
+                  if (!isNaN(cInt)) {
+                    const diff = Math.abs(cInt - targetInt);
+                    if (diff < minDiff) {
+                      minDiff = diff;
+                      closest = c;
+                    }
+                  }
+                }
+                return closest;
+              }
+              return sameSetCards[0];
+            } else if (sameSetCards.length > 0) {
+              return sameSetCards[0];
+            }
+          }
+
+          // Priority 3: Match collector number across all prints if set code was unrecognized
+          if (rawNum) {
+            const numMatch = cards.find((c) => {
+              const cNum = (c.collector_number || '').toLowerCase();
+              return (
+                cNum === rawNum.toLowerCase() ||
+                cNum === unpaddedNum.toLowerCase() ||
+                parseInt(cNum, 10) === parseInt(rawNum, 10)
+              );
+            });
             if (numMatch) return numMatch;
           }
 
-          // Return most recent print if set/num didn't match exactly
+          // Fallback: If neither set nor collector number matched, return most recent print
           return cards[0];
         }
       }
@@ -429,14 +478,16 @@ export async function identifyCardFromImage(
   }
 
   const prompt = `You are a professional Magic: The Gathering (MTG) card scanner.
-Analyze this MTG card photo with extreme precision.
+Analyze THIS SPECIFIC MTG card photo with extreme precision. Do NOT guess or repeat a previous card.
 Examine the following specific card regions:
-1. Top-left card title: Extract the exact official English card name.
-2. Bottom-left corner: Modern MTG cards print "[collector_number]/[total] [rarity] [SET_CODE] • [LANG]".
-   Extract the 3 to 5 letter set code (e.g. "NEO", "OTJ", "MH3", "BLB", "BRO", "MKM", "ONE", "LTR", "DMU", etc.).
-   Extract the collector number (e.g. "242", "045", "123", "007", "301", etc.).
-3. Foiling: Check if the card exhibits rainbow holographic sheen, metallic foil gloss, or a foil shooting-star stamp.
-4. Confidence: Return "high", "medium", or "low".
+1. Card Title (top): Extract the exact official English card name.
+2. Bottom-left footer: Modern MTG cards print "[collector_number]/[total] [rarity] [SET_CODE] • [LANG]" or "[collector_number] [SET_CODE]".
+   - Extract the 3 to 5 letter set code in UPPERCASE (e.g. "NEO", "OTJ", "MH3", "BLB", "BRO", "MKM", "ONE", "LTR", "DMU", "CLB", "2X2", "SLD", "FDN", etc.).
+   - Extract the exact collector number (e.g. "242", "045", "123a", "007", "301", "298").
+   - If older card without bottom-left footer, identify the expansion set from the expansion symbol on the middle-right line.
+3. Version Sensitivity: Cards often have multiple different printings and arts. Read the exact set code and collector number on THIS card.
+4. Foiling: Check if the card exhibits rainbow holographic sheen, metallic foil gloss, or a foil shooting-star stamp.
+5. Confidence: Return "high", "medium", or "low".
 
 Respond ONLY with a valid, raw JSON object matching this exact schema:
 {

@@ -116,6 +116,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Automatic Crosshairs Detection State
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
   const [isCrosshairLocked, setIsCrosshairLocked] = useState<boolean>(false);
+  const [swapGuidanceText, setSwapGuidanceText] = useState<string>('Position card in crosshairs');
+  const cardSwapStateRef = useRef<'SETTLING' | 'WAITING_FOR_SWAP'>('SETTLING');
   const prevFrameLumaRef = useRef<Float32Array | null>(null);
   const steadyCountRef = useRef<number>(0);
   const lastScannedLumaRef = useRef<Float32Array | null>(null);
@@ -346,9 +348,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vh = video.videoHeight;
 
     if (vw && vh) {
-      // Crop directly to the card crosshairs frame (standard MTG aspect ratio ~ 1 : 1.4)
-      const cropW = Math.min(vw, Math.round(vw * 0.70));
-      const cropH = Math.min(vh, Math.round(cropW * 1.4));
+      // Ensure card aspect ratio (~1:1.4) fits safely within both width and height (portrait or landscape)
+      const maxAllowedH = Math.round(vh * 0.88);
+      const maxAllowedW = Math.round(vw * 0.75);
+      let cropW = maxAllowedW;
+      let cropH = Math.round(cropW * 1.4);
+      if (cropH > maxAllowedH) {
+        cropH = maxAllowedH;
+        cropW = Math.round(cropH / 1.4);
+      }
       const cropX = Math.max(0, Math.round((vw - cropW) / 2));
       const cropY = Math.max(0, Math.round((vh - cropH) / 2));
 
@@ -369,9 +377,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   };
 
   // =========================================================================
-  // Automatic Crosshairs Card Detection Effect
-  // Automatically detects when a card is positioned steadily within the crosshairs
-  // =========================================================================
+  // Automatic Crosshairs Card Detection Effect with Motion Transition Tracking
+  // Automatically detects when a previous card is removed / motion occurs,
+  // then locks on when a new card comes into frame and settles steady.
   useEffect(() => {
     if (!cameraActive || !autoScanEnabled || isProcessing) return;
 
@@ -390,19 +398,21 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       const video = videoRef.current;
       if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
 
-      // Cooldown: 2.2 seconds between automatic scans
-      if (Date.now() - lastScanTimestampRef.current < 2200) return;
-
       const vw = video.videoWidth;
       const vh = video.videoHeight;
 
-      // Crop crosshairs reticle zone
-      const cropW = Math.round(vw * 0.55);
-      const cropH = Math.round(cropW * 1.4);
+      // Sample central reticle zone
+      const maxAllowedH = Math.round(vh * 0.80);
+      let cropW = Math.round(vw * 0.60);
+      let cropH = Math.round(cropW * 1.4);
+      if (cropH > maxAllowedH) {
+        cropH = maxAllowedH;
+        cropW = Math.round(cropH / 1.4);
+      }
       const cropX = Math.max(0, Math.round((vw - cropW) / 2));
       const cropY = Math.max(0, Math.round((vh - cropH) / 2));
 
-      ctx.drawImage(video, cropX, cropY, cropW, Math.min(cropH, vh - cropY), 0, 0, sampleW, sampleH);
+      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, sampleW, sampleH);
       const imgData = ctx.getImageData(0, 0, sampleW, sampleH);
       const d = imgData.data;
 
@@ -418,14 +428,19 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       }
 
       const mean = sum / count;
-      // Skip if lighting is too dark or pure glare
-      if (mean < 35 || mean > 230) {
-        steadyCountRef.current = 0;
-        setIsCrosshairLocked(false);
-        return;
-      }
 
-      // Contrast / standard deviation check
+      // Calculate motion (frame-to-frame pixel delta)
+      let motion = 0;
+      if (prevFrameLumaRef.current) {
+        let diffSum = 0;
+        for (let i = 0; i < count; i++) {
+          diffSum += Math.abs(currLuma[i] - prevFrameLumaRef.current[i]);
+        }
+        motion = diffSum / count;
+      }
+      prevFrameLumaRef.current = currLuma;
+
+      // Calculate contrast (standard deviation of luminance)
       let varianceSum = 0;
       for (let i = 0; i < count; i++) {
         const diff = currLuma[i] - mean;
@@ -433,56 +448,74 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       }
       const stdDev = Math.sqrt(varianceSum / count);
 
-      // MTG cards have high contrast (borders, art, text boxes)
-      if (stdDev < 18) {
-        steadyCountRef.current = 0;
-        setIsCrosshairLocked(false);
+      // -------------------------------------------------------------
+      // STATE 1: WAITING_FOR_SWAP (Previous card was scanned)
+      // Must detect motion or card removal before allowing another scan
+      // -------------------------------------------------------------
+      if (cardSwapStateRef.current === 'WAITING_FOR_SWAP') {
+        // Measure difference from the previously scanned card
+        let diffFromLast = 0;
+        if (lastScannedLumaRef.current) {
+          let lastDiffSum = 0;
+          for (let i = 0; i < count; i++) {
+            lastDiffSum += Math.abs(currLuma[i] - lastScannedLumaRef.current[i]);
+          }
+          diffFromLast = lastDiffSum / count;
+        }
+
+        // Card transition detected if:
+        // - Significant movement: motion > 14 (hand moving card)
+        // - Large change in frame: diffFromLast > 20 (new card in view)
+        // - Card removed: low contrast (stdDev < 14) or frame blank
+        const isTransitionDetected = motion > 14 || diffFromLast > 20 || stdDev < 14;
+
+        if (isTransitionDetected) {
+          // Card swap initiated! Re-arm the settling detector
+          cardSwapStateRef.current = 'SETTLING';
+          steadyCountRef.current = 0;
+          setIsCrosshairLocked(false);
+          setSwapGuidanceText('New card detected — hold steady');
+        } else {
+          setSwapGuidanceText('Card added! Swap card to scan next...');
+        }
         return;
       }
 
-      // Motion / stability check
-      if (prevFrameLumaRef.current) {
-        let diffSum = 0;
-        for (let i = 0; i < count; i++) {
-          diffSum += Math.abs(currLuma[i] - prevFrameLumaRef.current[i]);
-        }
-        const motion = diffSum / count;
+      // -------------------------------------------------------------
+      // STATE 2: SETTLING (New card is arriving into frame)
+      // Wait for it to become completely steady in the crosshairs
+      // -------------------------------------------------------------
+      const isCardInFrame = mean >= 35 && mean <= 230 && stdDev >= 18;
 
-        if (motion > 12) {
-          // Hand/card still moving into position
-          steadyCountRef.current = 0;
-          setIsCrosshairLocked(false);
-        } else {
-          // Stable within the crosshairs!
-          steadyCountRef.current += 1;
-        }
-      }
-
-      prevFrameLumaRef.current = currLuma;
-
-      // When stable for 2 consecutive intervals (~600ms):
-      if (steadyCountRef.current >= 2) {
-        // Prevent re-scanning the same card if user is still holding it
-        if (lastScannedLumaRef.current) {
-          let diffFromLast = 0;
-          for (let i = 0; i < count; i++) {
-            diffFromLast += Math.abs(currLuma[i] - lastScannedLumaRef.current[i]);
-          }
-          const diffAvg = diffFromLast / count;
-          if (diffAvg < 16) {
-            // Same card still resting in frame, wait for card to swap
-            return;
-          }
-        }
-
-        // New card detected & held steady! Trigger auto-scan!
-        setIsCrosshairLocked(true);
+      if (!isCardInFrame) {
         steadyCountRef.current = 0;
-        lastScannedLumaRef.current = currLuma;
-        lastScanTimestampRef.current = Date.now();
-        handleCaptureFrame();
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Position card in crosshairs');
+        return;
       }
-    }, 300);
+
+      if (motion > 10) {
+        // Still moving into position
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Hold card steady in crosshairs...');
+      } else {
+        // Card is stationary!
+        steadyCountRef.current += 1;
+        setSwapGuidanceText('Card detected — hold still...');
+
+        // Steady for 2 consecutive samples (~600ms) with low motion
+        if (steadyCountRef.current >= 2) {
+          setIsCrosshairLocked(true);
+          setSwapGuidanceText('Card locked in — scanning!');
+          steadyCountRef.current = 0;
+          lastScannedLumaRef.current = currLuma;
+          lastScanTimestampRef.current = Date.now();
+          cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+          handleCaptureFrame();
+        }
+      }
+    }, 280);
 
     return () => {
       isMounted = false;
@@ -749,10 +782,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 : 'bg-slate-900/85 border-slate-700/60 text-slate-200'
             }`}
           >
-            {isCrosshairLocked || isProcessing
-              ? 'Card in crosshairs — analyzing...'
+            {isProcessing
+              ? 'Analyzing card...'
+              : isCrosshairLocked
+              ? 'Card locked in — scanning!'
               : autoScanEnabled
-              ? 'Hold card within crosshairs to auto-scan'
+              ? swapGuidanceText
               : 'Center card & tap camera button'}
           </div>
         </div>
