@@ -65,7 +65,7 @@ export async function optimizeCardImage(
       const naturalHeight = bitmap.height;
 
       if (naturalWidth > 0 && naturalHeight > 0) {
-        const maxDimension = 1280;
+        const maxDimension = 960;
         let targetWidth = naturalWidth;
         let targetHeight = naturalHeight;
 
@@ -88,7 +88,7 @@ export async function optimizeCardImage(
           try {
             bitmap.close();
           } catch {}
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
           const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
           return { dataUrl, base64Only };
         }
@@ -115,7 +115,7 @@ export async function optimizeCardImage(
           throw new Error('Invalid image dimensions');
         }
 
-        const maxDimension = 1280;
+        const maxDimension = 960;
         let targetWidth = naturalWidth;
         let targetHeight = naturalHeight;
 
@@ -138,7 +138,7 @@ export async function optimizeCardImage(
         }
 
         ctx.drawImage(imageEl, 0, 0, targetWidth, targetHeight);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
         const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
 
         resolve({ dataUrl, base64Only });
@@ -281,6 +281,8 @@ async function queryGeminiVision(
   prompt: string
 ): Promise<string> {
   const candidateModels = [
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
     'gemini-3.5-flash',
     'gemini-2.5-flash',
     'gemini-2.0-flash',
@@ -293,7 +295,19 @@ async function queryGeminiVision(
   for (const model of candidateModels) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const payload = {
+      const generationConfig: Record<string, any> = {
+        temperature: 0.1,
+        maxOutputTokens: 200,
+      };
+
+      // Disable thinking tokens for lightning-fast zero-shot recognition (slashes latency by 2-3s)
+      if (!model.includes('2.0')) {
+        generationConfig.thinkingConfig = {
+          thinkingBudget: 0,
+        };
+      }
+
+      const payload: any = {
         contents: [
           {
             parts: [
@@ -309,18 +323,29 @@ async function queryGeminiVision(
             ],
           },
         ],
-        generationConfig: {
-          temperature: 0.1,
-        },
+        generationConfig,
       };
 
-      const res = await fetch(url, {
+      let res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
       });
+
+      // If endpoint rejects thinkingConfig with HTTP 400, retry once without it
+      if (!res.ok && res.status === 400 && generationConfig.thinkingConfig) {
+        delete generationConfig.thinkingConfig;
+        payload.generationConfig = generationConfig;
+        res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (res.ok) {
         const json = await res.json();
@@ -342,7 +367,7 @@ async function queryGeminiVision(
   }
 
   // 2. GoogleGenAI SDK fallback attempts
-  for (const sdkModel of ['gemini-3.5-flash', 'gemini-2.0-flash']) {
+  for (const sdkModel of ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.0-flash']) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const sdkResp = await ai.models.generateContent({

@@ -19,6 +19,7 @@ import {
   List,
   Check,
   FolderPlus,
+  ArrowLeft,
   X,
   Swords,
   Zap,
@@ -98,6 +99,7 @@ interface CollectionManagerProps {
   collection: CollectionCard[];
   binders?: Binder[];
   activeBinder?: Binder | null;
+  onBackToBinders?: () => void;
   onSelectBinder?: (binder: Binder) => void;
   onCreateBinder?: (name: string, description?: string) => Promise<void> | void;
   onDeleteBinder?: (binderId: string) => Promise<void> | void;
@@ -114,6 +116,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   collection,
   binders = [],
   activeBinder,
+  onBackToBinders,
   onSelectBinder,
   onCreateBinder,
   onDeleteBinder,
@@ -134,9 +137,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     scrollToTop();
   }, [activeBinder?.id]);
 
-  const [isCreatingBinder, setIsCreatingBinder] = useState(false);
-  const [newBinderName, setNewBinderName] = useState('');
-  const [newBinderDesc, setNewBinderDesc] = useState('');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRarity, setSelectedRarity] = useState<string>('all');
   const [selectedCondition, setSelectedCondition] = useState<string>('all');
@@ -423,14 +424,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     });
   }, [binderFilteredCollection, cardSearchIndexMap, deferredSearchQuery, selectedRarity, selectedCondition, selectedSet, selectedColor, onlyFoil]);
 
-  const handleCreateBinderSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBinderName.trim() || !onCreateBinder) return;
-    await onCreateBinder(newBinderName.trim(), newBinderDesc.trim() || undefined);
-    setNewBinderName('');
-    setNewBinderDesc('');
-    setIsCreatingBinder(false);
-  };
+
 
   // High-performance sorting using pre-indexed metadata
   const sortedCards = useMemo(() => {
@@ -685,6 +679,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
+            {onBackToBinders && (
+              <button
+                type="button"
+                onClick={onBackToBinders}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer mr-1"
+                title="Return to main binder screen"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
+                <span>All Binders</span>
+              </button>
+            )}
             <Bookmark className="w-4 h-4 text-emerald-400" />
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
               {selectedBinderFilter !== 'all' 
@@ -699,13 +704,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsCreatingBinder(!isCreatingBinder)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <FolderPlus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>+ Create Binder</span>
-            </button>
             <button
               onClick={onOpenSearch}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
@@ -726,45 +724,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             )}
           </div>
         </div>
-
-        {/* Inline Create Binder Form */}
-        {isCreatingBinder && (
-          <form
-            onSubmit={handleCreateBinderSubmit}
-            className="p-3.5 rounded-xl bg-slate-950 border border-emerald-800/60 flex flex-col sm:flex-row items-center gap-2.5"
-          >
-            <input
-              type="text"
-              required
-              placeholder="Binder name (e.g., Trade Binder, Modern Foils, Cube)..."
-              value={newBinderName}
-              onChange={(e) => setNewBinderName(e.target.value)}
-              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-            />
-            <input
-              type="text"
-              placeholder="Description (optional)..."
-              value={newBinderDesc}
-              onChange={(e) => setNewBinderDesc(e.target.value)}
-              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-            />
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="submit"
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                Create
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsCreatingBinder(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </form>
-        )}
 
         </div>
       {/* Summary Dashboard */}

@@ -1042,6 +1042,10 @@ export default function App() {
               collection={collectionCards}
               binders={binders}
               activeBinder={activeBinder}
+              onBackToBinders={() => {
+                scrollToTop();
+                setActiveBinder(null);
+              }}
               onSelectBinder={(b) => {
                 scrollToTop();
                 setActiveBinder(b);

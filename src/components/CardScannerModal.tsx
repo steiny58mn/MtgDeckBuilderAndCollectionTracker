@@ -21,7 +21,8 @@ import {
   ChevronDown, 
   Check, 
   X,
-  XCircle
+  XCircle,
+  Copy
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { 
@@ -100,6 +101,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Realtime Persistent Counts (Successes & Failures)
   const [successCount, setSuccessCount] = useState<number>(0);
   const [failureCount, setFailureCount] = useState<number>(0);
+  const [hasCopiedError, setHasCopiedError] = useState<boolean>(false);
 
   // Quick Fade-out Notification Toasts
   const [quickNotice, setQuickNotice] = useState<{
@@ -754,17 +756,17 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </button>
         </div>
 
-        {/* Quick Fade-out Notification Toast (Success or Failure) */}
+        {/* Quick Fade-out Notification Toast (Success) or Persistent Error Card (Failure) */}
         {quickNotice && (
-          <div className="absolute top-14 inset-x-4 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
+          <div className="absolute top-14 inset-x-3 sm:inset-x-4 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
             <div
-              className={`rounded-2xl p-3 shadow-2xl backdrop-blur-md max-w-sm w-full flex items-center justify-between gap-3 pointer-events-auto border transition-all duration-300 ${
+              className={`rounded-2xl p-3 sm:p-3.5 shadow-2xl backdrop-blur-md max-w-md w-full flex items-start justify-between gap-3 pointer-events-auto border transition-all duration-300 ${
                 quickNotice.type === 'success'
-                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100'
+                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100 items-center'
                   : 'bg-rose-950/95 border-rose-500/80 text-rose-100'
               }`}
             >
-              <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex items-start gap-2.5 min-w-0 flex-1">
                 {quickNotice.imageUrl ? (
                   <img
                     src={quickNotice.imageUrl}
@@ -776,12 +778,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     <CheckCircle2 className="w-5 h-5" />
                   </div>
                 ) : (
-                  <div className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
                     <AlertCircle className="w-5 h-5" />
                   </div>
                 )}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-bold">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-xs font-bold flex-wrap">
                     {quickNotice.type === 'success' ? (
                       <span className="text-emerald-300 flex items-center gap-1">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -800,13 +802,42 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     )}
                   </div>
                   {quickNotice.detail && (
-                    <p
-                      className={`text-[11px] truncate mt-0.5 ${
-                        quickNotice.type === 'success' ? 'text-emerald-200/90' : 'text-rose-200/90'
+                    <div
+                      className={`text-[11px] mt-1 select-text ${
+                        quickNotice.type === 'success'
+                          ? 'text-emerald-200/90 truncate'
+                          : 'text-rose-200/90 break-words max-h-36 overflow-y-auto font-mono text-[10.5px] leading-relaxed bg-black/40 p-2.5 rounded-lg border border-rose-900/60 cursor-text'
                       }`}
                     >
                       {quickNotice.detail}
-                    </p>
+                    </div>
+                  )}
+                  {quickNotice.type === 'failure' && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const errorText = `${quickNotice.title}: ${quickNotice.detail || ''}`;
+                          navigator.clipboard.writeText(errorText);
+                          setHasCopiedError(true);
+                          setTimeout(() => setHasCopiedError(false), 2000);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 text-[10px] font-semibold transition-colors cursor-pointer border border-rose-700/50"
+                        title="Copy error message to clipboard"
+                      >
+                        {hasCopiedError ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-300">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copy Error</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -814,6 +845,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 type="button"
                 onClick={() => setQuickNotice(null)}
                 className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 font-bold text-sm"
+                title="Dismiss message"
               >
                 &times;
               </button>
