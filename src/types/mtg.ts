@@ -216,6 +216,7 @@ export interface ColorBreakdown {
 export interface DeckStats {
   totalCards: number;
   mainboardCount: number;
+  commanderCount?: number;
   sideboardCount: number;
   maybeboardCount: number;
   averageCmc: number;

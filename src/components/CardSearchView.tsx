@@ -477,12 +477,12 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
     setSearchTerm('');
   };
 
-  // Helper to get count of copies of card currently in active deck (excluding maybeboard)
+  // Helper to get count of copies of card currently in active deck (across all categories: main, sideboard, maybeboard, commander)
   const getDeckCopies = (card: ScryfallCard): number => {
     if (!activeDeck) return 0;
     const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
     return activeDeck.cards
-      .filter((c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
+      .filter((c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
       .reduce((sum, c) => sum + c.quantity, 0);
   };
 
@@ -2476,13 +2476,14 @@ const displayedCards = useMemo(() => {
                       activeDeck && onQuickAddToDeck ? (
                         (() => {
                           const isCandidatePrimaryCommander =
-                            isCommanderDeck && !hasCommander && canBePrimaryCommander(card);
+                            isCommanderDeck && !hasCommander && canBePrimaryCommander(card) && !isAtLimit;
 
                           const isCandidatePartner =
                             isCommanderDeck &&
                             hasCommander &&
                             commanderInfo.commanderCards.length === 1 &&
-                            canCardsPartnerTogether(commanderInfo.commanderCards[0], card).canPartner;
+                            canCardsPartnerTogether(commanderInfo.commanderCards[0], card).canPartner &&
+                            !isAtLimit;
 
                           if (isCandidatePrimaryCommander) {
                             return (
@@ -2530,7 +2531,7 @@ const displayedCards = useMemo(() => {
                           const mainCopies = getDeckCopiesByCategory(card, 'main');
                           const sideCopies = getDeckCopiesByCategory(card, 'sideboard');
                           const maybeCopies = getDeckCopiesByCategory(card, 'maybeboard');
-                          const canAlsoAssignAsCommander = isCommanderDeck && !hasCommander && canBePrimaryCommander(card);
+                          const canAlsoAssignAsCommander = isCommanderDeck && !hasCommander && canBePrimaryCommander(card) && !isAtLimit;
 
                           return (
                             <div className="flex flex-col gap-1.5 w-full">
@@ -2576,12 +2577,15 @@ const displayedCards = useMemo(() => {
                               <button
                                 type="button"
                                 onClick={() => onQuickAddToDeck(card, 'maybeboard')}
+                                disabled={isAtLimit}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
-                                  initialTargetCategory === 'maybeboard'
-                                    ? 'bg-amber-600/30 border border-amber-500/60 hover:bg-amber-500 hover:text-white text-amber-200 cursor-pointer shadow-sm active:scale-95'
-                                    : 'bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
+                                  isAtLimit
+                                    ? 'bg-slate-900 border border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                                    : initialTargetCategory === 'maybeboard'
+                                      ? 'bg-violet-600/30 border border-violet-500/60 hover:bg-violet-500 hover:text-white text-violet-200 cursor-pointer shadow-sm active:scale-95'
+                                      : 'bg-slate-800 hover:bg-violet-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
-                                title={`Add 1 copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
                               >
                                 <HelpCircle className="w-3.5 h-3.5 shrink-0" />
                                 {maybeCopies > 0 && (

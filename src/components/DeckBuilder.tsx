@@ -52,7 +52,8 @@ import {
   calculateDeckStats, 
   getCardPartnerInfo, 
   canCardsPartnerTogether, 
-  canBePrimaryCommander, 
+  canBePrimaryCommander,
+  canHaveAnyNumberOfCopies, 
   getCardCategorySortOrder,
   getCardEffectiveColors,
   getCardColorCategoryRank,
@@ -1011,11 +1012,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     const newQty = existingCards[idx].quantity + delta;
 
-    // Commanders in singleton formats like Commander cannot exceed quantity 1
+    // Commanders and singleton deck cards in Commander cannot exceed quantity 1
     if (existingCards[idx].category === 'commander' && delta > 0 && newQty > 1) {
       setPriceRefreshMessage('Commander cards cannot have a quantity greater than 1.');
       setTimeout(() => setPriceRefreshMessage(null), 3000);
       return;
+    }
+
+    if (isCommanderDeck && !canHaveAnyNumberOfCopies(existingCards[idx]) && delta > 0) {
+      const cleanName = existingCards[idx].name.split(' // ')[0].trim().toLowerCase();
+      const totalCopies = existingCards
+        .filter((c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName)
+        .reduce((sum, c) => sum + c.quantity, 0);
+      if (totalCopies + delta > 1) {
+        setPriceRefreshMessage(`In Commander format, "${existingCards[idx].name}" is limited to 1 copy across all boards.`);
+        setTimeout(() => setPriceRefreshMessage(null), 3000);
+        return;
+      }
     }
 
     if (newQty <= 0) {
@@ -1546,6 +1559,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const mainCards = rawMainCards.filter(matchesCardFilter);
   const sideCards = rawSideCards.filter(matchesCardFilter);
   const maybeCards = rawMaybeCards.filter(matchesCardFilter);
+
+  const canShowAssignCommanderButton = (c: DeckCard) => {
+    if (commanderCards.some((cmdr) => cmdr.id === c.id)) return false;
+    const cleanName = c.name.split(' // ')[0].trim().toLowerCase();
+    if (commanderCards.some((cmdr) => cmdr.name.split(' // ')[0].trim().toLowerCase() === cleanName)) {
+      return false;
+    }
+    if (c.category === 'sideboard' || c.category === 'maybeboard') {
+      return canBePrimaryCommander(c);
+    }
+    if (isCommanderDeck) {
+      return canBePrimaryCommander(c);
+    }
+    return activeDeck.cards.length > 0;
+  };
 
   // Subgroup mainboard cards by Type (with cards sorted alphabetically by name within each category)
   const groupCardsByType = (cards: DeckCard[]) => {
@@ -2116,11 +2144,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       ? 'bg-slate-800/90 border-slate-700 text-white ring-1 ring-slate-600/40'
                       : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                   }`}
-                  title={`Total deck cards: ${stats.totalCards}. Click to show all cards in list.`}
+                  title={`Mainboard cards: ${stats.mainboardCount}. Click to show all cards in list.`}
                 >
                   <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>Cards:</span>
-                  <span className="font-mono font-bold text-white">{stats.totalCards}</span>
+                  <span className="font-mono font-bold text-white">{stats.mainboardCount}</span>
                 </button>
 
                 {/* Missing Cards Badge (filters cards down to what is missing) */}
@@ -2555,7 +2583,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Mainboard ({isCommanderDeck ? mainCards.reduce((s, c) => s + c.quantity, 0) : stats.mainboardCount})</span>
+            <span>Mainboard ({stats.mainboardCount})</span>
           </button>
 
           <button
@@ -3331,22 +3359,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         {/* Live Card Count Pill */}
         <div
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs font-semibold text-slate-200 shadow-xs select-none"
-          title={`Total deck cards: ${stats.totalCards}${isCommanderDeck ? ' / 100' : ''} (Main: ${stats.mainboardCount}, Cmdr: ${commanderCards.length}, Side: ${stats.sideboardCount})`}
+          title={
+            isCommanderDeck
+              ? `Mainboard: ${stats.mainboardCount}/${commanderCards.length === 2 ? 98 : commanderCards.length === 1 ? 99 : 100}${commanderCards.length > 0 ? ` (Cmdr: ${commanderCards.length})` : ''}`
+              : `Mainboard: ${stats.mainboardCount} cards`
+          }
         >
           <Layers className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-          <span className="text-[11px] text-slate-400 font-medium hidden xs:inline">Cards:</span>
+          <span className="text-[11px] text-slate-400 font-medium hidden xs:inline">Main:</span>
           <span
             className={`font-mono font-bold ${
               isCommanderDeck
-                ? stats.totalCards === 100
+                ? stats.mainboardCount === (commanderCards.length === 2 ? 98 : commanderCards.length === 1 ? 99 : 100)
                   ? 'text-emerald-400'
-                  : stats.totalCards > 100
+                  : stats.mainboardCount > (commanderCards.length === 2 ? 98 : commanderCards.length === 1 ? 99 : 100)
                   ? 'text-rose-400'
                   : 'text-fuchsia-300'
                 : 'text-violet-300'
             }`}
           >
-            {stats.totalCards}{isCommanderDeck ? '/100' : ''}
+            {stats.mainboardCount}{isCommanderDeck ? `/${commanderCards.length === 2 ? 98 : commanderCards.length === 1 ? 99 : 100}` : ''}
           </span>
         </div>
 
@@ -3880,9 +3912,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 e.stopPropagation();
                 handleUpdateCardQuantity(card.id, 1);
               }}
-              disabled={isThisCommander && card.quantity >= 1}
+              disabled={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) && card.quantity >= 1}
               className="p-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
-              title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase quantity'}
+              title={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) ? 'Limited to 1 copy in Commander format' : 'Increase quantity'}
             >
               <Plus className="w-2.5 h-2.5" />
             </button>
@@ -3911,7 +3943,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </button>
                 )}
                 {/* Crown in category selector in Pile View */}
-                {(isCommanderDeck || deck.cards.length > 0) && (
+                {canShowAssignCommanderButton(card) && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -3969,7 +4001,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
 
         {/* Bottom Action Bar in Pile View: Full-width Assign as Commander Button */}
-        {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
+        {canShowAssignCommanderButton(card) && (
           <div
             className={`absolute bottom-1.5 inset-x-1.5 z-30 transition-all duration-150 pointer-events-auto ${
               isActive ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-1 scale-95 pointer-events-none'
@@ -3981,12 +4013,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 e.stopPropagation();
                 handleAssignAsCommander(card.id);
               }}
-              className={`w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-[10px] font-bold shadow-lg transition-all cursor-pointer backdrop-blur-xs border ${
-                canBePrimaryCommander(card)
-                  ? 'bg-fuchsia-600/95 hover:bg-fuchsia-500 text-white border-fuchsia-400/70 shadow-fuchsia-500/25'
-                  : 'bg-slate-900/95 hover:bg-fuchsia-600 text-fuchsia-200 hover:text-white border-slate-700/80'
-              }`}
-              title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
+              className="w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-[10px] font-bold shadow-lg transition-all cursor-pointer backdrop-blur-xs border bg-fuchsia-600/95 hover:bg-fuchsia-500 text-white border-fuchsia-400/70 shadow-fuchsia-500/25"
+              title="Assign this card as Commander"
             >
               <Crown className="w-3 h-3 text-amber-300" />
               <span>Assign as Commander</span>
@@ -4193,9 +4221,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <span className="w-7 text-center text-xs font-bold text-slate-100">{card.quantity}</span>
                   <button
                     onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                    disabled={isThisCommander && card.quantity >= 1}
+                    disabled={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) && card.quantity >= 1}
                     className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                    title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
+                    title={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) ? 'Limited to 1 copy in Commander format' : 'Increase'}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -4252,16 +4280,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 )}
 
                 {/* Assign as Commander Button */}
-                {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
+                {canShowAssignCommanderButton(card) && (
                   <button
                     type="button"
                     onClick={() => handleAssignAsCommander(card.id)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer ${
-                      canBePrimaryCommander(card)
-                        ? 'bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20'
-                        : 'bg-slate-800/90 hover:bg-fuchsia-600 hover:text-white text-slate-300 border border-slate-700/70'
-                    }`}
-                    title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer bg-fuchsia-500/20 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20"
+                    title="Assign this card as Commander"
                   >
                     <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
                     <span>Assign as Commander</span>
@@ -4425,9 +4449,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <button
                     type="button"
                     onClick={() => handleUpdateCardQuantity(card.id, 1)}
-                    disabled={isThisCommander && card.quantity >= 1}
+                    disabled={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) && card.quantity >= 1}
                     className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                    title={isThisCommander ? 'Commanders are limited to 1 copy' : 'Increase'}
+                    title={(isThisCommander || (isCommanderDeck && !canHaveAnyNumberOfCopies(card))) ? 'Limited to 1 copy in Commander format' : 'Increase'}
                   >
                     <Plus className="w-2.5 h-2.5" />
                   </button>
@@ -4495,16 +4519,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           )}
 
           {/* Dedicated Assign as Commander button in Grid View */}
-          {!isThisCommander && (isCommanderDeck || deck.cards.length > 0) && (
+          {canShowAssignCommanderButton(card) && (
             <button
               type="button"
               onClick={() => handleAssignAsCommander(card.id)}
-              className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all shadow-sm cursor-pointer mt-1 ${
-                canBePrimaryCommander(card)
-                  ? 'bg-fuchsia-500/25 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20'
-                  : 'bg-slate-950/90 hover:bg-fuchsia-600 hover:text-white text-slate-300 border border-slate-800'
-              }`}
-              title={canBePrimaryCommander(card) ? 'Assign this card as Commander' : 'Assign this card to the Commander slot'}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all shadow-sm cursor-pointer mt-1 bg-fuchsia-500/25 hover:bg-fuchsia-500 hover:text-slate-950 text-fuchsia-300 border border-fuchsia-500/40 hover:shadow-fuchsia-500/20"
+              title="Assign this card as Commander"
             >
               <Crown className="w-3.5 h-3.5 text-fuchsia-400" />
               <span>Assign as Commander</span>

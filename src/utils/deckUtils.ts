@@ -130,6 +130,7 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
 
   let totalCards = 0;
   let mainboardCount = 0;
+  let commanderCount = 0;
   let sideboardCount = 0;
   let maybeboardCount = 0;
   let totalPriceUsd = 0;
@@ -153,8 +154,10 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
     const qty = card.quantity || 1;
     totalCards += qty;
 
-    if (card.category === 'main' || card.category === 'commander') {
+    if (card.category === 'main') {
       mainboardCount += qty;
+    } else if (card.category === 'commander') {
+      commanderCount += qty;
     } else if (card.category === 'sideboard') {
       sideboardCount += qty;
     } else if (card.category === 'maybeboard') {
@@ -262,13 +265,14 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
       illegalCards.push(`Commander decks cannot have more than 2 commanders (Current: ${commanderQty})`);
     }
 
-    if (mainboardCount !== 100) {
+    const totalCommanderDeckSize = mainboardCount + commanderQty;
+    if (totalCommanderDeckSize !== 100) {
       if (commanderCards.length === 2 || commanderQty === 2) {
-        illegalCards.push(`Commander decks with 2 commanders require exactly 100 cards (2 commanders + 98 other cards; Current: ${mainboardCount})`);
+        illegalCards.push(`Commander decks with 2 commanders require exactly 100 cards (2 commanders + 98 other cards; Current: ${totalCommanderDeckSize})`);
       } else if (commanderCards.length === 1 && commanderQty === 1) {
-        illegalCards.push(`Commander decks must have exactly 100 cards total (1 commander + 99 other cards; Current: ${mainboardCount})`);
+        illegalCards.push(`Commander decks must have exactly 100 cards total (1 commander + 99 other cards; Current: ${totalCommanderDeckSize})`);
       } else {
-        illegalCards.push(`Commander decks must have exactly 100 cards total (Current: ${mainboardCount})`);
+        illegalCards.push(`Commander decks must have exactly 100 cards total (Current: ${totalCommanderDeckSize})`);
       }
     }
   } else if (deck.format !== 'casual' && mainboardCount < 60) {
@@ -278,6 +282,7 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
   return {
     totalCards,
     mainboardCount,
+    commanderCount,
     sideboardCount,
     maybeboardCount,
     averageCmc,

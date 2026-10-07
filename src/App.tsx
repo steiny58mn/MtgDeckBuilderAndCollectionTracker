@@ -564,22 +564,20 @@ export default function App() {
         }
       }
 
-      // Check singleton rule for commander decks (anything with Basic Supertype or unlimited rule can have any quantity)
-      if (category !== 'maybeboard') {
-        const isUnlimited = canHaveAnyNumberOfCopies(card);
-        if (!isUnlimited) {
-          const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
-          const alreadyInDeck = latestActiveDeck.cards.some(
-            (c) => c.category !== 'maybeboard' && c.name.split(' // ')[0].trim().toLowerCase() === cleanName
-          );
-          if (alreadyInDeck) {
-            showToast(`"${card.name}" is already in your Commander deck (1 copy limit).`, 'info');
-            return;
-          }
-          if (quantity > 1) {
-            showToast(`In Commander format, "${card.name}" is limited to 1 copy. Adding 1 copy instead.`, 'info');
-            quantity = 1;
-          }
+      // Check singleton rule for commander decks across ALL boards (Main, Side, Maybe, Commander)
+      const isUnlimited = canHaveAnyNumberOfCopies(card);
+      if (!isUnlimited) {
+        const cleanName = card.name.split(' // ')[0].trim().toLowerCase();
+        const alreadyInDeck = latestActiveDeck.cards.some(
+          (c) => c.name.split(' // ')[0].trim().toLowerCase() === cleanName
+        );
+        if (alreadyInDeck) {
+          showToast(`"${card.name}" is already in your Commander deck (1 copy limit across Main, Side, and Maybeboard).`, 'info');
+          return;
+        }
+        if (quantity > 1) {
+          showToast(`In Commander format, "${card.name}" is limited to 1 copy. Adding 1 copy instead.`, 'info');
+          quantity = 1;
         }
       }
     }
