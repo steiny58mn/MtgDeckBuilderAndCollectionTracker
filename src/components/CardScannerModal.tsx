@@ -252,7 +252,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   };
 
   // Process and analyze image in continuous batch mode
-  const handleProcessImage = async (imageSource: Blob | File | HTMLVideoElement) => {
+  const handleProcessImage = async (imageSource: Blob | File | HTMLVideoElement | HTMLCanvasElement) => {
     unlockAudio();
     setIsProcessing(true);
     setStatusMessage('Analyzing photo...');
@@ -334,13 +334,38 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
   };
 
-  // Capture current live video frame
+  // Capture current live video frame with tight reticle crop for ultra-fast OCR
   const handleCaptureFrame = () => {
     if (!videoRef.current || isProcessing) return;
     try {
       navigator.vibrate?.(40);
     } catch {}
-    handleProcessImage(videoRef.current);
+
+    const video = videoRef.current;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    if (vw && vh) {
+      // Crop directly to the card crosshairs frame (standard MTG aspect ratio ~ 1 : 1.4)
+      const cropW = Math.min(vw, Math.round(vw * 0.70));
+      const cropH = Math.min(vh, Math.round(cropW * 1.4));
+      const cropX = Math.max(0, Math.round((vw - cropW) / 2));
+      const cropY = Math.max(0, Math.round((vh - cropH) / 2));
+
+      const canvas = document.createElement('canvas');
+      const targetW = 720;
+      const targetH = 1008;
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+        handleProcessImage(canvas);
+        return;
+      }
+    }
+
+    handleProcessImage(video);
   };
 
   // =========================================================================

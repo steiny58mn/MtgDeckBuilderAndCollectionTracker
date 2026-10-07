@@ -51,8 +51,14 @@ export function setStoredGeminiApiKey(apiKey: string): void {
  * Returns a clean base64 data URL and raw base64 string.
  */
 export async function optimizeCardImage(
-  imageSource: Blob | File | HTMLImageElement | HTMLVideoElement
+  imageSource: Blob | File | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
 ): Promise<{ dataUrl: string; base64Only: string }> {
+  // If already a pre-cropped canvas, serialize immediately
+  if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
+    const dataUrl = imageSource.toDataURL('image/jpeg', 0.80);
+    const base64Only = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+    return { dataUrl, base64Only };
+  }
   // 1. Try createImageBitmap for Blob/File (fast, handles EXIF orientation)
   if (
     typeof window !== 'undefined' &&
@@ -275,19 +281,25 @@ export async function lookupExactScryfallCard(
  * gemini-3.5-flash -> gemini-2.5-flash -> gemini-2.0-flash -> gemini-2.0-flash-lite
  * via direct REST API and GoogleGenAI SDK with complete fallback handling.
  */
+// Cache the verified working model in memory so subsequent scans hit it on attempt #1 with 0ms retry delay
+let cachedWorkingModel: string | null = null;
+
 async function queryGeminiVision(
   apiKey: string,
   base64Jpeg: string,
   prompt: string
 ): Promise<string> {
-  const candidateModels = [
-    'gemini-flash-latest',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
+  const baseModels = [
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
   ];
+
+  // Prioritize the known working model from previous scans
+  const candidateModels = cachedWorkingModel
+    ? [cachedWorkingModel, ...baseModels.filter((m) => m !== cachedWorkingModel)]
+    : baseModels;
 
   let lastError: any = null;
 
@@ -351,6 +363,7 @@ async function queryGeminiVision(
         const json = await res.json();
         const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
+          cachedWorkingModel = model;
           return text;
         }
       } else {
