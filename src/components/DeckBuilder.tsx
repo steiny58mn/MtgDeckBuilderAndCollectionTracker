@@ -232,9 +232,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return map;
   }, [collectionCards]);
 
-  const getCardOwnedQuantity = useCallback((cardName: string): number => {
-    if (!cardName) return 0;
-    const name = cardName.toLowerCase().trim();
+  const getCardOwnedQuantity = useCallback((cardOrName: { name?: string; scryfallId?: string } | string | null | undefined): number => {
+    if (!cardOrName) return 0;
+    const rawName = typeof cardOrName === 'string'
+      ? cardOrName
+      : (cardOrName && typeof cardOrName === 'object' && typeof cardOrName.name === 'string')
+        ? cardOrName.name
+        : '';
+    if (!rawName) return 0;
+    const name = rawName.toLowerCase().trim();
     if (collectionCountMap.has(name)) return collectionCountMap.get(name)!;
     const cleanFront = name.split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
     if (collectionCountMap.has(cleanFront)) return collectionCountMap.get(cleanFront)!;
@@ -427,7 +433,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const leg = c.legalities?.[deckFormat] || c.legalities?.[deckFormat.toLowerCase()];
       const isBanned = leg === 'banned';
       if (isBanned) {
-        const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
         const existing = itemMap.get(cleanName);
         if (existing) {
           existing.isBanned = true;
@@ -515,7 +521,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         // Basic lands have unlimited availability and should not trigger in-use warnings
         if (canHaveAnyNumberOfCopies(c)) return;
 
-        const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
         if (!cleanName) return;
 
         const qty = c.quantity || 1;
@@ -559,7 +565,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       if (cat === 'maybeboard') return;
       if (canHaveAnyNumberOfCopies(c)) return;
 
-      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
       if (!cleanName || seen.has(cleanName)) return;
 
       const inCol = getCardOwnedQuantity(c);
@@ -1663,7 +1669,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
 
     if (ownershipFilter === 'in-use') {
-      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
       const inCol = getCardOwnedQuantity(c);
       const cross = crossDeckUsageMap.get(cleanName);
       return !canHaveAnyNumberOfCopies(c) && inCol > 0 && Boolean(cross && cross.totalUsed > inCol);
@@ -4375,8 +4381,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </span>
               )}
               {(() => {
-                const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
-                const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+                const inCol = getCardOwnedQuantity(card);
+                const cleanName = (typeof card?.name === 'string' ? card.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
                 const cross = crossDeckUsageMap.get(cleanName);
                 const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
@@ -4628,8 +4634,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           {/* Ownership Badge in Grid Card */}
           <div className="absolute bottom-1.5 right-1.5 z-10">
             {(() => {
-              const inCol = collectionCountMap.get(card.name.toLowerCase().trim()) || 0;
-              const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+              const inCol = getCardOwnedQuantity(card);
+              const cleanName = (typeof card?.name === 'string' ? card.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
               const cross = crossDeckUsageMap.get(cleanName);
               const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
