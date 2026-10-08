@@ -957,6 +957,26 @@ export default function App() {
     await DeckService.saveCollectionCard(card);
   };
 
+  const handleToggleCardFoil = async (
+    cardId: string,
+    options?: { countToConvert?: number; targetFoil?: boolean }
+  ) => {
+    if (!requireAuth('Please sign in or create an account to update cards in your collection!', () => handleToggleCardFoil(cardId, options))) {
+      return;
+    }
+    try {
+      const result = await DeckService.toggleCollectionCardFoil(cardId, options);
+      showToast(
+        result.merged
+          ? `Merged ${result.countConverted}x into existing ${result.newFoil ? 'Foil' : 'Regular'} stack`
+          : `Changed ${result.countConverted}x to ${result.newFoil ? 'Foil ✨' : 'Regular'}`
+      );
+    } catch (err: any) {
+      console.error('[App] Failed to toggle card foil:', err);
+      showToast('Could not update card finish');
+    }
+  };
+
   const handleDeleteCollectionCard = async (cardId: string) => {
     await DeckService.deleteCollectionCard(cardId);
     showToast('Removed from binder');
@@ -1142,6 +1162,7 @@ export default function App() {
               onDeleteBinder={handleDeleteBinder}
               activeDeck={activeDeck}
               onUpdateCollectionCard={handleUpdateCollectionCard}
+              onToggleCardFoil={handleToggleCardFoil}
               onDeleteCollectionCard={handleDeleteCollectionCard}
               onAddCardToDeck={handleAddCollectionItemToDeck}
               onOpenSearch={() => {
@@ -1219,6 +1240,7 @@ export default function App() {
         onUpdateCardPrinting={(targetCard, newPrinting) => {
           handleUpdateCardPrinting(targetCard, newPrinting);
         }}
+        onToggleCardFoil={handleToggleCardFoil}
       />
 
       {/* Auth Modal (Sign In / Register / Change Password) */}

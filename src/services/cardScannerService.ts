@@ -6,18 +6,37 @@ export interface CardScanResult {
   card: ScryfallCard;
   isFoil: boolean;
   confidence: 'high' | 'medium' | 'low';
+  scanEngine?: 'ocr' | 'gemini';
   rawDetected?: {
     card_name?: string;
     set_code?: string;
     collector_number?: string;
     is_foil?: boolean;
+    engine?: 'ocr' | 'gemini';
   };
 }
 
+export type ScanEngineMode = 'hybrid' | 'gemini_only' | 'ocr_only';
+
 const STORAGE_KEY_GEMINI_API_KEY = 'mtg_gemini_api_key';
 const STORAGE_KEY_GEMINI_MODEL = 'mtg_gemini_model';
+const STORAGE_KEY_SCAN_ENGINE = 'mtg_scan_engine';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+
+export function getStoredScanEngine(): ScanEngineMode {
+  if (typeof window === 'undefined') return 'hybrid';
+  const val = localStorage.getItem(STORAGE_KEY_SCAN_ENGINE)?.trim() as ScanEngineMode;
+  if (val === 'gemini_only' || val === 'ocr_only' || val === 'hybrid') {
+    return val;
+  }
+  return 'hybrid';
+}
+
+export function setStoredScanEngine(engine: ScanEngineMode): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY_SCAN_ENGINE, engine);
+}
 
 export const POPULAR_GEMINI_MODELS = [
   { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Latest / Recommended)' },
@@ -562,15 +581,225 @@ async function queryGeminiVision(
   throw primaryError || lastError || new Error(`Failed to analyze card image with Gemini (${preferredModel}). Please ensure your Gemini API key is valid and has active quota.`);
 }
 
+let ocrWorkerPromise: Promise<any> | null = null;
+
+async function getOcrWorker(): Promise<any> {
+  if (typeof window === 'undefined') return null;
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      try {
+        const { createWorker } = await import('tesseract.js');
+        const worker = await createWorker('eng');
+        return worker;
+      } catch (err) {
+        console.warn('[CardScanner] Failed to init Tesseract OCR worker:', err);
+        ocrWorkerPromise = null;
+        return null;
+      }
+    })();
+  }
+  return ocrWorkerPromise;
+}
+
+const IGNORED_SET_CODES = new Set([
+  'THE', 'AND', 'FOR', 'SET', 'CARD', 'COPY', 'RULE', 'TEXT', 'WOTC',
+  'COAST', 'COASTS', 'ILLUS', 'GAME', 'MAGIC', 'EN', 'JP', 'FR', 'DE', 'IT', 'ES', 'PT', 'RU', 'ZHO'
+]);
+
 /**
- * Uses Gemini Vision model to inspect the card photo and identify its exact printing details.
+ * Parses MTG card footer text for collector number and set code
+ * e.g. "242/271 R MH3 • EN", "045 BLB", "123a NEO", "MH3 242", "301/280 LTR"
+ */
+export function parseMtgFooterText(text: string): { setCode?: string; collectorNumber?: string } | null {
+  if (!text) return null;
+  const clean = text.replace(/[\r\n]+/g, ' ').trim();
+
+  // Pattern A: e.g. "242/271 R MH3" or "242/271 MH3" or "045/281 C BLB" or "242 MH3"
+  const patA = /(\d{1,4}[a-z]?)\s*(?:\/\s*\d+)?\s*(?:[CURMLSTPcurmlstp]\s+)?([A-Z0-9]{3,5})\b/i.exec(clean);
+  if (patA) {
+    const num = patA[1].trim();
+    const set = patA[2].trim().toUpperCase();
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
+      return { collectorNumber: num, setCode: set };
+    }
+  }
+
+  // Pattern B: e.g. "MH3 242" or "BLB 015"
+  const patB = /\b([A-Z0-9]{3,5})\s+[•\*\.\-]?\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
+  if (patB) {
+    const set = patB[1].trim().toUpperCase();
+    const num = patB[2].trim();
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
+      return { collectorNumber: num, setCode: set };
+    }
+  }
+
+  // Pattern C: e.g. "MH3 • EN 242/271" or "BLB • EN \n 045"
+  const patC = /\b([A-Z0-9]{3,5})\s*•\s*[A-Z]{2}\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
+  if (patC) {
+    const set = patC[1].trim().toUpperCase();
+    const num = patC[2].trim();
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
+      return { collectorNumber: num, setCode: set };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fast client-side OCR recognition targeting MTG card footer & title banner.
+ * Runs in WebAssembly via Tesseract.js with 0 API cost.
+ */
+export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<CardScanResult | null> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+
+  try {
+    const worker = await getOcrWorker();
+    if (!worker) return null;
+
+    // Load image onto canvas to perform targeted crops
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = (e) => reject(e);
+      el.src = base64Jpeg.startsWith('data:') ? base64Jpeg : `data:image/jpeg;base64,${base64Jpeg}`;
+    });
+
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return null;
+
+    // 1. High-contrast Footer Crop (bottom ~15% of modern MTG card)
+    const footerCanvas = document.createElement('canvas');
+    const footerH = Math.max(32, Math.floor(h * 0.15));
+    const footerY = Math.max(0, h - footerH);
+    footerCanvas.width = w;
+    footerCanvas.height = footerH;
+    const fCtx = footerCanvas.getContext('2d');
+    if (fCtx) {
+      fCtx.drawImage(img, 0, footerY, w, footerH, 0, 0, w, footerH);
+
+      // Contrast enhancement: binarize light text on dark card border
+      const imgData = fCtx.getImageData(0, 0, w, footerH);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+        const bin = lum > 115 ? 255 : 0;
+        d[i] = bin;
+        d[i + 1] = bin;
+        d[i + 2] = bin;
+      }
+      fCtx.putImageData(imgData, 0, 0);
+
+      const footerDataUrl = footerCanvas.toDataURL('image/png');
+      const footerRes = await worker.recognize(footerDataUrl);
+      const footerText = footerRes?.data?.text || '';
+
+      const parsedFooter = parseMtgFooterText(footerText);
+      if (parsedFooter?.setCode && parsedFooter?.collectorNumber) {
+        console.log('[CardScanner:OCR] 🎯 Parsed footer:', parsedFooter);
+        const cardMatch = await lookupExactScryfallCard('', parsedFooter.setCode, parsedFooter.collectorNumber);
+        if (cardMatch) {
+          return {
+            card: cardMatch,
+            isFoil: false,
+            confidence: 'high',
+            scanEngine: 'ocr',
+            rawDetected: {
+              card_name: cardMatch.name,
+              set_code: parsedFooter.setCode,
+              collector_number: parsedFooter.collectorNumber,
+              is_foil: false,
+              engine: 'ocr',
+            },
+          };
+        }
+      }
+    }
+
+    // 2. Title Crop (top ~18% of card)
+    const titleCanvas = document.createElement('canvas');
+    const titleH = Math.max(40, Math.floor(h * 0.18));
+    titleCanvas.width = w;
+    titleCanvas.height = titleH;
+    const tCtx = titleCanvas.getContext('2d');
+    if (tCtx) {
+      tCtx.drawImage(img, 0, 0, w, titleH, 0, 0, w, titleH);
+      const titleDataUrl = titleCanvas.toDataURL('image/png');
+      const titleRes = await worker.recognize(titleDataUrl);
+      const titleLines = (titleRes?.data?.text || '')
+        .split('\n')
+        .map((l: string) => l.replace(/[^a-zA-Z0-9\s,'\-\/\(\)]/g, '').trim())
+        .filter((l: string) => l.length >= 3);
+
+      for (const candidateName of titleLines) {
+        console.log('[CardScanner:OCR] 🔍 Testing candidate title line:', candidateName);
+        const cardMatch = await lookupExactScryfallCard(candidateName);
+        if (cardMatch) {
+          return {
+            card: cardMatch,
+            isFoil: false,
+            confidence: 'medium',
+            scanEngine: 'ocr',
+            rawDetected: {
+              card_name: cardMatch.name,
+              set_code: cardMatch.set,
+              collector_number: cardMatch.collector_number,
+              is_foil: false,
+              engine: 'ocr',
+            },
+          };
+        }
+      }
+    }
+
+    return null;
+  } catch (ocrErr) {
+    console.warn('[CardScanner] Local OCR recognition attempt error:', ocrErr);
+    return null;
+  }
+}
+
+/**
+ * Hybrid card identification pipeline:
+ * Tier 1: Fast local on-device OCR (0 API cost, ~200ms)
+ * Tier 2: Gemini 3.8 Flash Vision (for complex art, foiling, vintage editions, and low-light)
  */
 export async function identifyCardFromImage(
   base64Jpeg: string,
-  customApiKey?: string
+  customApiKey?: string,
+  preferredEngine?: ScanEngineMode
 ): Promise<CardScanResult> {
+  const engine = preferredEngine || getStoredScanEngine();
+
+  // Tier 1: Fast Local OCR
+  if (engine === 'hybrid' || engine === 'ocr_only') {
+    try {
+      const ocrResult = await recognizeCardWithLocalOcr(base64Jpeg);
+      if (ocrResult) {
+        console.log('[CardScanner] ⚡ Card recognized via Fast Local OCR:', ocrResult.card.name);
+        return ocrResult;
+      }
+    } catch (ocrErr) {
+      console.warn('[CardScanner] Local OCR failed, falling back to Gemini Vision:', ocrErr);
+    }
+
+    if (engine === 'ocr_only') {
+      throw new Error(
+        'Local OCR could not read card title or set info. Please ensure card is clear and well-lit, or switch to Hybrid/AI mode.'
+      );
+    }
+  }
+
+  // Tier 2: Gemini 3.8 Flash AI Vision
   const apiKey = (customApiKey || getStoredGeminiApiKey()).trim();
   if (!apiKey) {
+    if (engine === 'hybrid') {
+      throw new Error(
+        'Local OCR could not read card footer/title. Enter a free Gemini API key in settings for AI fallback on difficult or vintage cards.'
+      );
+    }
     throw new Error(
       'Gemini API key is required for AI card recognition. Please enter your API key in the scanner settings.'
     );
@@ -660,11 +889,13 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
     card: matchedCard,
     isFoil: detectedFoil,
     confidence,
+    scanEngine: 'gemini',
     rawDetected: {
       card_name: detectedName,
       set_code: detectedSet,
       collector_number: detectedNumber,
       is_foil: detectedFoil,
+      engine: 'gemini',
     },
   };
 }

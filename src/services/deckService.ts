@@ -5,7 +5,7 @@
  */
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
-import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice } from './api';
+import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice, getCardById } from './api';
 import { AuthService } from './authService';
 import { GamechangerService } from './gamechangerService';
 import {
@@ -2129,6 +2129,138 @@ export class DeckService {
     };
 
     await this.saveBinder(updatedBinder);
+  }
+
+  /**
+   * Change a card in a collection binder between foil and nonfoil.
+   * If a matching card with the target finish already exists in the binder,
+   * merges the converted copies into the existing stack.
+   * If the card has multiple copies, allows converting 1 copy, a custom amount, or all copies.
+   */
+  static async toggleCollectionCardFoil(
+    cardId: string,
+    options?: { countToConvert?: number; targetFoil?: boolean }
+  ): Promise<{ newFoil: boolean; countConverted: number; merged: boolean }> {
+    let targetBinder: Binder | undefined;
+    let card: CollectionCard | undefined;
+
+    for (const b of this.inMemoryBinders) {
+      const found = (b.cards || []).find((c) => c.id === cardId);
+      if (found) {
+        targetBinder = b;
+        card = found;
+        break;
+      }
+    }
+
+    if (!targetBinder || !card) {
+      throw new Error('Card not found in binder');
+    }
+
+    const currentFoil = Boolean(card.isFoil);
+    const newFoil = options?.targetFoil !== undefined ? Boolean(options.targetFoil) : !currentFoil;
+
+    if (currentFoil === newFoil) {
+      return { newFoil, countConverted: 0, merged: false };
+    }
+
+    const totalQty = card.quantity || 1;
+    const qtyToConvert = options?.countToConvert !== undefined 
+      ? Math.min(Math.max(1, options.countToConvert), totalQty)
+      : totalQty;
+    const remainingQty = totalQty - qtyToConvert;
+
+    // Check if price needs updating based on new finish
+    let targetPrice = card.currentPriceUsd;
+    try {
+      if (card.scryfallId) {
+        const scryfallCard = await getCardById(card.scryfallId);
+        if (scryfallCard && scryfallCard.prices) {
+          if (newFoil && scryfallCard.prices.usd_foil) {
+            targetPrice = parseFloat(scryfallCard.prices.usd_foil);
+          } else if (!newFoil && scryfallCard.prices.usd) {
+            targetPrice = parseFloat(scryfallCard.prices.usd);
+          }
+        }
+      }
+    } catch {}
+
+    const currentCards = [...(targetBinder.cards || [])];
+    const cardIndex = currentCards.findIndex((c) => c.id === cardId);
+    if (cardIndex === -1) {
+      throw new Error('Card not found in binder');
+    }
+
+    // Look for existing card in the same binder with matching finish and condition
+    const matchingOtherIdx = currentCards.findIndex(
+      (c) =>
+        c.id !== cardId &&
+        c.scryfallId === card.scryfallId &&
+        Boolean(c.isFoil) === newFoil &&
+        (c.condition || 'NM') === (card.condition || 'NM')
+    );
+
+    let merged = false;
+
+    if (matchingOtherIdx >= 0) {
+      // Merge into existing card stack
+      merged = true;
+      currentCards[matchingOtherIdx] = {
+        ...currentCards[matchingOtherIdx],
+        quantity: currentCards[matchingOtherIdx].quantity + qtyToConvert,
+        currentPriceUsd: targetPrice !== undefined ? targetPrice : currentCards[matchingOtherIdx].currentPriceUsd,
+      };
+
+      if (remainingQty > 0) {
+        currentCards[cardIndex] = {
+          ...card,
+          quantity: remainingQty,
+        };
+      } else {
+        currentCards.splice(cardIndex, 1);
+      }
+    } else {
+      // No existing card with target finish
+      if (remainingQty > 0) {
+        currentCards[cardIndex] = {
+          ...card,
+          quantity: remainingQty,
+        };
+        const newCardEntry: CollectionCard = {
+          ...card,
+          id: `col-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          isFoil: newFoil,
+          quantity: qtyToConvert,
+          currentPriceUsd: targetPrice !== undefined ? targetPrice : card.currentPriceUsd,
+          acquiredPrice: targetPrice !== undefined ? targetPrice : card.acquiredPrice,
+          addedAt: Date.now(),
+        };
+        currentCards.unshift(newCardEntry);
+      } else {
+        // Convert in-place
+        currentCards[cardIndex] = {
+          ...card,
+          isFoil: newFoil,
+          currentPriceUsd: targetPrice !== undefined ? targetPrice : card.currentPriceUsd,
+          acquiredPrice: targetPrice !== undefined ? targetPrice : card.acquiredPrice,
+        };
+      }
+    }
+
+    const updatedBinder: Binder = {
+      ...targetBinder,
+      cards: currentCards,
+      cardCount: currentCards.reduce((acc, c) => acc + c.quantity, 0),
+      updatedAt: Date.now(),
+    };
+
+    await this.saveBinder(updatedBinder);
+
+    return {
+      newFoil,
+      countConverted: qtyToConvert,
+      merged,
+    };
   }
 
   /**

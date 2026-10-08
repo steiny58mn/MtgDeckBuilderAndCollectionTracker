@@ -30,6 +30,7 @@ interface CardDetailModalProps {
   onAddCardToDeck?: (card: ScryfallCard, category: DeckCategory, quantity: number, isFoil: boolean) => void;
   onAddCardToCollection?: (card: ScryfallCard, quantity: number, isFoil: boolean, condition: CardCondition, acquiredPrice?: number) => void;
   onUpdateCardPrinting?: (targetCard: ScryfallCard, newPrinting: ScryfallCard) => void;
+  onToggleCardFoil?: (cardId: string, options?: { countToConvert?: number; targetFoil?: boolean }) => Promise<void> | void;
 }
 
 export const CardDetailModal: React.FC<CardDetailModalProps> = ({
@@ -44,8 +45,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   onAddCardToDeck,
   onAddCardToCollection,
   onUpdateCardPrinting,
+  onToggleCardFoil,
 }) => {
   const [displayCard, setDisplayCard] = useState<ScryfallCard | null>(card);
+  const [inspectedFoil, setInspectedFoil] = useState<boolean>(Boolean((card as any)?.isFoil));
   const [isLoadingFull, setIsLoadingFull] = useState(false);
   const [showBackFace, setShowBackFace] = useState(false);
   const [deckCategory, setDeckCategory] = useState<DeckCategory>('main');
@@ -114,6 +117,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
       return;
     }
     setDisplayCard(card);
+    setInspectedFoil(Boolean((card as any)?.isFoil));
     setShowBackFace(false);
     setPrintingsList([]);
     setShowPrintings(false);
@@ -626,6 +630,48 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   <span>Create or open a deck to add this card directly to it.</span>
                 </div>
               )
+            )}
+
+            {/* If inspecting an existing card from a collection binder */}
+            {(card as any)?.collectionCardId && onToggleCardFoil && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-300">
+                    Finish in Binder:
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-bold border flex items-center gap-1 ${
+                      inspectedFoil
+                        ? 'bg-fuchsia-950/80 text-fuchsia-300 border-amber-600/70 shadow-xs'
+                        : 'bg-slate-800 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {inspectedFoil ? <Sparkles className="w-3 h-3 text-amber-300" /> : <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />}
+                    {inspectedFoil ? 'Foil' : 'Non-foil'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onToggleCardFoil((card as any).collectionCardId);
+                    setInspectedFoil(!inspectedFoil);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 active:scale-95 ${
+                    inspectedFoil
+                      ? 'bg-slate-800 hover:bg-slate-750 text-slate-200 border-slate-700'
+                      : 'bg-fuchsia-950 hover:bg-fuchsia-900 text-fuchsia-300 hover:text-white border-amber-600/60 shadow-sm'
+                  }`}
+                >
+                  {inspectedFoil ? (
+                    <span>Change to Non-foil</span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3 text-amber-300" />
+                      <span>Change to Foil ✨</span>
+                    </>
+                  )}
+                </button>
+              </div>
             )}
 
             {/* Add to Collection Binder - Only shown when in binder context or not restricted to deck */}

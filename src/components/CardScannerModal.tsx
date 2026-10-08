@@ -22,7 +22,10 @@ import {
   Check, 
   X,
   XCircle,
-  Copy
+  Copy,
+  Bot,
+  Cpu,
+  Sliders
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
@@ -33,6 +36,9 @@ import {
   setStoredGeminiApiKey,
   getStoredGeminiModel,
   setStoredGeminiModel,
+  getStoredScanEngine,
+  setStoredScanEngine,
+  ScanEngineMode,
   POPULAR_GEMINI_MODELS,
   DEFAULT_GEMINI_MODEL
 } from '../services/cardScannerService';
@@ -47,6 +53,7 @@ export interface BatchScannedCard {
   quantity: number;
   isFoil: boolean;
   timestamp: number;
+  scanEngine?: 'ocr' | 'gemini';
 }
 
 interface CardScannerModalProps {
@@ -145,6 +152,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState<string>(() => getStoredGeminiApiKey());
   const [selectedModel, setSelectedModel] = useState<string>(() => getStoredGeminiModel());
+  const [scanEngine, setScanEngine] = useState<ScanEngineMode>(() => getStoredScanEngine());
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
   // Manual fallback search
@@ -287,7 +295,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       const { base64Only } = await optimizeCardImage(imageSource);
 
       const apiKey = getStoredGeminiApiKey();
-      if (!apiKey) {
+      if (scanEngine === 'gemini_only' && !apiKey) {
         setStatusMessage('');
         setIsProcessing(false);
         setIsCrosshairLocked(false);
@@ -297,17 +305,25 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         setQuickNotice({
           type: 'failure',
           title: 'Gemini API Key Required',
-          detail: 'Enter your free Gemini key in settings to enable card scanning.',
+          detail: 'Enter your free Gemini key in settings to enable Gemini Vision scanning.',
           timestamp: Date.now(),
         });
         return;
       }
 
-      setStatusMessage('Identifying card with Gemini...');
-      const scanResult = await identifyCardFromImage(base64Only, apiKey);
+      if (scanEngine === 'hybrid') {
+        setStatusMessage('Scanning card (Local OCR)...');
+      } else if (scanEngine === 'ocr_only') {
+        setStatusMessage('Scanning card (Local OCR)...');
+      } else {
+        setStatusMessage('Identifying card with Gemini...');
+      }
+
+      const scanResult = await identifyCardFromImage(base64Only, apiKey, scanEngine);
 
       const finalIsFoil = overrideFoil !== null ? overrideFoil : scanResult.isFoil;
-      setStatusMessage(`Found "${scanResult.card.name}"!`);
+      const engineLabel = scanResult.scanEngine === 'ocr' ? '⚡ Local OCR' : '🤖 Gemini 3.8 Flash';
+      setStatusMessage(`Found "${scanResult.card.name}" (${engineLabel})!`);
 
       // Automatically add card to the chosen binder!
       await onAddCardToBinder(scanResult.card, cardQuantity, finalIsFoil, selectedBinderId);
@@ -323,6 +339,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         quantity: cardQuantity,
         isFoil: finalIsFoil,
         timestamp: Date.now(),
+        scanEngine: scanResult.scanEngine,
       };
 
       setScannedBatchCards((prev) => [batchItem, ...prev]);
@@ -332,7 +349,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setQuickNotice({
         type: 'success',
         title: `Added ${cardQuantity}x ${scanNames.actualName}`,
-        detail: `${scanNames.hasAlternateName && scanNames.subtitle ? `${scanNames.subtitle} · ` : ''}${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
+        detail: `${scanResult.scanEngine === 'ocr' ? '⚡ Local OCR · ' : '🤖 Gemini 3.8 Flash · '}${scanNames.hasAlternateName && scanNames.subtitle ? `${scanNames.subtitle} · ` : ''}${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
         imageUrl: getCardImageUrl(scanResult.card, 'small'),
         isFoil: finalIsFoil,
         timestamp: Date.now(),
@@ -758,6 +775,42 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Scan Engine Mode Selector Badge / Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
+                hybrid: 'ocr_only',
+                ocr_only: 'gemini_only',
+                gemini_only: 'hybrid',
+              };
+              const next = nextMode[scanEngine];
+              setScanEngine(next);
+              setStoredScanEngine(next);
+            }}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              scanEngine === 'hybrid'
+                ? 'bg-violet-950/70 border-violet-500/50 text-violet-200 hover:bg-violet-900/80 shadow-xs'
+                : scanEngine === 'ocr_only'
+                ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200 hover:bg-emerald-900/80 shadow-xs'
+                : 'bg-indigo-950/70 border-indigo-500/50 text-indigo-200 hover:bg-indigo-900/80 shadow-xs'
+            }`}
+            title={`Scan Engine: ${
+              scanEngine === 'hybrid'
+                ? 'Hybrid (Fast Local OCR + Gemini 3.8 Flash Fallback)'
+                : scanEngine === 'ocr_only'
+                ? 'Local OCR Only (Free / On-Device)'
+                : 'Gemini 3.8 Flash Only'
+            }. Click to cycle mode.`}
+          >
+            {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
+            {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
+            {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
+            <span className="hidden sm:inline font-bold">
+              {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'Local OCR' : 'Gemini AI'}
+            </span>
+          </button>
+
           {/* API Key Config Button */}
           <button
             type="button"
@@ -1125,6 +1178,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     <span>#{item.card.collector_number}</span>
                     {item.isFoil && <Sparkles className="w-2.5 h-2.5 text-amber-300" />}
                   </div>
+                  {item.scanEngine && (
+                    <span className={`text-[8.5px] font-semibold px-1.5 py-0.2 rounded-full mt-1 inline-flex items-center gap-0.5 ${
+                      item.scanEngine === 'ocr'
+                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-600/40'
+                        : 'bg-violet-950/80 text-violet-300 border border-violet-600/40'
+                    }`}>
+                      {item.scanEngine === 'ocr' ? '⚡ OCR' : '🤖 AI'}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -1474,14 +1536,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         </div>
       )}
 
-      {/* Gemini API Key Configuration Modal */}
+      {/* Card Scanner & Gemini Configuration Modal */}
       {showApiKeyModal && (
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Key className="w-5 h-5 text-violet-400" />
-                <h3 className="text-sm font-bold text-white">Gemini API Key Settings</h3>
+                <Sliders className="w-5 h-5 text-violet-400" />
+                <h3 className="text-sm font-bold text-white">Card Scanner Settings</h3>
               </div>
               <button
                 type="button"
@@ -1492,60 +1554,145 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               </button>
             </div>
 
-            <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-              Google Gemini Vision (gemini-3.8-flash) powers the automatic recognition of card titles, set codes, and collector numbers directly from your camera in batch.
-            </p>
-
-            <div className="mb-3">
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                Gemini Vision Model
+            {/* Scan Engine Mode Selector */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Recognition Engine Mode
               </label>
-              <select
-                value={selectedModel}
-                onChange={(e) => {
-                  setSelectedModel(e.target.value);
-                  setStoredGeminiModel(e.target.value);
-                }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 font-sans"
-              >
-                {POPULAR_GEMINI_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-400 mt-1">
-                Default: <span className="text-violet-400 font-mono font-medium">{DEFAULT_GEMINI_MODEL}</span> (Recommended)
-              </p>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScanEngine('hybrid')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    scanEngine === 'hybrid'
+                      ? 'bg-violet-950/70 border-violet-500 shadow-md ring-1 ring-violet-500/40'
+                      : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      Hybrid Mode (Recommended)
+                    </span>
+                    <span className="text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/40 px-1.5 py-0.2 rounded-full font-semibold">
+                      Best Performance
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Tries ultra-fast client-side OCR first (0 API cost, ~200ms). Seamlessly falls back to Gemini 3.8 Flash Vision for foil sheen, full-art, or vintage cards.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScanEngine('ocr_only')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    scanEngine === 'ocr_only'
+                      ? 'bg-emerald-950/70 border-emerald-500 shadow-md ring-1 ring-emerald-500/40'
+                      : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Cpu className="w-4 h-4 text-emerald-400" />
+                      Local OCR Only (Free / On-Device)
+                    </span>
+                    <span className="text-[10px] bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 px-1.5 py-0.2 rounded-full font-semibold">
+                      0 API Cost
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Runs 100% in your browser via WebAssembly (Tesseract.js). No API key or cloud credits needed. Best for modern cards with standard bottom-left footers.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScanEngine('gemini_only')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    scanEngine === 'gemini_only'
+                      ? 'bg-indigo-950/70 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
+                      : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Bot className="w-4 h-4 text-indigo-400" />
+                      Gemini 3.8 Flash Only
+                    </span>
+                    <span className="text-[10px] bg-indigo-400/20 text-indigo-300 border border-indigo-400/40 px-1.5 py-0.2 rounded-full font-semibold">
+                      AI Vision
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Uses Google Gemini Vision for every scan. Highest accuracy for complex art, vintage cards, and lighting glare, requiring a Gemini API key.
+                  </p>
+                </button>
+              </div>
             </div>
 
-            <div className="mb-3">
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                API Key
-              </label>
-              <input
-                type="password"
-                placeholder="AIzaSy..."
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 font-mono"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">
-                Stored securely in your local browser only. Never shared with third parties.
-              </p>
-            </div>
+            {/* Gemini Configuration (Shown for Hybrid & Gemini Only) */}
+            {scanEngine !== 'ocr_only' && (
+              <div className="border-t border-slate-800 pt-3">
+                <div className="mb-3">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Gemini Vision Model
+                  </label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => {
+                      setSelectedModel(e.target.value);
+                      setStoredGeminiModel(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 font-sans"
+                  >
+                    {POPULAR_GEMINI_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Default: <span className="text-violet-400 font-mono font-medium">{DEFAULT_GEMINI_MODEL}</span> (Recommended)
+                  </p>
+                </div>
 
-            <div className="bg-slate-800/60 rounded-lg p-2.5 mb-4 text-xs text-slate-300 flex items-center justify-between">
-              <span>Need a free API key?</span>
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="text-violet-400 hover:text-violet-300 font-semibold inline-flex items-center gap-1"
-              >
-                Get Key on Google AI Studio <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
+                <div className="mb-3">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Gemini API Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="AIzaSy..."
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Stored securely in your local browser only.
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 rounded-lg p-2.5 mb-4 text-xs text-slate-300 flex items-center justify-between">
+                  <span>Need a free API key?</span>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-violet-400 hover:text-violet-300 font-semibold inline-flex items-center gap-1"
+                  >
+                    Get Key on Google AI Studio <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {scanEngine === 'ocr_only' && (
+              <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-600/30 text-emerald-200 text-xs mb-4 flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Local OCR runs entirely on your device in WebAssembly. No API key required!</span>
+              </div>
+            )}
 
             {apiKeySavedSuccess && (
               <div className="text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 rounded-lg p-2 mb-3 flex items-center gap-1.5">
@@ -1558,6 +1705,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  setStoredScanEngine(scanEngine);
                   setStoredGeminiApiKey(apiKeyInput);
                   setStoredGeminiModel(selectedModel);
                   setApiKeySavedSuccess(true);

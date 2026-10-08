@@ -87,6 +87,10 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
     imageUrl: card.imageUrl,
     scryfallId: card.scryfallId,
     set_name: card.setName,
+    isFoil: card.isFoil,
+    collectionCardId: card.id,
+    quantity: card.quantity,
+    binderId: card.binderId,
   } as any;
 }
 
@@ -108,6 +112,7 @@ interface CollectionManagerProps {
   onDeleteBinder?: (binderId: string) => Promise<void> | void;
   activeDeck: Deck | null;
   onUpdateCollectionCard: (card: CollectionCard) => void;
+  onToggleCardFoil?: (cardId: string, options?: { countToConvert?: number; targetFoil?: boolean }) => Promise<void> | void;
   onDeleteCollectionCard: (cardId: string) => void;
   onAddCardToDeck: (card: CollectionCard) => void;
   onOpenSearch: () => void;
@@ -125,6 +130,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   onDeleteBinder,
   activeDeck,
   onUpdateCollectionCard,
+  onToggleCardFoil,
   onDeleteCollectionCard,
   onAddCardToDeck,
   onOpenSearch,
@@ -198,6 +204,43 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [displayLimit, setDisplayLimit] = useState(INITIAL_PAGE_SIZE);
   const priceCheckAttempted = useRef<Set<string>>(new Set());
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Multi-copy foil conversion dialog state
+  const [foilModalData, setFoilModalData] = useState<{
+    card: CollectionCard;
+    targetFoil: boolean;
+    convertQuantity: number;
+  } | null>(null);
+
+  const executeToggleFoil = async (
+    cardId: string,
+    options?: { countToConvert?: number; targetFoil?: boolean }
+  ) => {
+    if (onToggleCardFoil) {
+      await onToggleCardFoil(cardId, options);
+    } else {
+      const target = collection.find((c) => c.id === cardId);
+      if (target) {
+        onUpdateCollectionCard({
+          ...target,
+          isFoil: options?.targetFoil !== undefined ? options.targetFoil : !target.isFoil,
+        });
+      }
+    }
+  };
+
+  const handleFoilClick = (card: CollectionCard) => {
+    const targetFoil = !card.isFoil;
+    if (card.quantity > 1) {
+      setFoilModalData({
+        card,
+        targetFoil,
+        convertQuantity: 1,
+      });
+    } else {
+      executeToggleFoil(card.id, { countToConvert: 1, targetFoil });
+    }
+  };
 
   // Filter by selected binder if specified (memoized)
   const binderFilteredCollection = useMemo(() => {
@@ -1358,11 +1401,31 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                         </div>
                                       );
                                     })()}
-                                    {card.isFoil && (
-                                      <span className="text-violet-400 text-[10px] flex items-center gap-0.5">
-                                        <Sparkles className="w-2.5 h-2.5" />
-                                      </span>
-                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleFoilClick(card);
+                                      }}
+                                      title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
+                                        card.isFoil
+                                          ? "bg-fuchsia-950/90 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs"
+                                          : "bg-slate-800/80 hover:bg-slate-750 border-slate-700 hover:border-slate-600 text-slate-400 hover:text-slate-200"
+                                      }`}
+                                    >
+                                      {card.isFoil ? (
+                                        <>
+                                          <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                          <span>Foil</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                          <span>Non-foil</span>
+                                        </>
+                                      )}
+                                    </button>
                                     <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-400">
                                       {card.condition}
                                     </span>
@@ -1499,10 +1562,30 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           }}
                         />
 
-                        {card.isFoil && (
-                          <div className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-700/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md">
-                            <Sparkles className="w-2.5 h-2.5" /> Foil
-                          </div>
+                        {card.isFoil ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFoilClick(card);
+                            }}
+                            title="Click to change to Non-foil"
+                            className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 hover:bg-fuchsia-900 border border-amber-600/80 hover:border-amber-400 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 hover:text-white flex items-center gap-0.5 shadow-md transition-all cursor-pointer active:scale-95 z-10"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-300" /> Foil
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFoilClick(card);
+                            }}
+                            title="Click to change to Foil"
+                            className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-900/90 hover:bg-violet-950/90 border border-slate-700 hover:border-violet-500/80 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-300 hover:text-violet-200 flex items-center gap-1 shadow-md transition-all cursor-pointer active:scale-95 z-10"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-violet-400" /> + Foil
+                          </button>
                         )}
 
                         <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400 flex items-center gap-1">
@@ -1579,6 +1662,32 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           </div>
 
                           <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFoilClick(card);
+                              }}
+                              title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
+                                card.isFoil
+                                  ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs"
+                                  : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              {card.isFoil ? (
+                                <>
+                                  <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                  <span>Foil</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                  <span>Reg</span>
+                                </>
+                              )}
+                            </button>
+
                             {activeDeck && (
                               <button
                                 onClick={() => onAddCardToDeck(card)}
@@ -1741,13 +1850,31 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                             <span className="text-slate-500 block text-[10px] truncate max-w-[120px]">{card.setName}</span>
                           </td>
                           <td className="py-2 px-3">
-                            {card.isFoil ? (
-                              <span className="text-fuchsia-300 font-bold text-[11px] flex items-center gap-1">
-                                <Sparkles className="w-3 h-3" /> Foil
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 text-xs">Regular</span>
-                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFoilClick(card);
+                              }}
+                              title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
+                              className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
+                                card.isFoil
+                                  ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs"
+                                  : "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              {card.isFoil ? (
+                                <>
+                                  <Sparkles className="w-3 h-3 text-amber-300" />
+                                  <span>Foil</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                  <span>Regular</span>
+                                </>
+                              )}
+                            </button>
                           </td>
                           <td className="py-2 px-3 font-mono text-slate-300 font-semibold text-xs">{card.condition}</td>
                           <td className="py-2 px-3 font-bold text-slate-100 font-mono text-xs">{card.quantity}</td>
@@ -1877,6 +2004,148 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           }
         }}
       />
+
+      {/* Multi-quantity Foil / Non-foil Conversion Modal */}
+      {foilModalData && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                {foilModalData.targetFoil ? (
+                  <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+                ) : (
+                  <Layers className="w-5 h-5 text-slate-400" />
+                )}
+                <h3 className="text-sm font-bold text-white">
+                  {foilModalData.targetFoil ? 'Convert to Foil' : 'Convert to Non-foil'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFoilModalData(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <img
+                src={getCardDisplayImageUrl(foilModalData.card)}
+                alt={foilModalData.card.name}
+                className="w-12 h-16 object-cover rounded-md border border-slate-700 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-white truncate">{foilModalData.card.name}</h4>
+                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  {(foilModalData.card.set || '').toUpperCase()} · #{foilModalData.card.collectorNumber}
+                </div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="text-[10px] font-semibold text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">
+                    Total: {foilModalData.card.quantity} copies
+                  </span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                    foilModalData.card.isFoil
+                      ? 'bg-fuchsia-950 text-fuchsia-300 border-amber-600/60'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                    {foilModalData.card.isFoil ? 'Currently Foil' : 'Currently Regular'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-slate-300 block">
+                How many copies to convert to {foilModalData.targetFoil ? 'Foil' : 'Regular'}?
+              </label>
+
+              <div className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                <span className="text-xs text-slate-400">Selected copies:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFoilModalData((prev) =>
+                        prev ? { ...prev, convertQuantity: Math.max(1, prev.convertQuantity - 1) } : null
+                      )
+                    }
+                    disabled={foilModalData.convertQuantity <= 1}
+                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-8 text-center font-bold text-white font-mono text-sm">
+                    {foilModalData.convertQuantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFoilModalData((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              convertQuantity: Math.min(prev.card.quantity, prev.convertQuantity + 1),
+                            }
+                          : null
+                      )
+                    }
+                    disabled={foilModalData.convertQuantity >= foilModalData.card.quantity}
+                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const data = foilModalData;
+                  setFoilModalData(null);
+                  await executeToggleFoil(data.card.id, {
+                    countToConvert: data.convertQuantity,
+                    targetFoil: data.targetFoil,
+                  });
+                }}
+                className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-violet-600/30 transition-all cursor-pointer active:scale-98"
+              >
+                {foilModalData.targetFoil && <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+                <span>
+                  Convert {foilModalData.convertQuantity}x to {foilModalData.targetFoil ? 'Foil' : 'Regular'}
+                </span>
+              </button>
+
+              {foilModalData.card.quantity > 1 && foilModalData.convertQuantity < foilModalData.card.quantity && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const data = foilModalData;
+                    setFoilModalData(null);
+                    await executeToggleFoil(data.card.id, {
+                      countToConvert: data.card.quantity,
+                      targetFoil: data.targetFoil,
+                    });
+                  }}
+                  className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  Convert ALL ({foilModalData.card.quantity}x) to {foilModalData.targetFoil ? 'Foil' : 'Regular'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setFoilModalData(null)}
+                className="w-full py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Go to Top Button */}
       <ScrollToTopButton />
