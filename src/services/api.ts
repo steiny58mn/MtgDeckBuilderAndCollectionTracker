@@ -3,6 +3,7 @@ import { ScryfallCard } from '../types/mtg';
 import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConfig';
 import { GamechangerService } from './gamechangerService';
 import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName } from '../utils/deckUtils';
+import { filterPaperCardsOnly } from '../utils/cardUtils';
 
 export function getFrostpointBaseUrl(): string {
   const url = getApiBaseUrl();
@@ -219,7 +220,8 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
   try {
     const scryfallOrder = ((order as any) === 'synergy' || (order as any) === 'commander_decks' || (order as any) === 'category') ? 'edhrec' : (order || 'name');
     const scryfallDir = dir && dir !== 'auto' ? dir : 'auto';
-    const scryfallUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(trimmed)}&page=${page}&order=${scryfallOrder}&dir=${scryfallDir}${unique === 'prints' ? '&unique=prints' : ''}`;
+    const paperQuery = (trimmed.includes('game:paper') || trimmed.includes('not:digital')) ? trimmed : `${trimmed} game:paper not:digital`;
+    const scryfallUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(paperQuery)}&page=${page}&order=${scryfallOrder}&dir=${scryfallDir}${unique === 'prints' ? '&unique=prints' : ''}`;
 
     const scryfallRes = await fetch(scryfallUrl, {
       signal,
@@ -229,7 +231,7 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     if (scryfallRes.ok) {
       const sJson = await scryfallRes.json();
       if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
-        let normalized = sJson.data.map(normalizeFrostpointCard);
+        let normalized = filterPaperCardsOnly(sJson.data.map(normalizeFrostpointCard));
         if (unique !== 'prints') {
           const seenNames = new Set<string>();
           normalized = normalized.filter((card: ScryfallCard) => {
@@ -481,9 +483,11 @@ export async function fetchCardPrints(cardNameOrId: string): Promise<ScryfallCar
     if (res.ok) {
       const json = await res.json();
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-        const list = json.data.map(normalizeFrostpointCard);
-        printsCache.set(cacheKey, list);
-        return list;
+        const list = filterPaperCardsOnly(json.data.map(normalizeFrostpointCard));
+        if (list.length > 0) {
+          printsCache.set(cacheKey, list);
+          return list;
+        }
       }
     }
   } catch (err) {
@@ -492,16 +496,18 @@ export async function fetchCardPrints(cardNameOrId: string): Promise<ScryfallCar
 
   // Fallback to direct Scryfall prints search
   try {
-    const scryUrl = 'https://api.scryfall.com/cards/search?q=%21%22' + encodeURIComponent(clean) + '%22&unique=prints&order=released&dir=desc';
+    const scryUrl = 'https://api.scryfall.com/cards/search?q=%21%22' + encodeURIComponent(clean) + '%22+unique%3Aprints+game%3Apaper+not%3Adigital&order=released&dir=desc';
     const sRes = await fetch(scryUrl, {
       headers: { 'Accept': 'application/json' },
     });
     if (sRes.ok) {
       const sJson = await sRes.json();
       if (sJson.data && Array.isArray(sJson.data) && sJson.data.length > 0) {
-        const list = sJson.data.map(normalizeFrostpointCard);
-        printsCache.set(cacheKey, list);
-        return list;
+        const list = filterPaperCardsOnly(sJson.data.map(normalizeFrostpointCard));
+        if (list.length > 0) {
+          printsCache.set(cacheKey, list);
+          return list;
+        }
       }
     }
   } catch (sErr) {

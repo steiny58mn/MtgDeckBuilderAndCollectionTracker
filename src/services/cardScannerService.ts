@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { ScryfallCard } from '../types/mtg';
-import { normalizeFrostpointCard } from './api';
+import { normalizeFrostpointCard, fetchCardPrints } from './api';
+import { isDigitalOnlyCard, filterPaperCardsOnly } from '../utils/cardUtils';
 
 export interface CardScanResult {
   card: ScryfallCard;
@@ -277,9 +278,24 @@ export async function optimizeCardImage(
 }
 
 /**
+ * Helper to ensure a returned card is a physical paper printing, converting digital-only cards to physical paper versions.
+ */
+async function resolvePaperCard(card: ScryfallCard | null): Promise<ScryfallCard | null> {
+  if (!card) return null;
+  if (!isDigitalOnlyCard(card)) return card;
+  try {
+    const paperPrints = await fetchCardPrints(card.name);
+    if (paperPrints && paperPrints.length > 0) {
+      return paperPrints[0];
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Look up exact card printing on Scryfall using set code and collector number,
  * with fallbacks to prints search and fuzzy name search.
- * Ensures the EXACT printing version (set and collector number) is matched.
+ * Ensures the EXACT printing version (set and collector number) is matched and is physical paper only.
  */
 export async function lookupExactScryfallCard(
   cardName: string,
@@ -323,7 +339,9 @@ export async function lookupExactScryfallCard(
           if (res.ok) {
             const json = await res.json();
             if (json && json.id) {
-              return normalizeFrostpointCard(json);
+              const norm = normalizeFrostpointCard(json);
+              const paper = await resolvePaperCard(norm);
+              if (paper) return paper;
             }
           }
         } catch (err) {
@@ -334,12 +352,14 @@ export async function lookupExactScryfallCard(
 
     // Direct search on Scryfall for set + collector number e.g. "e:blb cn:045" or "e:blb cn:45"
     try {
-      const searchUrl = `https://api.scryfall.com/cards/search?q=e%3A${encodeURIComponent(cleanSet)}+cn%3A${encodeURIComponent(unpaddedNum || rawNum)}`;
+      const searchUrl = `https://api.scryfall.com/cards/search?q=e%3A${encodeURIComponent(cleanSet)}+cn%3A${encodeURIComponent(unpaddedNum || rawNum)}+game%3Apaper+not%3Adigital`;
       const searchRes = await fetch(searchUrl, { headers: { Accept: 'application/json' } });
       if (searchRes.ok) {
         const searchJson = await searchRes.json();
         if (Array.isArray(searchJson?.data) && searchJson.data.length > 0) {
-          return normalizeFrostpointCard(searchJson.data[0]);
+          const norm = normalizeFrostpointCard(searchJson.data[0]);
+          const paper = await resolvePaperCard(norm);
+          if (paper) return paper;
         }
       }
     } catch {}
@@ -348,12 +368,12 @@ export async function lookupExactScryfallCard(
   // 2. Exact Card Name prints search
   if (cleanName) {
     try {
-      const printsUrl = `https://api.scryfall.com/cards/search?q=%21%22${encodeURIComponent(cleanName)}%22+unique%3Aprints&order=released&dir=desc`;
+      const printsUrl = `https://api.scryfall.com/cards/search?q=%21%22${encodeURIComponent(cleanName)}%22+unique%3Aprints+game%3Apaper+not%3Adigital&order=released&dir=desc`;
       const res = await fetch(printsUrl, { headers: { Accept: 'application/json' } });
       if (res.ok) {
         const json = await res.json();
         if (Array.isArray(json?.data) && json.data.length > 0) {
-          const cards: ScryfallCard[] = json.data.map(normalizeFrostpointCard);
+          const cards: ScryfallCard[] = filterPaperCardsOnly(json.data.map(normalizeFrostpointCard));
 
           // Priority 1: Match BOTH set code AND exact collector number
           if (cleanSet && rawNum) {
@@ -366,14 +386,14 @@ export async function lookupExactScryfallCard(
                 parseInt(cNum, 10) === parseInt(rawNum, 10);
               return setOk && numOk;
             });
-            if (bothMatch) return bothMatch;
+            if (bothMatch) return await resolvePaperCard(bothMatch);
           }
 
           // Priority 2: Match in the specified set if set is known
           if (cleanSet) {
             const sameSetCards = cards.filter((c) => (c.set || '').toLowerCase() === cleanSet);
             if (sameSetCards.length === 1) {
-              return sameSetCards[0];
+              return await resolvePaperCard(sameSetCards[0]);
             } else if (sameSetCards.length > 1 && rawNum) {
               // If multiple printings in the same set (e.g. variants, showcase, basics), pick closest number
               const targetInt = parseInt(rawNum, 10);
@@ -390,11 +410,11 @@ export async function lookupExactScryfallCard(
                     }
                   }
                 }
-                return closest;
+                return await resolvePaperCard(closest);
               }
-              return sameSetCards[0];
+              return await resolvePaperCard(sameSetCards[0]);
             } else if (sameSetCards.length > 0) {
-              return sameSetCards[0];
+              return await resolvePaperCard(sameSetCards[0]);
             }
           }
 
@@ -408,11 +428,13 @@ export async function lookupExactScryfallCard(
                 parseInt(cNum, 10) === parseInt(rawNum, 10)
               );
             });
-            if (numMatch) return numMatch;
+            if (numMatch) return await resolvePaperCard(numMatch);
           }
 
-          // Fallback: If neither set nor collector number matched, return most recent print
-          return cards[0];
+          // Fallback: If neither set nor collector number matched, return most recent paper print
+          if (cards.length > 0) {
+            return await resolvePaperCard(cards[0]);
+          }
         }
       }
     } catch (err) {
@@ -427,38 +449,34 @@ export async function lookupExactScryfallCard(
         if (res.ok) {
           const json = await res.json();
           if (json && json.id) {
-            return normalizeFrostpointCard(json);
+            const paper = await resolvePaperCard(normalizeFrostpointCard(json));
+            if (paper) return paper;
           }
         }
       } catch (err) {
         console.warn('[CardScanner] Fuzzy lookup fallback failed:', err);
       }
 
-      // 4. Normalized variations (remove brackets, showcase tags, split dual-face, clean subtitles, leading noise)
+      // 4. Normalized variations
       const variations: string[] = [];
-      // Clean bracketed or parenthesized tags like "Sol Ring (Retro Frame)" -> "Sol Ring"
       const noBrackets = cleanName.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
       if (noBrackets && noBrackets !== cleanName) variations.push(noBrackets);
 
-      // Clean dual-face card "Delver of Secrets // Insectile Aberration" -> "Delver of Secrets"
       if (cleanName.includes('//')) {
         const face1 = cleanName.split('//')[0].trim();
         if (face1) variations.push(face1);
       }
 
-      // Clean secondary subtitle after comma e.g. "Urza, Lord High Artificer" -> "Urza"
       if (cleanName.includes(',')) {
         const preComma = cleanName.split(',')[0].trim();
         if (preComma.length >= 3) variations.push(preComma);
       }
 
-      // Clean hyphens/dashes e.g. "Boseiju, Who Endures - Showcase" -> "Boseiju, Who Endures"
       if (cleanName.includes(' - ')) {
         const preDash = cleanName.split(' - ')[0].trim();
         if (preDash.length >= 3) variations.push(preDash);
       }
 
-      // First 2-3 words extraction e.g. "Lightning Bolt Foil Retro" -> "Lightning Bolt"
       const wordTokens = cleanName.split(/\s+/).filter((w) => w.length >= 2);
       if (wordTokens.length >= 2) {
         variations.push(wordTokens.slice(0, 2).join(' '));
@@ -475,13 +493,14 @@ export async function lookupExactScryfallCard(
           if (varRes.ok) {
             const varJson = await varRes.json();
             if (varJson && varJson.id) {
-              return normalizeFrostpointCard(varJson);
+              const paper = await resolvePaperCard(normalizeFrostpointCard(varJson));
+              if (paper) return paper;
             }
           }
         } catch {}
       }
 
-      // 5. Scryfall Autocomplete fallback (resolves minor OCR/AI typos like 1 wrong letter)
+      // 5. Scryfall Autocomplete fallback
       try {
         const acQuery = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 24);
         if (acQuery.length >= 3) {
@@ -496,7 +515,8 @@ export async function lookupExactScryfallCard(
               if (matchRes.ok) {
                 const matchJson = await matchRes.json();
                 if (matchJson && matchJson.id) {
-                  return normalizeFrostpointCard(matchJson);
+                  const paper = await resolvePaperCard(normalizeFrostpointCard(matchJson));
+                  if (paper) return paper;
                 }
               }
             }
@@ -510,12 +530,13 @@ export async function lookupExactScryfallCard(
       try {
         const searchWords = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
         if (searchWords.length >= 3) {
-          const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchWords)}&order=relevance`;
+          const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchWords)}+game%3Apaper+not%3Adigital&order=relevance`;
           const sRes = await fetch(searchUrl, { headers: { Accept: 'application/json' } });
           if (sRes.ok) {
             const sJson = await sRes.json();
             if (Array.isArray(sJson?.data) && sJson.data.length > 0) {
-              return normalizeFrostpointCard(sJson.data[0]);
+              const paper = await resolvePaperCard(normalizeFrostpointCard(sJson.data[0]));
+              if (paper) return paper;
             }
           }
         }
@@ -766,13 +787,22 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
   // Modern MTG cards print a STAR symbol ★ in the bottom border text for FOIL printings, or a DOT/CIRCLE • for NON-FOIL
   const hasFoilStar = /[\u2605\u2606★\*]|star|\bfoil\b/i.test(text);
 
-  const clean = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let clean = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Helper to fix common OCR number/letter misreads
+  // 1. Separate fused single-letter rarity indicator from set code (e.g. "UCM2" -> "U CM2", "CBLB" -> "C BLB")
+  clean = clean.replace(/\b([CURMLSTP])([A-Z0-9]{3,5})\b/g, '$1 $2');
+
+  // 2. Re-attach split alphanumeric set codes where OCR inserted a space before digits (e.g. "CM 2" -> "CM2", "GN 2" -> "GN2", "MH 3" -> "MH3", "M 21" -> "M21")
+  clean = clean.replace(/\b([A-Z]{1,4})\s+([0-9]{1,2})\b/g, '$1$2');
+
+  // 3. Re-attach spaced multi-character set codes (e.g. "2 X 2" -> "2X2")
+  clean = clean.replace(/\b([0-9])\s*X\s*([0-9])\b/gi, '$1X$2');
+
+  // Helper to fix common OCR number/letter misreads (including 4-digit numbers like "OO14" -> "0014")
   const fixNum = (s: string) =>
     s
       .trim()
-      .replace(/^[OQ]/i, '0')
+      .replace(/[OQ]/gi, '0') // handles multiple zeros like OO14, 0O14
       .replace(/^S/i, '5')
       .replace(/^Z/i, '2')
       .replace(/^[Il|]/i, '1')
@@ -784,7 +814,21 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
       .toUpperCase()
       .replace(/^8/, 'B')
       .replace(/^0/, 'O')
-      .replace(/^1/, 'L');
+      .replace(/^1/, 'L')
+      .replace(/^5(?=[A-Z])/, 'S') // e.g. "5PM" -> "SPM"
+      .replace(/([A-Z]{2})Z$/, '$12'); // e.g. "CMZ" -> "CM2", "GNZ" -> "GN2"
+
+  // Pattern UB: Universes Beyond / Modern Borderless stacked layout e.g. "R 0014 SPM • EN", "M 0014 SPM", "R 0014 \n SPM * EN"
+  // Rarity letter [CURMLS] followed by 1-4 digit number, then set code
+  const patUB = /\b([CURMLS])\s*([0-9OIQlSZb]{1,4}[a-z]?)\s+[•\*\.\-\_e★]?\s*(?:[A-Z]{2}\s+)?([A-Z0-9]{3,5})\b/i.exec(clean);
+  if (patUB) {
+    const num = fixNum(patUB[2]);
+    const rawSet = patUB[3].trim().toUpperCase();
+    const set = fixSet(rawSet);
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set) && /^\d+[a-z]?$/i.test(num)) {
+      return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
+    }
+  }
 
   // Pattern A: Modern fraction layout e.g. "242/271 R MH3", "045/281 C BLB", "123a/280 M FDN", "301/280 LTR"
   // Note: allows ANY single-letter rarity indicator [A-Za-z] (C, U, R, M, L, S, T, P, A, F, B, E, N, H)
@@ -1339,21 +1383,24 @@ export async function identifyCardFromImage(
 This photo is a zoomed-in close-up of the BOTTOM FOOTER / BOTTOM BORDER of an MTG card.
 
 CARD FOOTER INSTRUCTIONS:
-1. Extract the 3 to 5 letter uppercase expansion SET CODE (e.g. "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK").
-2. Extract the COLLECTOR NUMBER (e.g. "045", "242", "123a", "301").
-3. FOOTER FOIL SYMBOL RULE:
+1. Extract the 3 to 5 character uppercase expansion SET CODE (e.g. "SPM", "CM2", "GN2", "2X2", "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK"). Note: Set codes often contain numbers (like CM2, GN2, 2X2, MH3) or represent Universes Beyond sets (like SPM for Spider-Man).
+2. PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (e.g. VMA, ME1, ME2, ME3, ME4, TPR, Magic Online Promos, Alchemy). Always map to physical paper set codes.
+3. Extract the COLLECTOR NUMBER:
+   - On traditional cards: written as a fraction like "050/312" (extract "050") or "045".
+   - On Universes Beyond / modern borderless cards (e.g. SPM, WHO, PIP): often stacked on two lines with rarity in front, e.g. "R 0014" over "SPM ★ EN" (extract "0014").
+4. FOOTER FOIL SYMBOL RULE:
    - Modern MTG cards feature a STAR symbol ★ in the bottom border text (next to collector number or set code) for FOIL printings.
    - Non-foil cards feature a DOT/CIRCLE symbol • in the bottom border text.
    - If a STAR symbol ★ is present in the bottom text, set "is_foil": true.
    - If a DOT/CIRCLE • is present, set "is_foil": false.
-4. If any card title text is visible in the frame, provide it in "card_name". Otherwise leave "card_name" as "".
+5. If any card title text, artist name (e.g. "Roberta Ingranata" on SPM #14 Spectacular Spider-Man), or distinctive rules text is visible in the frame, identify the exact official English card name in "card_name". Otherwise leave "card_name" as "".
 
 Respond ONLY with a valid, raw JSON object:
 {
-  "card_name": "",
-  "set_code": "BLB",
-  "collector_number": "045",
-  "is_foil": false,
+  "card_name": "Spectacular Spider-Man",
+  "set_code": "SPM",
+  "collector_number": "0014",
+  "is_foil": true,
   "confidence": "high"
 }`
     : `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
@@ -1367,6 +1414,7 @@ CARD RECOGNITION PRIORITIES:
 
 2. SECONDARY / OPTIONAL PRINTING DETAILS (Bottom-left footer):
    - On modern cards, the bottom-left footer displays "[collector_number] [SET_CODE]" or "[collector_number]/[total] [rarity] [SET_CODE]".
+   - PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (such as VMA, ME1, ME2, ME3, ME4, TPR, Magic Online Promos, Alchemy). Always map to physical paper set codes.
    - If clearly readable, provide "set_code" (e.g. "MH3", "OTJ", "BLB", "FDN", "ONE") and "collector_number".
    - If the bottom of the card is cut off, blurry, or absent: Leave "set_code" and "collector_number" as empty strings (""). DO NOT invent numbers or abort—identifying the card name and artwork is the most important!
 

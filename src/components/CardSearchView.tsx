@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
 import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi, handleCardImageError } from '../services/api';
+import { filterPaperCardsOnly } from '../utils/cardUtils';
 import { getCommanderData } from '../services/edhrec';
 import { getTcgplayerMarketPrice, formatTcgplayerPrice } from '../utils/priceUtils';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -927,7 +928,7 @@ const displayedCards = useMemo(() => {
 
       if (currentAbort.signal.aborted) return;
       
-      let processedData = res.data;
+      let processedData = filterPaperCardsOnly(res.data);
       
       // Client-side sorting for Category (Lands at bottom, sorted by name within category)
       if (sortBy === 'category') {

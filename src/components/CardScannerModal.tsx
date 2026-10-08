@@ -146,6 +146,7 @@ export function analyzeCanvasImageQuality(canvas: HTMLCanvasElement): {
 }
 import { playScanSuccessSound, playScanErrorSound, unlockAudio } from '../utils/soundUtils';
 import { getCardImageUrl, getAutocomplete, fetchCardPrints } from '../services/api';
+import { filterPaperCardsOnly } from '../utils/cardUtils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
@@ -282,8 +283,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
   const [isCrosshairLocked, setIsCrosshairLocked] = useState<boolean>(false);
   const [swapGuidanceText, setSwapGuidanceText] = useState<string>('Position card in crosshairs');
-  const cardSwapStateRef = useRef<'SETTLING' | 'WAITING_FOR_SWAP'>('SETTLING');
-  const hasSeenCardRemovalRef = useRef<boolean>(false);
+  const cardSwapStateRef = useRef<'WAITING_FOR_REMOVAL' | 'WAITING_FOR_NEW_CARD' | 'SETTLING'>('WAITING_FOR_NEW_CARD');
+  const hasSeenCardRemovalRef = useRef<boolean>(true);
   const prevFrameLumaRef = useRef<Float32Array | null>(null);
   const steadyCountRef = useRef<number>(0);
   const lastScannedLumaRef = useRef<Float32Array | null>(null);
@@ -826,67 +827,70 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         diffFromLast = lastDiffSum / count;
       }
 
-      // -------------------------------------------------------------
-      // STATE 1: WAITING_FOR_SWAP (Previous card was scanned)
-      // Detects when a new card comes into frame or motion/visual change occurs,
-      // without requiring the old card to leave the frame first.
-      // -------------------------------------------------------------
-      if (cardSwapStateRef.current === 'WAITING_FOR_SWAP') {
-        // Transition to SETTLING if:
-        // - Motion detected over card (motion > 3.5)
-        // - Visual change from last scanned card (diffFromLast > 4)
-        // - Physical removal/empty background (stdDev < 12 or mean < 30)
-        const isNewCardOrMotion = stdDev < 12 || mean < 30 || mean > 240 || motion > 3.5 || diffFromLast > 4;
+      const isCardInFrame = mean >= 25 && mean <= 240 && stdDev >= 12;
 
-        if (isNewCardOrMotion) {
+      // -------------------------------------------------------------
+      // STATE 1: WAITING_FOR_REMOVAL (Previous card was scanned)
+      // Strictly enforces that the old card MUST leave the reticle frame first.
+      // -------------------------------------------------------------
+      if (cardSwapStateRef.current === 'WAITING_FOR_REMOVAL') {
+        // Card is considered removed if reticle goes empty (!isCardInFrame)
+        // or significant motion/visual difference indicates the card left the reticle.
+        const cardIsOut = !isCardInFrame || (motion > 7.0 && (diffFromLast > 10 || stdDev < 15));
+
+        if (cardIsOut) {
           hasSeenCardRemovalRef.current = true;
-          cardSwapStateRef.current = 'SETTLING';
+          cardSwapStateRef.current = 'WAITING_FOR_NEW_CARD';
           steadyCountRef.current = 0;
           setIsCrosshairLocked(false);
-          setSwapGuidanceText('New card detected — hold steady');
+          setSwapGuidanceText('Card removed — place next card in crosshairs');
         } else {
-          setSwapGuidanceText('Card added! Place next card in crosshairs...');
+          setSwapGuidanceText('Card added! Remove card to scan next...');
         }
         return;
       }
 
       // -------------------------------------------------------------
-      // STATE 2: SETTLING (New card is arriving into frame)
-      // Lock on when steady and verify it's a new card or new placement
+      // STATE 2: WAITING_FOR_NEW_CARD (Old card is out, waiting for new card)
+      // Detects when a new card enters the crosshairs frame.
       // -------------------------------------------------------------
-      if (!hasSeenCardRemovalRef.current) {
-        cardSwapStateRef.current = 'WAITING_FOR_SWAP';
-        setSwapGuidanceText('Card added! Place next card in crosshairs...');
+      if (cardSwapStateRef.current === 'WAITING_FOR_NEW_CARD' || !hasSeenCardRemovalRef.current) {
+        if (isCardInFrame) {
+          cardSwapStateRef.current = 'SETTLING';
+          steadyCountRef.current = 0;
+          setIsCrosshairLocked(false);
+          setSwapGuidanceText('New card detected — hold steady...');
+        } else {
+          cardSwapStateRef.current = 'WAITING_FOR_NEW_CARD';
+          setSwapGuidanceText('Position next card in crosshairs');
+        }
         return;
       }
 
-      const isCardInFrame = mean >= 30 && mean <= 240 && stdDev >= 12;
+      // -------------------------------------------------------------
+      // STATE 3: SETTLING (New card is in frame, waiting for low motion)
+      // Lock on and trigger scan when card is steady.
+      // -------------------------------------------------------------
       if (!isCardInFrame) {
+        // Card was pulled back out before settling
+        cardSwapStateRef.current = 'WAITING_FOR_NEW_CARD';
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Position card in crosshairs');
         return;
       }
 
-      // Enforce minimum time interval between scans (~1.2s)
+      // Enforce minimum time interval between scans (~1.0s)
       const timeSinceLastScan = Date.now() - lastScanTimestampRef.current;
-      if (timeSinceLastScan < 1200) {
+      if (timeSinceLastScan < 1000) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Ready for next card...');
         return;
       }
 
-      // If current frame visual is identical to last scan and no motion occurred
-      if (diffFromLast < 4 && motion < 3 && timeSinceLastScan < 2500) {
-        steadyCountRef.current = 0;
-        setIsCrosshairLocked(false);
-        setSwapGuidanceText('Same card detected — place new card...');
-        return;
-      }
-
-      // Require low motion (motion < 8) for lock-on
-      if (motion > 8) {
+      // Require low motion (motion < 7) for lock-on
+      if (motion > 7) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Hold card steady in crosshairs...');
@@ -902,7 +906,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           hasSeenCardRemovalRef.current = false;
           lastScannedLumaRef.current = currLuma;
           lastScanTimestampRef.current = Date.now();
-          cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+          cardSwapStateRef.current = 'WAITING_FOR_REMOVAL';
           handleCaptureFrame();
         }
       }
@@ -941,7 +945,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Open Version & Finish Editor for a scanned batch card
   const handleOpenVersionEditor = async (item: BatchScannedCard) => {
     // Reset swap state so scanner requires card removal when editor closes
-    cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+    cardSwapStateRef.current = 'WAITING_FOR_REMOVAL';
     hasSeenCardRemovalRef.current = false;
     lastScanTimestampRef.current = Date.now();
     steadyCountRef.current = 0;
@@ -956,7 +960,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
     try {
       const cleanName = item.card.name.split(' // ')[0].trim();
-      const prints = await fetchCardPrints(cleanName);
+      const rawPrints = await fetchCardPrints(cleanName);
+      const prints = filterPaperCardsOnly(rawPrints);
       if (Array.isArray(prints) && prints.length > 0) {
         const selectedId = item.card.id;
         const selectedIndex = prints.findIndex((p) => p.id === selectedId);
@@ -982,7 +987,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Adjust quantity of a previously scanned card in the batch
   const handleUpdateBatchCardQuantity = async (item: BatchScannedCard, delta: number) => {
     // Re-arm swap requirement so stepper clicks don't re-trigger scanning
-    cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+    cardSwapStateRef.current = 'WAITING_FOR_REMOVAL';
     hasSeenCardRemovalRef.current = false;
     lastScanTimestampRef.current = Date.now();
     steadyCountRef.current = 0;
@@ -1117,7 +1122,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     setIsSearchingManual(true);
     unlockAudio();
     try {
-      const prints = await fetchCardPrints(name);
+      const rawPrints = await fetchCardPrints(name);
+      const prints = filterPaperCardsOnly(rawPrints);
       if (prints.length > 0) {
         setManualPrints(prints);
         setSelectedManualVersion(prints[0]);
@@ -2449,22 +2455,70 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                   </div>
                 </div>
 
-                {/* Primary Add Button */}
-                <button
-                  type="button"
-                  onClick={handleConfirmAddManualCard}
-                  disabled={isSearchingManual}
-                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
-                >
-                  {isSearchingManual ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Plus className="w-4 h-4" />
-                      <span>Add Selected Version to {currentBinder?.name || 'Binder'}</span>
-                    </>
-                  )}
-                </button>
+                {/* Inline Success Notice */}
+                {manualAddSuccess && (
+                  <div className="p-3 bg-emerald-950/90 border border-emerald-500/60 rounded-xl flex items-center justify-between gap-2 animate-in fade-in">
+                    <div className="flex items-center gap-2 text-xs text-emerald-200 font-semibold min-w-0">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="truncate">{manualAddSuccess}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setManualAddSuccess(null)}
+                      className="text-xs text-emerald-400 hover:text-white font-bold underline shrink-0 cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleConfirmAddManualCard}
+                    disabled={isSearchingManual}
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                  >
+                    {isSearchingManual ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Add Selected Version to {currentBinder?.name || 'Binder'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualAddSuccess(null);
+                        // User can now pick another printing from the version dropdown above!
+                      }}
+                      className="py-2 px-3 rounded-xl bg-violet-900/40 hover:bg-violet-900/70 border border-violet-700/50 text-violet-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                      title="Select another printing/set from the dropdown above to add"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-violet-300" />
+                      <span>Add Another Version</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualPrints(null);
+                        setSelectedManualVersion(null);
+                        setManualAddSuccess(null);
+                        setManualQuery('');
+                      }}
+                      className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Search className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Search Different Card</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               /* Search Query View */
