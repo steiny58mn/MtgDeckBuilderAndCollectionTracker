@@ -695,15 +695,17 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
     const h = img.naturalHeight || img.height;
     if (!w || !h) return null;
 
-    // 1. High-contrast Footer Crop (bottom ~16% of modern MTG card)
+    // 1. High-contrast Footer Crop (bottom ~16% of modern MTG card, upscaled 2x for OCR clarity)
     const footerCanvas = document.createElement('canvas');
-    const footerH = Math.max(36, Math.floor(h * 0.16));
+    const footerH = Math.max(40, Math.floor(h * 0.16));
     const footerY = Math.max(0, h - footerH);
-    footerCanvas.width = w;
-    footerCanvas.height = footerH;
+    footerCanvas.width = w * 2;
+    footerCanvas.height = footerH * 2;
     const fCtx = footerCanvas.getContext('2d');
     if (fCtx) {
-      fCtx.drawImage(img, 0, footerY, w, footerH, 0, 0, w, footerH);
+      fCtx.imageSmoothingEnabled = true;
+      fCtx.imageSmoothingQuality = 'high';
+      fCtx.drawImage(img, 0, footerY, w, footerH, 0, 0, w * 2, footerH * 2);
 
       // Pass 1A: Raw footer (lets Tesseract's built-in adaptive Otsu/Sauvola binarizer do its work)
       const rawFooterDataUrl = footerCanvas.toDataURL('image/png');
@@ -714,7 +716,7 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
 
       // Pass 1B: If raw failed, try high-contrast binarization
       if (!parsedFooter) {
-        const imgData = fCtx.getImageData(0, 0, w, footerH);
+        const imgData = fCtx.getImageData(0, 0, w * 2, footerH * 2);
         const d = imgData.data;
         for (let i = 0; i < d.length; i += 4) {
           const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
@@ -750,14 +752,19 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
       }
     }
 
-    // 2. Title Crop (top ~20% of card)
+    // 2. Focused Title Banner Crop (top 3% to 15% of card, avoiding mana cost on right, upscaled 2x)
     const titleCanvas = document.createElement('canvas');
-    const titleH = Math.max(45, Math.floor(h * 0.20));
-    titleCanvas.width = w;
-    titleCanvas.height = titleH;
+    const titleY = Math.max(0, Math.floor(h * 0.025));
+    const titleH = Math.max(35, Math.floor(h * 0.13));
+    const titleX = Math.max(0, Math.floor(w * 0.04));
+    const titleW = Math.max(50, Math.floor(w * 0.76)); // cuts out right mana symbols
+    titleCanvas.width = titleW * 2;
+    titleCanvas.height = titleH * 2;
     const tCtx = titleCanvas.getContext('2d');
     if (tCtx) {
-      tCtx.drawImage(img, 0, 0, w, titleH, 0, 0, w, titleH);
+      tCtx.imageSmoothingEnabled = true;
+      tCtx.imageSmoothingQuality = 'high';
+      tCtx.drawImage(img, titleX, titleY, titleW, titleH, 0, 0, titleW * 2, titleH * 2);
       const titleDataUrl = titleCanvas.toDataURL('image/png');
       const titleRes = await worker.recognize(titleDataUrl);
       const titleLines = (titleRes?.data?.text || '')
@@ -807,6 +814,7 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
 /**
  * Resiliently extracts MTG card identification fields from raw AI output.
  * Handles strict JSON, markdown codeblocks, trailing commas, single quotes,
+ * unquoted keys, bold markdown labels (**Card Name:**), natural language,
  * and key variations across different Gemini models.
  */
 export function parseCardAiResponse(rawResponseText: string): {
@@ -829,9 +837,12 @@ export function parseCardAiResponse(rawResponseText: string): {
   const firstBrace = cleanFences.indexOf('{');
   const lastBrace = cleanFences.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    const candidateJson = cleanFences
+    let candidateJson = cleanFences
       .substring(firstBrace, lastBrace + 1)
-      .replace(/,\s*([\}\]])/g, '$1'); // strip trailing commas
+      .replace(/,\s*([\}\]])/g, '$1') // strip trailing commas
+      .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '$1'); // strip JS comments
+
+    // Attempt direct parse
     try {
       const parsed = JSON.parse(candidateJson);
       const name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
@@ -849,43 +860,82 @@ export function parseCardAiResponse(rawResponseText: string): {
         };
       }
     } catch (_err) {
-      // Fall through to regex extraction
+      // Try quoting unquoted keys: e.g. { card_name: "Sol Ring" }
+      try {
+        const quotedKeysJson = candidateJson
+          .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+          .replace(/'/g, '"');
+        const parsed = JSON.parse(quotedKeysJson);
+        const name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
+        const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim();
+        const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim();
+        const foil = Boolean(parsed.is_foil ?? parsed.isFoil ?? parsed.foil);
+        const conf = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
+        if (name || set) {
+          return {
+            card_name: name,
+            set_code: set,
+            collector_number: num,
+            is_foil: foil,
+            confidence: conf,
+          };
+        }
+      } catch (_err2) {
+        // Fall through to regex extraction
+      }
     }
   }
 
-  // 3. Resilient regex extraction across the text (handling quotes, unquoted keys, line-based output)
+  // 3. Resilient regex extraction across text (handles **, quotes, unquoted keys, line-based output)
+  // Matches: **Card Name:** Sol Ring, "card_name": "Sol Ring", - Card Name: Sol Ring, Name = Sol Ring
   const nameMatch =
-    rawResponseText.match(/"?(?:card_name|cardName|card_title|cardTitle|name|title)"?\s*[:=]\s*["']?([^"',\n\r\}]+)["']?/i) ||
-    rawResponseText.match(/(?:Card Name|Card|Title)\s*[:=]\s*([^\n\r,\}]+)/i);
+    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:card[_\s-]?name|card[_\s-]?title|name|card|title)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([^\r\n"',\}\*]+)/i);
 
   const setMatch =
-    rawResponseText.match(/"?(?:set_code|setCode|set|expansion)"?\s*[:=]\s*["']?([a-zA-Z0-9]{3,5})["']?/i) ||
-    rawResponseText.match(/(?:Set Code|Set|Expansion)\s*[:=]\s*([a-zA-Z0-9]{3,5})/i);
+    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:set[_\s-]?code|set|expansion)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([a-zA-Z0-9]{3,5})/i);
 
   const numMatch =
-    rawResponseText.match(/"?(?:collector_number|collectorNumber|number|collector_no)"?\s*[:=]\s*["']?([0-9]{1,4}[a-zA-Z]?)["']?/i) ||
-    rawResponseText.match(/(?:Collector Number|Number|#)\s*[:=]\s*([0-9]{1,4}[a-zA-Z]?)/i);
+    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:collector[_\s-]?number|collectorNumber|number|collector[_\s-]?no|card[_\s-]?no|#)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([0-9]{1,4}[a-zA-Z]?)/i);
 
   const foilMatch =
-    rawResponseText.match(/"?(?:is_foil|foil)"?\s*[:=]\s*["']?(true|false|yes|no)["']?/i) ||
-    rawResponseText.match(/(?:Foil)\s*[:=]\s*(true|false|yes|no)/i);
+    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:is[_\s-]?foil|foil|finish)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?(true|false|yes|no|foil|non-foil|regular)/i);
 
   if (nameMatch && nameMatch[1]) {
     const rawFoil = foilMatch ? foilMatch[1].toLowerCase() : 'false';
-    return {
-      card_name: nameMatch[1].trim(),
-      set_code: setMatch ? setMatch[1].trim() : '',
-      collector_number: numMatch ? numMatch[1].trim() : '',
-      is_foil: rawFoil === 'true' || rawFoil === 'yes',
-      confidence: 'medium',
-    };
+    const cleanName = nameMatch[1].replace(/^[*\s"']+|[*\s"']+$/g, '').trim();
+    if (cleanName.length >= 2) {
+      return {
+        card_name: cleanName,
+        set_code: setMatch ? setMatch[1].trim() : '',
+        collector_number: numMatch ? numMatch[1].trim() : '',
+        is_foil: rawFoil === 'true' || rawFoil === 'yes' || rawFoil === 'foil',
+        confidence: 'medium',
+      };
+    }
   }
 
-  // 4. Last resort: scan lines for any quoted card title
+  // 4. Natural language sentence extraction: "The card is Sol Ring", "Identified card: Sol Ring", "shows a Lightning Bolt"
+  const nlMatch =
+    rawResponseText.match(/(?:card(?:\s+is|\s+identified\s+as|\s+shown\s+is|\s+name\s+is)?[:\s]+)(?:["']([^"'\n\r]+)["']|([A-Z][A-Za-z0-9',\-\s]{2,35}))/i) ||
+    rawResponseText.match(/(?:identified|recognize[d]?|shows)\s+(?:a\s+|an\s+)?["']?([A-Z][a-zA-Z0-9',\s\-]{2,35}?)["']?\s+(?:from|\(|\-|\.)/i);
+  if (nlMatch) {
+    const foundName = (nlMatch[1] || nlMatch[2] || '').trim();
+    if (foundName && foundName.length >= 2) {
+      return {
+        card_name: foundName,
+        set_code: setMatch ? setMatch[1].trim() : '',
+        collector_number: numMatch ? numMatch[1].trim() : '',
+        is_foil: false,
+        confidence: 'medium',
+      };
+    }
+  }
+
+  // 5. Scan lines for any quoted card title or clean title-like line
   const lines = rawResponseText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
-    const quoted = line.match(/"([^"]{3,40})"/);
-    if (quoted && !/^(json|card_name|set_code|collector_number|is_foil|confidence)$/i.test(quoted[1])) {
+    const quoted = line.match(/"([^"]{3,45})"/);
+    if (quoted && !/^(json|card_name|set_code|collector_number|is_foil|confidence|true|false)$/i.test(quoted[1])) {
       return {
         card_name: quoted[1].trim(),
         set_code: setMatch ? setMatch[1].trim() : '',
@@ -896,7 +946,28 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
-  throw new Error('Could not parse card identification details from AI response');
+  // 6. Last resort: first non-empty line between 3 and 40 characters that doesn't look like code or boilerplate
+  for (const line of lines) {
+    const stripped = line.replace(/^[*\-#\s"']+|[*\-#\s"']+$/g, '').trim();
+    if (
+      stripped.length >= 3 &&
+      stripped.length <= 40 &&
+      !/^[{}[\]\/\\]/.test(stripped) &&
+      !/^(here is|i have|analyzing|this image|the card|error|json)/i.test(stripped)
+    ) {
+      return {
+        card_name: stripped,
+        set_code: setMatch ? setMatch[1].trim() : '',
+        collector_number: numMatch ? numMatch[1].trim() : '',
+        is_foil: false,
+        confidence: 'low',
+      };
+    }
+  }
+
+  console.warn('[CardScanner] Raw unparseable AI response:', rawResponseText);
+  const snippet = rawResponseText.slice(0, 90).replace(/[\r\n]+/g, ' ').trim();
+  throw new Error(`Could not parse card identification details from AI response: "${snippet || 'Empty output'}"`);
 }
 
 /**

@@ -373,16 +373,29 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setFailureCount((c) => c + 1);
 
       let errorDetail = err?.message || 'Could not recognize card. Ensure card is clear, centered, and well-lit.';
+      let errorTitle = 'Scan Failed';
+
       if (errorDetail.includes('no longer available') || errorDetail.includes('gemini-2.0')) {
         setStoredGeminiModel(DEFAULT_GEMINI_MODEL);
         setSelectedModel(DEFAULT_GEMINI_MODEL);
         errorDetail = 'Updated scanner to Gemini 3.8 Flash. Please retry your scan.';
+      } else if (
+        errorDetail.includes('quota') ||
+        errorDetail.includes('429') ||
+        errorDetail.includes('RESOURCE_EXHAUSTED') ||
+        errorDetail.includes('free-tier') ||
+        errorDetail.includes('free tier')
+      ) {
+        errorTitle = scanEngine === 'hybrid' ? 'Hybrid AI Fallback Quota Limit' : 'Gemini Rate Limit';
+        if (scanEngine === 'hybrid') {
+          errorDetail = 'Fast Local OCR could not read this card, and the Gemini fallback hit its free-tier rate limit (15 scans/min). Tap "Switch to Local OCR Only" below for unlimited 100% free scans, or ensure the card title and footer are well-lit.';
+        }
       }
 
-      // Quick fade-out failure notification
+      // Quick failure notification
       setQuickNotice({
         type: 'failure',
-        title: 'Scan Failed',
+        title: errorTitle,
         detail: errorDetail,
         timestamp: Date.now(),
       });
@@ -758,7 +771,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         {/* Top Row: Binder + Hybrid Engine Badge + Done Button */}
         <div className="flex items-center justify-between gap-2">
           {/* Target Binder Selector */}
-          <div className="flex items-center gap-2 min-w-0 flex-1 max-w-[45%] sm:max-w-none">
+          <div className="flex items-center gap-2 min-w-0 max-w-[38%] sm:max-w-none">
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
               <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
@@ -771,7 +784,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 <select
                   value={selectedBinderId}
                   onChange={(e) => setSelectedBinderId(e.target.value)}
-                  className="bg-transparent text-slate-200 font-semibold hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[110px] sm:max-w-[170px]"
+                  className="bg-transparent text-slate-200 font-semibold hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[95px] sm:max-w-[170px]"
                   title="Target Binder"
                 >
                   {binders.map((b) => (
@@ -805,8 +818,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             </span>
           </div>
 
-          {/* Mobile Center & Desktop Right: Prominent Hybrid Mode Badge */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Prominent Center Hybrid Mode Badge (100% visible on mobile and desktop) */}
+          <div className="flex items-center justify-center shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -821,10 +834,10 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               }}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer shadow-md active:scale-95 ${
                 scanEngine === 'hybrid'
-                  ? 'bg-gradient-to-r from-violet-900/90 to-fuchsia-900/90 border-violet-400/80 text-violet-100 shadow-violet-500/20 ring-1 ring-violet-500/50'
+                  ? 'bg-gradient-to-r from-violet-900/95 to-fuchsia-900/95 border-violet-400 text-violet-100 shadow-violet-500/30 ring-1 ring-violet-400/60'
                   : scanEngine === 'ocr_only'
-                  ? 'bg-emerald-950/90 border-emerald-400/80 text-emerald-100 shadow-emerald-500/20 ring-1 ring-emerald-500/50'
-                  : 'bg-indigo-950/90 border-indigo-400/80 text-indigo-100 shadow-indigo-500/20 ring-1 ring-indigo-500/50'
+                  ? 'bg-emerald-950/95 border-emerald-400 text-emerald-100 shadow-emerald-500/30 ring-1 ring-emerald-400/60'
+                  : 'bg-indigo-950/95 border-indigo-400 text-indigo-100 shadow-indigo-500/30 ring-1 ring-indigo-400/60'
               }`}
               title={`Active Scan Engine: ${
                 scanEngine === 'hybrid'
@@ -837,11 +850,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />}
               {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
               {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
-              <span className="font-extrabold text-[11.5px] tracking-wide">
+              <span className="font-extrabold text-xs tracking-wide">
                 {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'OCR Only' : 'Gemini'}
               </span>
             </button>
+          </div>
 
+          {/* Right Action Tools & Done Button */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Desktop API Key Config */}
             <button
               type="button"

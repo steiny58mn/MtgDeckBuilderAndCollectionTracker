@@ -13,3 +13,5 @@ coverage/
 *.db-journal
 *.db-wal
 *.db-shm
+bun.lock
+bun.lockb
