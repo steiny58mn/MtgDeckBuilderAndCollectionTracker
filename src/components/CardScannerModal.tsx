@@ -175,13 +175,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [isLoadingEditPrints, setIsLoadingEditPrints] = useState<boolean>(false);
   const [selectedEditCard, setSelectedEditCard] = useState<ScryfallCard | null>(null);
   const [selectedEditFoil, setSelectedEditFoil] = useState<boolean>(false);
+  const [selectedEditQuantity, setSelectedEditQuantity] = useState<number>(1);
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Auto fade-out timer for quick success/failure notification toast
   useEffect(() => {
     if (!quickNotice) return;
     if (quickNotice.type === 'failure') return;
-    const duration = 2400;
+    const duration = 4000;
     const timer = setTimeout(() => {
       setQuickNotice(null);
     }, duration);
@@ -622,6 +623,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     setEditingBatchItem(item);
     setSelectedEditCard(item.card);
     setSelectedEditFoil(item.isFoil);
+    setSelectedEditQuantity(item.quantity || 1);
     setEditPrintsList([]);
     setIsLoadingEditPrints(true);
 
@@ -638,28 +640,90 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
   };
 
-  // Save updated version / finish to binder
+  // Adjust quantity of a previously scanned card in the batch
+  const handleUpdateBatchCardQuantity = async (item: BatchScannedCard, delta: number) => {
+    const currentQty = item.quantity || 1;
+    const newQty = currentQty + delta;
+
+    if (newQty <= 0) {
+      await handleDeleteBatchCard(item);
+      return;
+    }
+
+    try {
+      if (delta > 0) {
+        await onAddCardToBinder(item.card, delta, item.isFoil, selectedBinderId);
+        setSuccessCount((c) => c + delta);
+      } else if (delta < 0 && onDeleteCardFromBinder) {
+        await onDeleteCardFromBinder(item.card, item.isFoil, Math.abs(delta), selectedBinderId);
+        setSuccessCount((c) => Math.max(0, c - Math.abs(delta)));
+      }
+
+      // Update in local batch cards state
+      setScannedBatchCards((prev) =>
+        prev.map((b) => (b.id === item.id ? { ...b, quantity: newQty } : b))
+      );
+
+      // Refresh toast notification with updated quantity
+      const scanNames = getCardNames(item.card);
+      setQuickNotice({
+        type: 'success',
+        title: `Added ${newQty}x ${scanNames.actualName}`,
+        detail: `${newQty} copies in ${currentBinder?.name || 'Binder'} · ${item.card.set?.toUpperCase()} #${item.card.collector_number}`,
+        imageUrl: getCardImageUrl(item.card, 'small'),
+        isFoil: item.isFoil,
+        timestamp: Date.now(),
+      });
+
+      playScanSuccessSound();
+      try {
+        navigator.vibrate?.(30);
+      } catch {}
+    } catch (err) {
+      console.error('[CardScanner] Error updating batch card quantity:', err);
+    }
+  };
+
+  // Save updated version / finish / quantity to binder
   const handleSaveCardEdit = async () => {
     if (!editingBatchItem || !selectedEditCard) return;
     setIsSavingEdit(true);
 
     try {
-      if (onUpdateCardInBinder) {
+      const oldQty = editingBatchItem.quantity || 1;
+      const targetQty = selectedEditQuantity || 1;
+
+      // 1. If card or foil changed, update through onUpdateCardInBinder
+      const cardChanged = selectedEditCard.id !== editingBatchItem.card.id;
+      const foilChanged = selectedEditFoil !== editingBatchItem.isFoil;
+
+      if ((cardChanged || foilChanged) && onUpdateCardInBinder) {
         await onUpdateCardInBinder(
           editingBatchItem.card,
           editingBatchItem.isFoil,
           selectedEditCard,
           selectedEditFoil,
-          editingBatchItem.quantity,
+          oldQty,
           selectedBinderId
         );
+      }
+
+      // 2. Adjust quantity delta if changed
+      if (targetQty > oldQty) {
+        const delta = targetQty - oldQty;
+        await onAddCardToBinder(selectedEditCard, delta, selectedEditFoil, selectedBinderId);
+        setSuccessCount((c) => c + delta);
+      } else if (targetQty < oldQty && onDeleteCardFromBinder) {
+        const delta = oldQty - targetQty;
+        await onDeleteCardFromBinder(selectedEditCard, selectedEditFoil, delta, selectedBinderId);
+        setSuccessCount((c) => Math.max(0, c - delta));
       }
 
       // Update in local batch state
       setScannedBatchCards((prev) =>
         prev.map((item) =>
           item.id === editingBatchItem.id
-            ? { ...item, card: selectedEditCard, isFoil: selectedEditFoil }
+            ? { ...item, card: selectedEditCard, isFoil: selectedEditFoil, quantity: targetQty }
             : item
         )
       );
@@ -668,7 +732,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       // Show quick notification
       setQuickNotice({
         type: 'success',
-        title: `Updated: ${editNames.actualName}`,
+        title: `Updated: ${targetQty}x ${editNames.actualName}`,
         detail: `${editNames.hasAlternateName && editNames.subtitle ? `${editNames.subtitle} · ` : ''}${selectedEditCard.set?.toUpperCase()} #${selectedEditCard.collector_number} · ${selectedEditFoil ? 'Foil' : 'Regular'}`,
         imageUrl: getCardImageUrl(selectedEditCard, 'small'),
         isFoil: selectedEditFoil,
@@ -1004,6 +1068,11 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               }`}
             >
               <span>{isCrosshairLocked ? 'CARD LOCKED IN' : 'SET & # ↓'}</span>
+              {cardQuantity > 1 && (
+                <span className="ml-1 pl-1 border-l border-white/30 font-bold text-amber-300">
+                  +{cardQuantity}x copies
+                </span>
+              )}
             </div>
             <div
               className={`w-7 h-7 border-b-3 border-r-3 rounded-br-lg shadow-sm transition-colors duration-200 ${
@@ -1155,23 +1224,66 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     </div>
                   )}
                   {quickNotice.type === 'success' && scannedBatchCards.length > 0 && (
-                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline inline-block cursor-pointer"
-                      >
-                        Change version or finish &rarr;
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBatchCard(scannedBatchCards[0])}
-                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold inline-flex items-center gap-1 cursor-pointer ml-auto"
-                        title="Delete this card if scan was incorrect"
-                      >
-                        <Trash2 className="w-2.5 h-2.5" />
-                        <span>Delete card</span>
-                      </button>
+                    <div className="space-y-1.5 mt-2 pt-1.5 border-t border-emerald-500/20">
+                      {/* Quantity Stepper for just-scanned card */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">
+                            Copies:
+                          </span>
+                          <div className="inline-flex items-center bg-slate-900/90 rounded-md border border-emerald-500/40 p-0.5 shadow-xs">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], -1)}
+                              className="w-5 h-5 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95 transition-transform"
+                              title="Decrease copies (-1)"
+                            >
+                              -
+                            </button>
+                            <span className="px-2 font-mono font-extrabold text-xs text-white">
+                              {scannedBatchCards[0].quantity}x
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], 1)}
+                              className="w-5 h-5 rounded bg-emerald-700/80 hover:bg-emerald-600 text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95 transition-transform shadow-xs"
+                              title="Add another copy (+1)"
+                            >
+                              +
+                            </button>
+                          </div>
+                          {/* Quick Playset Button: bumps from 1x directly to 4x */}
+                          {scannedBatchCards[0].quantity === 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], 3)}
+                              className="px-2 py-0.5 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-600/50 text-[10px] font-bold cursor-pointer transition-colors active:scale-95"
+                              title="Make it 4 copies (Full Playset) without scanning again"
+                            >
+                              +3 (Playset)
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 ml-auto">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
+                            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline cursor-pointer"
+                          >
+                            Change version &rarr;
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBatchCard(scannedBatchCards[0])}
+                            className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                            title="Delete this card if scan was incorrect"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                   {quickNotice.type === 'failure' && (
@@ -1306,8 +1418,13 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                       className="w-full h-full object-cover rounded shadow-xs group-hover:scale-105 transition-transform"
                     />
                     {item.isFoil && (
-                      <div className="absolute top-1 left-1 bg-amber-400/90 text-slate-950 p-0.5 rounded-full shadow">
+                      <div className="absolute top-1 left-1 bg-amber-400/90 text-slate-950 p-0.5 rounded-full shadow z-10">
                         <Sparkles className="w-2.5 h-2.5" />
+                      </div>
+                    )}
+                    {(item.quantity || 1) > 1 && (
+                      <div className="absolute top-1 left-1 bg-emerald-600 text-white text-[9.5px] font-extrabold px-1.5 py-0.2 rounded-full shadow-md border border-emerald-400/80 z-10 font-mono">
+                        {item.quantity}x
                       </div>
                     )}
                     {/* Quick Delete Button */}
@@ -1351,8 +1468,36 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     <span>#{item.card.collector_number}</span>
                     {item.isFoil && <Sparkles className="w-2.5 h-2.5 text-amber-300" />}
                   </div>
+
+                  {/* Quantity Stepper on Card */}
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center justify-between w-full mt-1.5 px-1 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px]"
+                    title="Change number of copies in binder"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateBatchCardQuantity(item, -1)}
+                      className="w-4 h-4 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center font-bold cursor-pointer active:scale-90"
+                      title="Decrease copies (-1)"
+                    >
+                      -
+                    </button>
+                    <span className="font-extrabold text-white font-mono px-0.5">
+                      {item.quantity || 1}x
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateBatchCardQuantity(item, 1)}
+                      className="w-4 h-4 rounded bg-emerald-700/80 hover:bg-emerald-600 text-white flex items-center justify-center font-bold cursor-pointer shadow-2xs active:scale-90"
+                      title="Increase copies (+1)"
+                    >
+                      +
+                    </button>
+                  </div>
+
                   {item.scanEngine && (
-                    <span className={`text-[8.5px] font-semibold px-1.5 py-0.2 rounded-full mt-1 inline-flex items-center gap-0.5 ${
+                    <span className={`text-[8px] font-semibold px-1.5 py-0.2 rounded-full mt-1 inline-flex items-center gap-0.5 ${
                       item.scanEngine === 'ocr'
                         ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-600/40'
                         : 'bg-violet-950/80 text-violet-300 border border-violet-600/40'
@@ -1421,24 +1566,61 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               </button>
             </div>
 
-            {/* Quantity Stepper */}
-            <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-lg border border-slate-700/60">
-              <span className="text-[11px] text-slate-400">Qty:</span>
+            {/* Quantity Stepper & Quick Playset Presets */}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border transition-all ${
+              cardQuantity > 1
+                ? 'bg-emerald-950/70 border-emerald-500/80 text-emerald-200 shadow-sm'
+                : 'bg-slate-800/80 border-slate-700/60 text-slate-300'
+            }`}>
+              <span className="text-[11px] font-bold text-slate-400">Qty:</span>
               <button
                 type="button"
                 onClick={() => setCardQuantity((q) => Math.max(1, q - 1))}
-                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer active:scale-90 transition-transform"
+                title="Decrease copies per scan"
               >
                 -
               </button>
-              <span className="font-bold text-white w-4 text-center">{cardQuantity}</span>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={cardQuantity}
+                onChange={(e) => setCardQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                className="font-mono font-extrabold text-white w-6 text-center bg-transparent focus:outline-none focus:bg-slate-700/60 rounded text-xs"
+                title="Direct quantity input (number of copies added per scan)"
+              />
               <button
                 type="button"
                 onClick={() => setCardQuantity((q) => q + 1)}
-                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+                className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer active:scale-90 transition-transform"
+                title="Increase copies per scan"
               >
                 +
               </button>
+              {/* Quick playset buttons */}
+              <div className="flex items-center gap-1 pl-1 border-l border-slate-700/80">
+                <button
+                  type="button"
+                  onClick={() => setCardQuantity(1)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                    cardQuantity === 1 ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="1 copy per card scan"
+                >
+                  1x
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCardQuantity(4)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                    cardQuantity === 4 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="4 copies (Playset per card scan)"
+                >
+                  4x
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1637,6 +1819,63 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                     <span>Foil ✨</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Quantity / Copies in Binder */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Quantity / Copies in Binder
+                  </label>
+                  <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                    Total: {selectedEditQuantity} copies
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex-wrap">
+                  <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEditQuantity((q) => Math.max(1, q - 1))}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white flex items-center justify-center font-bold text-sm cursor-pointer active:scale-95 transition-transform"
+                      title="Decrease copies (-1)"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={selectedEditQuantity}
+                      onChange={(e) => setSelectedEditQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-12 text-center bg-transparent font-extrabold text-sm text-white focus:outline-none font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEditQuantity((q) => q + 1)}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white flex items-center justify-center font-bold text-sm cursor-pointer active:scale-95 transition-transform"
+                      title="Increase copies (+1)"
+                    >
+                      +
+                    </button>
+                  </div>
+                  {/* Quick preset buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[1, 2, 3, 4, 8].map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => setSelectedEditQuantity(q)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                          selectedEditQuantity === q
+                            ? 'bg-emerald-600 text-white border-emerald-400 shadow-sm'
+                            : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {q === 4 ? '4x (Playset)' : `${q}x`}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
