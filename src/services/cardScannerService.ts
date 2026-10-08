@@ -386,6 +386,80 @@ export async function lookupExactScryfallCard(
       } catch (err) {
         console.warn('[CardScanner] Fuzzy lookup fallback failed:', err);
       }
+
+      // 4. Normalized variations (remove brackets, showcase tags, split dual-face, clean subtitles)
+      const variations: string[] = [];
+      // Clean bracketed or parenthesized tags like "Sol Ring (Retro Frame)" -> "Sol Ring"
+      const noBrackets = cleanName.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+      if (noBrackets && noBrackets !== cleanName) variations.push(noBrackets);
+
+      // Clean dual-face card "Delver of Secrets // Insectile Aberration" -> "Delver of Secrets"
+      if (cleanName.includes('//')) {
+        const face1 = cleanName.split('//')[0].trim();
+        if (face1) variations.push(face1);
+      }
+
+      // Clean secondary subtitle after comma e.g. "Urza, Lord High Artificer" -> "Urza"
+      if (cleanName.includes(',')) {
+        const preComma = cleanName.split(',')[0].trim();
+        if (preComma.length >= 4) variations.push(preComma);
+      }
+
+      for (const variant of variations) {
+        if (!isValidCardName(variant)) continue;
+        try {
+          const varUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(variant)}`;
+          const varRes = await fetch(varUrl, { headers: { Accept: 'application/json' } });
+          if (varRes.ok) {
+            const varJson = await varRes.json();
+            if (varJson && varJson.id) {
+              return normalizeFrostpointCard(varJson);
+            }
+          }
+        } catch {}
+      }
+
+      // 5. Scryfall Autocomplete fallback (resolves minor OCR/AI typos like 1 wrong letter)
+      try {
+        const acQuery = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 20);
+        if (acQuery.length >= 3) {
+          const acUrl = `https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(acQuery)}`;
+          const acRes = await fetch(acUrl, { headers: { Accept: 'application/json' } });
+          if (acRes.ok) {
+            const acJson = await acRes.json();
+            if (Array.isArray(acJson?.data) && acJson.data.length > 0) {
+              const bestMatch = acJson.data[0];
+              const matchUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(bestMatch)}`;
+              const matchRes = await fetch(matchUrl, { headers: { Accept: 'application/json' } });
+              if (matchRes.ok) {
+                const matchJson = await matchRes.json();
+                if (matchJson && matchJson.id) {
+                  return normalizeFrostpointCard(matchJson);
+                }
+              }
+            }
+          }
+        }
+      } catch (acErr) {
+        console.warn('[CardScanner] Autocomplete fallback lookup failed:', acErr);
+      }
+
+      // 6. Broad keyword search fallback
+      try {
+        const searchWords = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+        if (searchWords.length >= 3) {
+          const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchWords)}&order=relevance`;
+          const sRes = await fetch(searchUrl, { headers: { Accept: 'application/json' } });
+          if (sRes.ok) {
+            const sJson = await sRes.json();
+            if (Array.isArray(sJson?.data) && sJson.data.length > 0) {
+              return normalizeFrostpointCard(sJson.data[0]);
+            }
+          }
+        }
+      } catch (sErr) {
+        console.warn('[CardScanner] Broad search fallback failed:', sErr);
+      }
     }
   }
 
@@ -1065,17 +1139,23 @@ export async function identifyCardFromImage(
     );
   }
 
-  const prompt = `You are a professional Magic: The Gathering (MTG) card scanner.
-Analyze THIS SPECIFIC MTG card photo with extreme precision. Do NOT guess or repeat a previous card.
-Examine the following specific card regions:
-1. Card Title (top): Extract the exact official English card name.
-2. Bottom-left footer: Modern MTG cards print "[collector_number]/[total] [rarity] [SET_CODE] \u2022 [LANG]" or "[collector_number] [SET_CODE]".
-   - Extract the 3 to 5 letter set code in UPPERCASE (e.g. "NEO", "OTJ", "MH3", "BLB", "BRO", "MKM", "ONE", "LTR", "DMU", "CLB", "2X2", "SLD", "FDN", etc.).
-   - Extract the exact collector number (e.g. "242", "045", "123a", "007", "301", "298").
-   - If older card without bottom-left footer, identify the expansion set from the expansion symbol on the middle-right line.
-3. Version Sensitivity: Cards often have multiple different printings and arts. Read the exact set code and collector number on THIS card.
-4. Foiling: Check if the card exhibits rainbow holographic sheen, metallic foil gloss, or a foil shooting-star stamp.
-5. Confidence: Return "high", "medium", or "low".
+  const prompt = `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
+Analyze this MTG card photo and identify the card.
+
+CARD RECOGNITION PRIORITIES:
+1. PRIMARY IDENTIFICATION (Card Artwork, Illustration, & Title):
+   - Identify the card primarily by its distinctive CARD ARTWORK illustration, card title banner, mana cost symbols, and card type!
+   - MTG card illustrations are iconic and unique. Even if the bottom text, set code, or collector number is blurry, cut off, obscured by a hand/sleeve, or if this is an older vintage card without bottom collector numbers, IDENTIFY THE CARD ACCURATELY BY ITS ARTWORK AND VISUAL DESIGN!
+   - Extract the exact official English card name.
+
+2. SECONDARY / OPTIONAL PRINTING DETAILS (Bottom-left footer):
+   - On modern cards, the bottom-left footer displays "[collector_number] [SET_CODE]" or "[collector_number]/[total] [rarity] [SET_CODE]".
+   - If clearly readable, provide "set_code" (e.g. "MH3", "OTJ", "BLB", "FDN", "ONE") and "collector_number".
+   - If the bottom of the card is cut off, blurry, or absent: Leave "set_code" and "collector_number" as empty strings (""). DO NOT invent numbers or abort—identifying the card name and artwork is the most important!
+
+3. FOILING:
+   - Check if the card exhibits rainbow holographic foil sheen or a shooting-star stamp.
+   - Return "confidence": "high", "medium", or "low".
 
 Respond ONLY with a valid, raw JSON object matching this exact schema:
 {

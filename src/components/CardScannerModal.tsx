@@ -143,6 +143,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     isFoil?: boolean;
     rawJson?: string;
     timestamp: number;
+    suggestions?: string[];
   } | null>(null);
 
   // Raw JSON Error Inspector Modal State
@@ -407,12 +408,26 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
       const rawJsonText = err?.rawResponseText || err?.rawJson || err?.rawOutput || (typeof err?.message === 'string' && (err.message.includes('{') || err.message.includes('[')) ? err.message : undefined);
 
+      // Attempt to retrieve candidate suggestions so the user has 1-tap recovery
+      let suggestions: string[] = [];
+      const quotedMatch = errorDetail.match(/"([^"]{2,35})"/);
+      const candidateQuery = quotedMatch ? quotedMatch[1] : '';
+      if (candidateQuery && candidateQuery.length >= 3) {
+        try {
+          const results = await getAutocomplete(candidateQuery.slice(0, 20));
+          if (Array.isArray(results) && results.length > 0) {
+            suggestions = results.slice(0, 3);
+          }
+        } catch {}
+      }
+
       // Quick failure notification
       setQuickNotice({
         type: 'failure',
         title: errorTitle,
         detail: errorDetail,
         rawJson: rawJsonText,
+        suggestions: suggestions.length > 0 ? suggestions : undefined,
         timestamp: Date.now(),
       });
 
@@ -422,7 +437,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
   };
 
-  // Capture current live video frame with tight reticle crop for ultra-fast OCR
+  // Capture current live video frame with generous framing so borders and text are never clipped
   const handleCaptureFrame = () => {
     if (!videoRef.current || isProcessing) return;
     try {
@@ -434,21 +449,21 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vh = video.videoHeight;
 
     if (vw && vh) {
-      // Ensure card aspect ratio (~1:1.4) fits safely within both width and height (portrait or landscape)
-      const maxAllowedH = Math.round(vh * 0.88);
-      const maxAllowedW = Math.round(vw * 0.75);
-      let cropW = maxAllowedW;
-      let cropH = Math.round(cropW * 1.4);
+      // Generous card crop with safety padding (~1:1.38 aspect ratio) so cards aren't clipped at edges
+      const maxAllowedH = Math.round(vh * 0.94);
+      const maxAllowedW = Math.round(vw * 0.88);
+      let cropW = Math.min(maxAllowedW, Math.round(maxAllowedH / 1.38));
+      let cropH = Math.min(maxAllowedH, Math.round(cropW * 1.38));
       if (cropH > maxAllowedH) {
         cropH = maxAllowedH;
-        cropW = Math.round(cropH / 1.4);
+        cropW = Math.round(cropH / 1.38);
       }
       const cropX = Math.max(0, Math.round((vw - cropW) / 2));
       const cropY = Math.max(0, Math.round((vh - cropH) / 2));
 
       const canvas = document.createElement('canvas');
-      const targetW = 720;
-      const targetH = 1008;
+      const targetW = 750;
+      const targetH = 1035;
       canvas.width = targetW;
       canvas.height = targetH;
       const ctx = canvas.getContext('2d');
@@ -1340,67 +1355,102 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     </div>
                   )}
                   {quickNotice.type === 'failure' && (
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const errorText = `${quickNotice.title}: ${quickNotice.detail || ''}`;
-                          navigator.clipboard.writeText(errorText);
-                          setHasCopiedError(true);
-                          setTimeout(() => setHasCopiedError(false), 2000);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 text-[10px] font-semibold transition-colors cursor-pointer border border-rose-700/50"
-                        title="Copy error message to clipboard"
-                      >
-                        {hasCopiedError ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-300">Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy Error</span>
-                          </>
+                    <div className="space-y-2 mt-2">
+                      {/* One-tap recovery suggestions */}
+                      {quickNotice.suggestions && quickNotice.suggestions.length > 0 && (
+                        <div className="pt-2 border-t border-rose-500/20">
+                          <div className="text-[10px] text-amber-300 font-bold mb-1.5 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-amber-400" />
+                            <span>Did you mean to scan:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {quickNotice.suggestions.map((sugName) => (
+                              <button
+                                key={sugName}
+                                type="button"
+                                onClick={() => handleSelectManualCard(sugName)}
+                                className="px-2.5 py-1 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/50 text-[10px] font-bold cursor-pointer transition-colors shadow-xs flex items-center gap-1 active:scale-95"
+                                title={`Add "${sugName}" directly`}
+                              >
+                                <span>+ Add</span>
+                                <span className="underline">{sugName}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setManualSearchOpen(true)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold transition-colors cursor-pointer border border-slate-700 shadow-xs"
+                          title="Search for card title manually"
+                        >
+                          <Search className="w-3 h-3 text-emerald-400" />
+                          <span>Search Manually</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const errorText = `${quickNotice.title}: ${quickNotice.detail || ''}`;
+                            navigator.clipboard.writeText(errorText);
+                            setHasCopiedError(true);
+                            setTimeout(() => setHasCopiedError(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 text-[10px] font-semibold transition-colors cursor-pointer border border-rose-700/50"
+                          title="Copy error message to clipboard"
+                        >
+                          {hasCopiedError ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-300">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy Error</span>
+                            </>
+                          )}
+                        </button>
+                        {(quickNotice.rawJson || (quickNotice.detail && (quickNotice.detail.includes('{') || quickNotice.detail.includes('[')))) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const jsonText = quickNotice.rawJson || quickNotice.detail || '';
+                              setInspectJsonData({
+                                title: `${quickNotice.title} - Raw JSON Response`,
+                                errorMessage: quickNotice.detail,
+                                rawJson: jsonText,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-950/80 hover:bg-amber-900 text-amber-200 text-[10px] font-bold transition-colors cursor-pointer border border-amber-600/60 shadow-xs"
+                            title="Display the entire raw JSON text that failed to parse"
+                          >
+                            <Code className="w-3 h-3 text-amber-400" />
+                            <span>View Entire JSON</span>
+                          </button>
                         )}
-                      </button>
-                      {(quickNotice.rawJson || (quickNotice.detail && (quickNotice.detail.includes('{') || quickNotice.detail.includes('[')))) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const jsonText = quickNotice.rawJson || quickNotice.detail || '';
-                            setInspectJsonData({
-                              title: `${quickNotice.title} - Raw JSON Response`,
-                              errorMessage: quickNotice.detail,
-                              rawJson: jsonText,
-                            });
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-950/80 hover:bg-amber-900 text-amber-200 text-[10px] font-bold transition-colors cursor-pointer border border-amber-600/60 shadow-xs"
-                          title="Display the entire raw JSON text that failed to parse"
-                        >
-                          <Code className="w-3 h-3 text-amber-400" />
-                          <span>View Entire JSON</span>
-                        </button>
-                      )}
-                      {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded') || quickNotice.detail?.includes('429') || quickNotice.detail?.includes('RESOURCE_EXHAUSTED') || quickNotice.detail?.includes('free-tier') || quickNotice.detail?.includes('free tier')) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScanEngine('ocr_only');
-                            setStoredScanEngine('ocr_only');
-                            setQuickNotice({
-                              type: 'success',
-                              title: 'Switched to Local OCR Only',
-                              detail: '100% on-device WebAssembly recognition. Zero Gemini API calls and unlimited free scans!',
-                              timestamp: Date.now(),
-                            });
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-sm"
-                        >
-                          <Cpu className="w-3 h-3" />
-                          <span>Switch to Local OCR Only</span>
-                        </button>
-                      )}
+                        {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded') || quickNotice.detail?.includes('429') || quickNotice.detail?.includes('RESOURCE_EXHAUSTED') || quickNotice.detail?.includes('free-tier') || quickNotice.detail?.includes('free tier')) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScanEngine('ocr_only');
+                              setStoredScanEngine('ocr_only');
+                              setQuickNotice({
+                                type: 'success',
+                                title: 'Switched to Local OCR Only',
+                                detail: '100% on-device WebAssembly recognition. Zero Gemini API calls and unlimited free scans!',
+                                timestamp: Date.now(),
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-sm"
+                          >
+                            <Cpu className="w-3 h-3" />
+                            <span>Switch to Local OCR Only</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
