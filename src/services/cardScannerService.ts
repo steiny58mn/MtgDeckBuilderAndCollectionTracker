@@ -1418,21 +1418,51 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
   const confidence = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
 
   if (!detectedName && (!detectedSet || !detectedNumber)) {
-    throw new Error('Could not identify a Magic card in this image. Please ensure the card is well-lit and clearly centered.');
+    const rawInfoParts: string[] = [];
+    if (parsed.card_name) rawInfoParts.push(`Name: "${parsed.card_name}"`);
+    if (parsed.set_code) rawInfoParts.push(`Set: ${parsed.set_code.toUpperCase()}`);
+    if (parsed.collector_number) rawInfoParts.push(`Collector #: ${parsed.collector_number}`);
+    
+    const rawSummary = rawInfoParts.length > 0 ? rawInfoParts.join(' · ') : 'None (Text blurred/unrecognized)';
+    const errMessage = `[Optical Scan Issue]\nCould not read card details from image.\n🔍 Picked up on Card: [${rawSummary}]. Please center the card under steady light.`;
+
+    const err: any = new Error(errMessage);
+    err.rawResponseText = rawResponseText;
+    err.rawDetected = {
+      card_name: parsed.card_name || '',
+      set_code: parsed.set_code || '',
+      collector_number: parsed.collector_number || '',
+      is_foil: Boolean(parsed.is_foil),
+    };
+    err.errorType = 'scan_failed';
+    throw err;
   }
 
   // Lookup the card on Scryfall
   const matchedCard = await lookupExactScryfallCard(detectedName, detectedSet, detectedNumber);
   if (!matchedCard) {
-    if (detectedName) {
-      throw new Error(
-        `Could not find card "${detectedName}" on Scryfall. Try centering the card under better light, or tap Manual Search to add it.`
-      );
-    } else {
-      throw new Error(
-        `Could not find a card matching set ${detectedSet.toUpperCase()} #${detectedNumber} on Scryfall.`
-      );
-    }
+    const parts: string[] = [];
+    if (detectedName) parts.push(`Name: "${detectedName}"`);
+    if (detectedSet) parts.push(`Set: ${detectedSet.toUpperCase()}`);
+    if (detectedNumber) parts.push(`Collector #: ${detectedNumber}`);
+    parts.push(`Foil: ${detectedFoil ? 'Yes' : 'No'}`);
+
+    const extractedSummary = parts.length > 0 ? parts.join(' · ') : 'None';
+
+    const errMessage = detectedName
+      ? `[Scryfall Lookup Issue]\nCould not find card "${detectedName}" on Scryfall.\n🔍 Picked up on Card: [${extractedSummary}]`
+      : `[Scryfall Lookup Issue]\nCould not find a card matching set ${detectedSet.toUpperCase()} #${detectedNumber} on Scryfall.\n🔍 Picked up on Card: [${extractedSummary}]`;
+
+    const err: any = new Error(errMessage);
+    err.rawResponseText = rawResponseText;
+    err.rawDetected = {
+      card_name: detectedName,
+      set_code: detectedSet,
+      collector_number: detectedNumber,
+      is_foil: detectedFoil,
+    };
+    err.errorType = 'lookup_failed';
+    throw err;
   }
 
   // If Scryfall matched under official rules name but image identified a printed/unofficial title (e.g. "Xenk, Paladin Unbroken"), preserve it!

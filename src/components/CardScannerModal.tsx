@@ -404,6 +404,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       let errorDetail = err?.message || 'Could not recognize card. Ensure card is clear, centered, and well-lit.';
       let errorTitle = 'Scan Failed';
 
+      if (err?.errorType === 'lookup_failed' || errorDetail.includes('[Scryfall Lookup Issue]')) {
+        errorTitle = 'Scryfall Lookup Issue';
+      } else if (err?.errorType === 'scan_failed' || errorDetail.includes('[Optical Scan Issue]') || errorDetail.includes('[OCR Scan Failed]')) {
+        errorTitle = 'Camera Read Issue';
+      }
+
       if (errorDetail.includes('no longer available') || errorDetail.includes('gemini-2.0')) {
         setStoredGeminiModel(DEFAULT_GEMINI_MODEL);
         setSelectedModel(DEFAULT_GEMINI_MODEL);
@@ -1440,19 +1446,30 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               </div>
             ) : (
               <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1 scrollbar-thin">
-                {errorLogs.map((log) => (
-                  <div key={log.id} className="p-3 rounded-xl bg-slate-950/90 border border-rose-900/50 text-xs">
-                    <div className="flex items-center justify-between text-rose-300 font-bold text-[11px] mb-1">
-                      <span>{log.title}</span>
-                      <span className="text-[9.5px] font-mono text-slate-500 font-normal">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </span>
-                    </div>
-                    {log.detail && (
-                      <p className="text-[10.5px] font-mono text-rose-200/90 leading-relaxed bg-black/50 p-2 rounded-lg border border-rose-900/60 break-words mb-2">
-                        {log.detail}
-                      </p>
-                    )}
+                {errorLogs.map((log) => {
+                  const isLookupError = log.title.includes('Lookup') || (log.detail && log.detail.includes('Scryfall'));
+                  return (
+                    <div key={log.id} className="p-3 rounded-xl bg-slate-950/90 border border-rose-900/50 text-xs">
+                      <div className="flex items-center justify-between gap-2 text-rose-300 font-bold text-[11px] mb-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span>{log.title}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono uppercase ${
+                            isLookupError
+                              ? 'bg-blue-950 text-blue-300 border border-blue-700/60'
+                              : 'bg-amber-950 text-amber-300 border border-amber-700/60'
+                          }`}>
+                            {isLookupError ? '🌐 Lookup Issue' : '📷 Optical/Camera Issue'}
+                          </span>
+                        </div>
+                        <span className="text-[9.5px] font-mono text-slate-500 font-normal">
+                          {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                      </div>
+                      {log.detail && (
+                        <p className="text-[10.5px] font-mono text-rose-200/90 leading-relaxed bg-black/60 p-2.5 rounded-lg border border-rose-900/60 break-words whitespace-pre-line mb-2">
+                          {log.detail}
+                        </p>
+                      )}
 
                     {/* Suggestions recovery */}
                     {log.suggestions && log.suggestions.length > 0 && (
@@ -1523,7 +1540,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                       )}
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             )}
           </div>
