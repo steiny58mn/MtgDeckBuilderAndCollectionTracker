@@ -27,7 +27,11 @@ import {
   Cpu,
   Sliders,
   Trash2,
-  Code
+  Code,
+  Eye,
+  Sun,
+  Info,
+  Image
 } from 'lucide-react';
 import { JsonErrorModal } from './JsonErrorModal';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
@@ -49,6 +53,97 @@ import {
   POPULAR_GEMINI_MODELS,
   DEFAULT_GEMINI_MODEL
 } from '../services/cardScannerService';
+
+// Calculate live camera image quality metrics (brightness %, contrast score, glare check)
+export function analyzeCanvasImageQuality(canvas: HTMLCanvasElement): {
+  brightnessPercent: number;
+  contrastScore: number;
+  glarePercent: number;
+  qualityLabel: string;
+  recommendations: string[];
+} {
+  const ctx = canvas.getContext('2d');
+  if (!ctx || canvas.width === 0 || canvas.height === 0) {
+    return {
+      brightnessPercent: 50,
+      contrastScore: 50,
+      glarePercent: 0,
+      qualityLabel: 'Unknown',
+      recommendations: [],
+    };
+  }
+
+  try {
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imgData.data;
+    let totalLuminance = 0;
+    let brightPixelCount = 0;
+    const sampleStep = 16; // every 4th pixel RGBA
+    const totalSamples = pixels.length / sampleStep;
+
+    const luminances: number[] = [];
+
+    for (let i = 0; i < pixels.length; i += sampleStep) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      totalLuminance += lum;
+      luminances.push(lum);
+      if (lum > 240) {
+        brightPixelCount++;
+      }
+    }
+
+    const avgLum = totalLuminance / Math.max(1, totalSamples);
+    const brightnessPercent = Math.round((avgLum / 255) * 100);
+    const glarePercent = Math.round((brightPixelCount / Math.max(1, totalSamples)) * 100);
+
+    let sumSqDiff = 0;
+    for (let i = 0; i < luminances.length; i++) {
+      const diff = luminances[i] - avgLum;
+      sumSqDiff += diff * diff;
+    }
+    const variance = sumSqDiff / Math.max(1, luminances.length);
+    const contrastScore = Math.min(100, Math.round(Math.sqrt(variance)));
+
+    const recommendations: string[] = [];
+    let qualityLabel = 'Good Lighting & Clarity';
+
+    if (brightnessPercent < 28) {
+      qualityLabel = '⚠️ Underexposed / Too Dark';
+      recommendations.push('Turn on room lights or tap the 🔦 Flashlight icon to illuminate the card.');
+    } else if (brightnessPercent > 82) {
+      qualityLabel = '⚠️ Overexposed / Too Bright';
+      recommendations.push('Avoid direct overhead spotlights to prevent blowing out text.');
+    }
+
+    if (glarePercent > 12) {
+      qualityLabel = '⚠️ Surface Glare Detected';
+      recommendations.push('Tilt card slightly away from direct overhead light or camera flash to remove glare.');
+    }
+
+    if (contrastScore < 20) {
+      recommendations.push('Ensure card is in clear focus and held steady.');
+    }
+
+    return {
+      brightnessPercent,
+      contrastScore,
+      glarePercent,
+      qualityLabel,
+      recommendations,
+    };
+  } catch (e) {
+    return {
+      brightnessPercent: 50,
+      contrastScore: 50,
+      glarePercent: 0,
+      qualityLabel: 'Captured Frame',
+      recommendations: [],
+    };
+  }
+}
 import { playScanSuccessSound, playScanErrorSound, unlockAudio } from '../utils/soundUtils';
 import { getCardImageUrl, getAutocomplete, fetchCardPrints } from '../services/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -106,6 +201,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const reticleRef = useRef<HTMLDivElement | null>(null);
 
   // Scanner stream state
   const [cameraActive, setCameraActive] = useState(false);
@@ -115,6 +211,19 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [hasTorch, setHasTorch] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+
+  // Diagnostic State for Captured Frame Inspection
+  const [lastCapturedImage, setLastCapturedImage] = useState<{
+    dataUrl: string;
+    width: number;
+    height: number;
+    scanTarget: ScanTargetMode;
+    scanEngine: ScanEngineMode;
+    timestamp: number;
+    diagnostics: ReturnType<typeof analyzeCanvasImageQuality>;
+    usedFullFrameFallback?: boolean;
+  } | null>(null);
+  const [showInspectImageModal, setShowInspectImageModal] = useState<boolean>(false);
 
   // Target Binder selection
   const [selectedBinderId, setSelectedBinderId] = useState<string>(() => {
@@ -156,6 +265,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     title: string;
     detail?: string;
     rawJson?: string;
+    imageDataUrl?: string;
     suggestions?: string[];
     timestamp: number;
   }[]>([]);
@@ -246,8 +356,21 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         await videoRef.current.play();
         setCameraActive(true);
 
-        // Check torch capability
+        // Apply continuous focus/exposure track constraints on mobile/webcam
         const track = stream.getVideoTracks()[0];
+        if (track && track.applyConstraints) {
+          try {
+            await track.applyConstraints({
+              advanced: [
+                { focusMode: 'continuous' } as any,
+                { exposureMode: 'continuous' } as any,
+                { whiteBalanceMode: 'continuous' } as any,
+              ],
+            });
+          } catch {}
+        }
+
+        // Check torch capability
         const capabilities = track.getCapabilities ? (track.getCapabilities() as any) : {};
         setHasTorch(Boolean(capabilities?.torch));
       }
@@ -322,13 +445,40 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   };
 
   // Process and analyze image in continuous batch mode
-  const handleProcessImage = async (imageSource: Blob | File | HTMLVideoElement | HTMLCanvasElement) => {
+  const handleProcessImage = async (
+    imageSource: Blob | File | HTMLVideoElement | HTMLCanvasElement,
+    isCroppedReticle = false
+  ) => {
     unlockAudio();
     setIsProcessing(true);
     setStatusMessage('Analyzing photo...');
 
+    let currentCapturedDataUrl = '';
+    let currentDiagnostics = {
+      brightnessPercent: 50,
+      contrastScore: 50,
+      glarePercent: 0,
+      qualityLabel: 'Captured Frame',
+      recommendations: [] as string[],
+    };
+
     try {
-      const { base64Only } = await optimizeCardImage(imageSource);
+      const { dataUrl, base64Only } = await optimizeCardImage(imageSource);
+      currentCapturedDataUrl = dataUrl;
+
+      // Calculate diagnostics on canvas if available
+      if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
+        currentDiagnostics = analyzeCanvasImageQuality(imageSource);
+        setLastCapturedImage({
+          dataUrl,
+          width: imageSource.width,
+          height: imageSource.height,
+          scanTarget,
+          scanEngine,
+          timestamp: Date.now(),
+          diagnostics: currentDiagnostics,
+        });
+      }
 
       const apiKey = getStoredGeminiApiKey();
       if (scanEngine === 'gemini_only' && !apiKey) {
@@ -397,6 +547,75 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setIsProcessing(false);
       setIsCrosshairLocked(false);
     } catch (err: any) {
+      // 2nd Chance Fallback: If reticle crop scan failed, automatically attempt full-frame uncropped camera view!
+      if (isCroppedReticle && videoRef.current && videoRef.current.readyState >= 2) {
+        try {
+          setStatusMessage('Rescanning full video view...');
+          const video = videoRef.current;
+          const fullCanvas = document.createElement('canvas');
+          const maxDim = 960;
+          let targetW = video.videoWidth;
+          let targetH = video.videoHeight;
+          if (targetW > maxDim || targetH > maxDim) {
+            if (targetW > targetH) {
+              targetW = maxDim;
+              targetH = Math.round((video.videoHeight * maxDim) / video.videoWidth);
+            } else {
+              targetH = maxDim;
+              targetW = Math.round((video.videoWidth * maxDim) / video.videoHeight);
+            }
+          }
+          fullCanvas.width = targetW;
+          fullCanvas.height = targetH;
+          const fullCtx = fullCanvas.getContext('2d');
+          if (fullCtx) {
+            fullCtx.imageSmoothingEnabled = true;
+            fullCtx.imageSmoothingQuality = 'high';
+            fullCtx.drawImage(video, 0, 0, targetW, targetH);
+            const { dataUrl: fullDataUrl, base64Only: fullBase64 } = await optimizeCardImage(fullCanvas);
+            const apiKey = getStoredGeminiApiKey();
+            const fallbackResult = await identifyCardFromImage(fullBase64, apiKey, scanEngine, 'full');
+
+            const finalIsFoil = overrideFoil !== null ? overrideFoil : fallbackResult.isFoil;
+            const engineLabel = fallbackResult.scanEngine === 'ocr' ? '⚡ Local OCR' : '🤖 Gemini 3.8 Flash';
+            setStatusMessage(`Found "${fallbackResult.card.name}" (${engineLabel})!`);
+
+            await onAddCardToBinder(fallbackResult.card, cardQuantity, finalIsFoil, selectedBinderId);
+            playScanSuccessSound();
+            setSuccessCount((c) => c + 1);
+
+            const batchItem: BatchScannedCard = {
+              id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              card: fallbackResult.card,
+              quantity: cardQuantity,
+              isFoil: finalIsFoil,
+              timestamp: Date.now(),
+              scanEngine: fallbackResult.scanEngine,
+            };
+            setScannedBatchCards((prev) => [batchItem, ...prev]);
+            setShowBatchDrawer(true);
+
+            const scanNames = getCardNames(fallbackResult.card);
+            setQuickNotice({
+              type: 'success',
+              title: `Added ${cardQuantity}x ${scanNames.actualName}`,
+              detail: `[Full Frame Rescan] ${fallbackResult.scanEngine === 'ocr' ? '⚡ Local OCR · ' : '🤖 Gemini 3.8 Flash · '}${fallbackResult.card.set?.toUpperCase()} #${fallbackResult.card.collector_number}`,
+              imageUrl: getCardImageUrl(fallbackResult.card, 'small'),
+              isFoil: finalIsFoil,
+              timestamp: Date.now(),
+            });
+
+            lastScanTimestampRef.current = Date.now();
+            setStatusMessage('');
+            setIsProcessing(false);
+            setIsCrosshairLocked(false);
+            return;
+          }
+        } catch (fallbackErr) {
+          console.warn('[CardScanner] Full frame rescan fallback also failed:', fallbackErr);
+        }
+      }
+
       console.error('[CardScanner] Scan error:', err);
       playScanErrorSound();
       setFailureCount((c) => c + 1);
@@ -427,9 +646,12 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         }
       }
 
+      if (errorTitle === 'Camera Read Issue' && currentDiagnostics) {
+        errorDetail += `\n[Image Diagnostics: Light ${currentDiagnostics.brightnessPercent}% · Contrast ${currentDiagnostics.contrastScore}/100 · ${currentDiagnostics.qualityLabel}]`;
+      }
+
       const rawJsonText = err?.rawResponseText || err?.rawJson || err?.rawOutput || (typeof err?.message === 'string' && (err.message.includes('{') || err.message.includes('[')) ? err.message : undefined);
 
-      // Attempt to retrieve candidate suggestions so the user has 1-tap recovery
       let suggestions: string[] = [];
       const quotedMatch = errorDetail.match(/"([^"]{2,35})"/);
       const candidateQuery = quotedMatch ? quotedMatch[1] : '';
@@ -442,18 +664,17 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         } catch {}
       }
 
-      // Store error log in error history list for on-demand dropdown viewing
       const errorLogItem = {
         id: `err-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
         title: errorTitle,
         detail: errorDetail,
         rawJson: rawJsonText,
+        imageDataUrl: currentCapturedDataUrl || undefined,
         suggestions: suggestions.length > 0 ? suggestions : undefined,
         timestamp: Date.now(),
       };
       setErrorLogs((prev) => [errorLogItem, ...prev]);
 
-      // Quick fade-out failure notification
       setQuickNotice({
         type: 'failure',
         title: errorTitle,
@@ -480,32 +701,48 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vw = video.videoWidth;
     const vh = video.videoHeight;
 
-    if (vw && vh) {
-      const clientW = video.clientWidth || window.innerWidth;
-      const clientH = video.clientHeight || window.innerHeight;
+    if (vw && vh && video.clientWidth && video.clientHeight) {
+      let cropX = 0;
+      let cropY = 0;
+      let cropW = vw;
+      let cropH = vh;
+      let isCroppedReticle = false;
 
-      // Calculate object-cover scale and offsets
-      const scale = Math.max(clientW / vw, clientH / vh);
-      const scaledW = vw * scale;
-      const scaledH = vh * scale;
-      const offsetX = (clientW - scaledW) / 2;
-      const offsetY = (clientH - scaledH) / 2;
+      if (reticleRef.current) {
+        const reticleRect = reticleRef.current.getBoundingClientRect();
+        const videoRect = video.getBoundingClientRect();
 
-      if (scanTarget === 'footer') {
-        // Match the footer reticle on screen (wide banner reticle)
-        const boxW = Math.min(clientW * 0.94, 460);
-        const boxH = 125;
-        const boxX = (clientW - boxW) / 2;
-        const boxY = (clientH - boxH) / 2;
+        if (videoRect.width > 0 && videoRect.height > 0 && reticleRect.width > 0 && reticleRect.height > 0) {
+          const scale = Math.max(videoRect.width / vw, videoRect.height / vh);
+          const scaledW = vw * scale;
+          const scaledH = vh * scale;
+          const offsetX = (videoRect.width - scaledW) / 2;
+          const offsetY = (videoRect.height - scaledH) / 2;
 
-        const cropX = Math.max(0, Math.round((boxX - offsetX) / scale));
-        const cropY = Math.max(0, Math.round((boxY - offsetY) / scale));
-        const cropW = Math.min(vw - cropX, Math.round(boxW / scale));
-        const cropH = Math.min(vh - cropY, Math.round(boxH / scale));
+          const relX = reticleRect.left - videoRect.left;
+          const relY = reticleRect.top - videoRect.top;
 
+          // Add a generous 6% safety margin around reticle box so text edges aren't shaved off
+          const padX = reticleRect.width * 0.06;
+          const padY = reticleRect.height * 0.06;
+
+          const paddedX = Math.max(0, relX - padX);
+          const paddedY = Math.max(0, relY - padY);
+          const paddedW = Math.min(videoRect.width - paddedX, reticleRect.width + padX * 2);
+          const paddedH = Math.min(videoRect.height - paddedY, reticleRect.height + padY * 2);
+
+          cropX = Math.max(0, Math.round((paddedX - offsetX) / scale));
+          cropY = Math.max(0, Math.round((paddedY - offsetY) / scale));
+          cropW = Math.min(vw - cropX, Math.round(paddedW / scale));
+          cropH = Math.min(vh - cropY, Math.round(paddedH / scale));
+          isCroppedReticle = true;
+        }
+      }
+
+      if (cropW > 80 && cropH > 80 && isCroppedReticle) {
         const canvas = document.createElement('canvas');
-        const targetW = 950;
-        const targetH = 260;
+        const targetW = scanTarget === 'footer' ? 960 : 800;
+        const targetH = scanTarget === 'footer' ? 280 : 1100;
         canvas.width = targetW;
         canvas.height = targetH;
         const ctx = canvas.getContext('2d');
@@ -513,38 +750,13 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
-          handleProcessImage(canvas);
+          handleProcessImage(canvas, true);
           return;
         }
       }
-
-      // Generous card crop reticle matching full card frame on screen
-      const boxW = Math.min(clientW * 0.92, 380);
-      const boxH = Math.round(boxW * 1.38);
-      const boxX = (clientW - boxW) / 2;
-      const boxY = (clientH - boxH) / 2;
-
-      const cropX = Math.max(0, Math.round((boxX - offsetX) / scale));
-      const cropY = Math.max(0, Math.round((boxY - offsetY) / scale));
-      const cropW = Math.min(vw - cropX, Math.round(boxW / scale));
-      const cropH = Math.min(vh - cropY, Math.round(boxH / scale));
-
-      const canvas = document.createElement('canvas');
-      const targetW = 750;
-      const targetH = 1035;
-      canvas.width = targetW;
-      canvas.height = targetH;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
-        handleProcessImage(canvas);
-        return;
-      }
     }
 
-    handleProcessImage(video);
+    handleProcessImage(video, false);
   };
 
   // =========================================================================
@@ -1201,6 +1413,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         {/* Card Alignment Reticle Frame (Full Card vs Footer Text Only) */}
         {scanTarget === 'footer' ? (
           <div
+            ref={reticleRef}
             className={`relative z-10 w-[94vw] max-w-[460px] h-[125px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-black/5 border-2 ${
               isCrosshairLocked || isProcessing
                 ? 'border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.5)]'
@@ -1245,6 +1458,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </div>
         ) : (
           <div
+            ref={reticleRef}
             className={`relative z-10 w-[90vw] max-w-[365px] sm:max-w-[390px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 ${
               isCrosshairLocked || isProcessing
                 ? 'scale-102 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
@@ -1521,6 +1735,20 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                         <Copy className="w-3 h-3" />
                         <span>Copy Error</span>
                       </button>
+                      {log.imageDataUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowInspectImageModal(true);
+                            setShowErrorDropdown(false);
+                          }}
+                          className="px-2.5 py-1 rounded bg-indigo-950 hover:bg-indigo-900 text-indigo-200 text-[10px] font-bold cursor-pointer border border-indigo-600 inline-flex items-center gap-1"
+                          title="Inspect exact captured camera image frame"
+                        >
+                          <Eye className="w-3 h-3 text-indigo-300" />
+                          <span>Inspect Frame</span>
+                        </button>
+                      )}
                       {log.rawJson && (
                         <button
                           type="button"
@@ -1594,15 +1822,30 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 </div>
               </div>
 
-              {quickNotice.type === 'failure' && errorLogs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowErrorDropdown(true)}
-                  className="px-2 py-1 rounded bg-rose-900/80 hover:bg-rose-800 text-rose-200 border border-rose-600/60 text-[10px] font-bold cursor-pointer shrink-0 transition-colors"
-                  title="View full error details in dropdown"
-                >
-                  Details
-                </button>
+              {quickNotice.type === 'failure' && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {lastCapturedImage && (
+                    <button
+                      type="button"
+                      onClick={() => setShowInspectImageModal(true)}
+                      className="px-2 py-1 rounded bg-indigo-950 hover:bg-indigo-900 text-indigo-200 border border-indigo-600 text-[10px] font-bold cursor-pointer transition-colors inline-flex items-center gap-1"
+                      title="Inspect exact camera frame sent to scanner"
+                    >
+                      <Eye className="w-3 h-3 text-indigo-300" />
+                      <span>Inspect</span>
+                    </button>
+                  )}
+                  {errorLogs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowErrorDropdown(true)}
+                      className="px-2 py-1 rounded bg-rose-900/80 hover:bg-rose-800 text-rose-200 border border-rose-600/60 text-[10px] font-bold cursor-pointer transition-colors"
+                      title="View full error details in dropdown"
+                    >
+                      Details
+                    </button>
+                  )}
+                </div>
               )}
 
               <button
@@ -2448,6 +2691,134 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold cursor-pointer"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Captured Image & Quality Diagnostics Inspector Modal */}
+      {showInspectImageModal && lastCapturedImage && (
+        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5 text-indigo-400 shrink-0" />
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Captured Frame Inspector
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInspectImageModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Main Body */}
+            <div className="p-4 overflow-y-auto space-y-4 text-xs text-slate-300">
+              {/* Captured Image View */}
+              <div className="relative bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center min-h-[220px] max-h-[340px] p-2">
+                <img
+                  src={lastCapturedImage.dataUrl}
+                  alt="Captured Camera Scan Frame"
+                  className="max-h-[320px] w-auto object-contain rounded-lg shadow-lg"
+                />
+                <div className="absolute top-3 left-3 px-2 py-1 rounded-md bg-black/80 border border-slate-700 text-[10px] font-mono font-bold text-amber-300 shadow">
+                  {lastCapturedImage.width} &times; {lastCapturedImage.height} px
+                </div>
+                <div className="absolute top-3 right-3 px-2 py-1 rounded-md bg-black/80 border border-slate-700 text-[10px] font-mono font-bold text-indigo-300 shadow">
+                  {lastCapturedImage.scanTarget === 'footer' ? '🔎 Footer Reticle' : '🃏 Full Card Reticle'}
+                </div>
+              </div>
+
+              {/* Quality Diagnostics Cards */}
+              <div className="grid grid-cols-3 gap-2 text-center font-mono">
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-sans uppercase mb-1 flex items-center justify-center gap-1">
+                    <Sun className="w-3 h-3 text-amber-400" /> Light
+                  </div>
+                  <div className={`text-sm font-bold ${
+                    lastCapturedImage.diagnostics.brightnessPercent < 28 || lastCapturedImage.diagnostics.brightnessPercent > 82
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
+                  }`}>
+                    {lastCapturedImage.diagnostics.brightnessPercent}%
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-sans uppercase mb-1 flex items-center justify-center gap-1">
+                    <Sliders className="w-3 h-3 text-violet-400" /> Contrast
+                  </div>
+                  <div className={`text-sm font-bold ${
+                    lastCapturedImage.diagnostics.contrastScore < 22 ? 'text-rose-400' : 'text-emerald-400'
+                  }`}>
+                    {lastCapturedImage.diagnostics.contrastScore}/100
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-sans uppercase mb-1 flex items-center justify-center gap-1">
+                    <Zap className="w-3 h-3 text-cyan-400" /> Glare Check
+                  </div>
+                  <div className={`text-sm font-bold ${
+                    lastCapturedImage.diagnostics.glarePercent > 12 ? 'text-rose-400' : 'text-emerald-400'
+                  }`}>
+                    {lastCapturedImage.diagnostics.glarePercent}%
+                  </div>
+                </div>
+              </div>
+
+              {/* Quality Status & Recommendations */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Image Assessment: {lastCapturedImage.diagnostics.qualityLabel}</span>
+                </div>
+                {lastCapturedImage.diagnostics.recommendations.length > 0 ? (
+                  <ul className="list-disc list-inside space-y-1 text-slate-300 text-[11px] font-sans">
+                    {lastCapturedImage.diagnostics.recommendations.map((rec, idx) => (
+                      <li key={idx}>{rec}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11px] text-slate-400 font-sans">
+                    The camera captured a clear high-resolution frame. If details were missing, ensure card title (top) or set code (bottom) wasn't covered by fingers or sleeve reflections.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+              {hasTorch && (
+                <button
+                  type="button"
+                  onClick={toggleTorch}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    torchOn
+                      ? 'bg-amber-950 border-amber-400 text-amber-200'
+                      : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{torchOn ? 'Torch On' : 'Flashlight'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInspectImageModal(false);
+                  handleCaptureFrame();
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition-colors flex items-center gap-1.5 cursor-pointer ml-auto"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Retry Frame Scan</span>
               </button>
             </div>
           </div>
