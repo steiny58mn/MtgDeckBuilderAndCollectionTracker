@@ -39,9 +39,9 @@ import {
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
 import { DeckService } from '../services/deckService';
-import { getKnownMedianPrice, toHighResImageUrl } from '../services/api';
+import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
-import { getCardColorCategoryRank } from '../utils/deckUtils';
+import { getCardColorCategoryRank, getCardEffectiveColors } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
 import { ScrollToTopButton } from './ScrollToTopButton';
@@ -64,6 +64,7 @@ export function getCardMarketPrice(card: CollectionCard): { price: number; isMed
 }
 
 export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
+  const effectiveColors = getCardEffectiveColors(card as any);
   return {
     id: card.scryfallId,
     name: card.name,
@@ -75,7 +76,8 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
     mana_cost: card.mana_cost,
     type_line: card.type_line,
     rarity: card.rarity,
-    color_identity: card.colors || [],
+    colors: effectiveColors,
+    color_identity: (Array.isArray(card.color_identity) && card.color_identity.length > 0) ? card.color_identity : effectiveColors,
     legalities: {},
     prices: { usd: card.currentPriceUsd?.toString() },
     image_uris: {
@@ -153,7 +155,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedSet, setSelectedSet] = useState<string>('all');
   const [selectedColor, setSelectedColor] = useState<string>('all');
   const [onlyFoil, setOnlyFoil] = useState(false);
-  const [sortBy, setSortBy] = useState<'price-desc' | 'price-asc' | 'value' | 'name' | 'name-desc' | 'recent' | 'profit' | 'cmc' | 'color'>('price-desc');
+  const [sortBy, setSortBy] = useState<'price-desc' | 'price-asc' | 'value' | 'name' | 'name-desc' | 'recent' | 'profit' | 'cmc' | 'color'>('name');
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table' | 'category-grid'>('grid');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
@@ -272,7 +274,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
         nameLower: `${names.actualName} ${names.oracleName} ${names.unofficialName || ''} ${c.name}`.toLowerCase(),
         setLower: (c.setName || c.set || '').toLowerCase(),
         notesLower: (c.notes || '').toLowerCase(),
-        colors: c.colors || c.color_identity || [],
+        colors: getCardEffectiveColors(c as any),
       });
     }
     return map;
@@ -1369,8 +1371,8 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                     className="w-full h-full object-cover"
                                     referrerPolicy="no-referrer"
                                     onError={(e) => {
-                                      if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                                        e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large`;
+                                      if (card) {
+                                        handleCardImageError(e, card);
                                       }
                                     }}
                                   />
@@ -1558,8 +1560,8 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                           referrerPolicy="no-referrer"
                           onError={(e) => {
-                            if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                              e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=large`;
+                            if (card) {
+                              handleCardImageError(e, card);
                             }
                           }}
                         />

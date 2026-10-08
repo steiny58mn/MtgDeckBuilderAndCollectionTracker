@@ -15,7 +15,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
-import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints } from '../services/api';
+import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError } from '../services/api';
 import { ManaCostBadge } from './ManaCostBadge';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
 
@@ -236,11 +236,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               alt={displayCard.name}
               className="w-full h-auto rounded-2xl object-cover transition-transform duration-300 group-hover:scale-[1.02]"
               referrerPolicy="no-referrer"
-              onError={(e) => {
-                if (displayCard.image_uris?.normal && e.currentTarget.src !== displayCard.image_uris.normal) {
-                  e.currentTarget.src = displayCard.image_uris.normal;
-                }
-              }}
+              onError={(e) => handleCardImageError(e, displayCard)}
             />
             {deckIsFoil && (
               <div className="absolute inset-0 bg-gradient-to-tr from-fuchsia-400/10 via-purple-400/20 to-cyan-400/15 pointer-events-none mix-blend-color-dodge" />
@@ -436,6 +432,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                             alt={p.name}
                             className="w-12 h-16 object-cover rounded-lg border border-slate-800 shrink-0"
                             loading="lazy"
+                            onError={(e) => handleCardImageError(e, p)}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-1">

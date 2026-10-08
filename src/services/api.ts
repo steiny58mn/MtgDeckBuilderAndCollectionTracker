@@ -1,3 +1,4 @@
+import type React from 'react';
 import { ScryfallCard } from '../types/mtg';
 import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConfig';
 import { GamechangerService } from './gamechangerService';
@@ -757,7 +758,7 @@ export async function fetchBatchCardsCollection(
   return cardMap;
 }
 
-export function toHighResImageUrl(url?: string, scryfallId?: string): string {
+export function toHighResImageUrl(url?: string, scryfallId?: string, name?: string): string {
   if (url && typeof url === 'string' && url.trim() !== '') {
     let upgraded = url
       .replace('/small/', '/large/')
@@ -772,7 +773,43 @@ export function toHighResImageUrl(url?: string, scryfallId?: string): string {
   if (scryfallId) {
     return `https://api.scryfall.com/cards/${scryfallId}?format=image&version=large`;
   }
+  if (name && typeof name === 'string' && name.trim() !== '') {
+    const cleanName = name.split(' // ')[0].trim();
+    return `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cleanName)}&format=image&version=large`;
+  }
   return 'https://cards.scryfall.io/back.jpg';
+}
+
+/**
+ * Global resilient onError event handler for card <img> elements.
+ * Seamlessly fails over from broken/cached CDN URLs to Scryfall API ID or named image lookup,
+ * and finally to the MTG card back image.
+ */
+export function handleCardImageError(
+  e: React.SyntheticEvent<HTMLImageElement, Event>,
+  card?: { scryfallId?: string; name?: string; imageUrl?: string } | string
+): void {
+  const target = e.currentTarget;
+  if (!target) return;
+
+  const currentSrc = target.src || '';
+  const scryId = typeof card === 'object' ? card?.scryfallId : undefined;
+  const name = typeof card === 'object' ? card?.name : (typeof card === 'string' ? card : undefined);
+
+  if (scryId && !currentSrc.includes(`/cards/${scryId}`)) {
+    target.src = `https://api.scryfall.com/cards/${scryId}?format=image&version=large`;
+    return;
+  }
+
+  if (name && typeof name === 'string' && name.trim() !== '' && !currentSrc.includes('/cards/named')) {
+    const cleanName = name.split(' // ')[0].trim();
+    target.src = `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cleanName)}&format=image&version=large`;
+    return;
+  }
+
+  if (!currentSrc.includes('back.jpg')) {
+    target.src = 'https://cards.scryfall.io/back.jpg';
+  }
 }
 
 /**
@@ -780,7 +817,7 @@ export function toHighResImageUrl(url?: string, scryfallId?: string): string {
  * with fallbacks across all size versions and Scryfall redirect URLs.
  */
 export function getCardImageUrl(
-  card: ScryfallCard | { image_uris?: any; card_faces?: any[]; imageUrl?: string; id?: string; scryfallId?: string },
+  card: ScryfallCard | { image_uris?: any; card_faces?: any[]; imageUrl?: string; id?: string; scryfallId?: string; name?: string },
   version: 'normal' | 'large' | 'art_crop' | 'small' = 'large'
 ): string {
   if (!card) return 'https://cards.scryfall.io/back.jpg';
@@ -834,6 +871,13 @@ export function getCardImageUrl(
   if (cardId) {
     const scryfallVersion = version === 'art_crop' ? 'art_crop' : version === 'small' ? 'small' : 'large';
     return `https://api.scryfall.com/cards/${cardId}?format=image&version=${scryfallVersion}`;
+  }
+
+  // 5. Named card image lookup fallback
+  const cardName = (card as any).name;
+  if (cardName && typeof cardName === 'string' && cardName.trim() !== '') {
+    const cleanName = cardName.split(' // ')[0].trim();
+    return `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cleanName)}&format=image&version=${version === 'small' ? 'small' : 'large'}`;
   }
 
   return 'https://cards.scryfall.io/back.jpg';

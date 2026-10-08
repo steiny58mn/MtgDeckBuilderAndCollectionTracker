@@ -82,6 +82,7 @@ import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
+import { handleCardImageError, getCardImageUrl } from '../services/api';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -3425,9 +3426,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                             className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-emerald-700/50"
                           >
                             <img
-                              src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                              src={getCardImageUrl(item.card as any, 'small')}
                               alt={item.card.name}
                               className="w-full h-full object-cover"
+                              onError={(e) => handleCardImageError(e, item.card as any)}
                             />
                           </div>
                           <div className="min-w-0 flex-1">
@@ -3504,9 +3506,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                             className="w-7 h-9 bg-slate-900 rounded overflow-hidden shrink-0 cursor-pointer border border-rose-700/50 opacity-80"
                           >
                             <img
-                              src={item.card.imageUrl || (item.card.scryfallId ? `https://api.scryfall.com/cards/${item.card.scryfallId}?format=image&version=small` : 'https://cards.scryfall.io/back.jpg')}
+                              src={getCardImageUrl(item.card as any, 'small')}
                               alt={item.card.name}
                               className="w-full h-full object-cover grayscale-30"
+                              onError={(e) => handleCardImageError(e, item.card as any)}
                             />
                           </div>
                           <div className="min-w-0 flex-1">

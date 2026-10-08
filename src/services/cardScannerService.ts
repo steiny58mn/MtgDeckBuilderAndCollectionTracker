@@ -858,10 +858,11 @@ export async function recognizeCardWithLocalOcr(
       }
     }
 
-    // 1. High-contrast Footer Crop (bottom ~16% of modern MTG card, upscaled 2x for OCR clarity)
+    // 1. High-contrast Footer Crop (or full frame if scanTarget === 'footer', upscaled 2x for OCR clarity)
+    const isFooterOnly = scanTarget === 'footer';
     const footerCanvas = document.createElement('canvas');
-    const footerH = Math.max(40, Math.floor(h * 0.16));
-    const footerY = Math.max(0, h - footerH);
+    const footerH = isFooterOnly ? h : Math.max(40, Math.floor(h * 0.16));
+    const footerY = isFooterOnly ? 0 : Math.max(0, h - footerH);
     footerCanvas.width = w * 2;
     footerCanvas.height = footerH * 2;
     const fCtx = footerCanvas.getContext('2d');

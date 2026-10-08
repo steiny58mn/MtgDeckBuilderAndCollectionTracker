@@ -16,6 +16,7 @@ import {
   getDeckColorName,
   MTG_COLOR_NAMES,
   isCardGamechanger,
+  getCardEffectiveColors,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
 
@@ -141,8 +142,11 @@ export function normalizeCard(card: any): DeckCard {
   const manaCost = card.mana_cost || card.manaCost || card.ManaCost || '';
   const setName = card.set_name || card.setName || card.SetName || '';
   const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || '';
-  const colorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || [];
-  const colors = card.colors || card.Colors || [];
+  const rawColorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || [];
+  const rawColors = card.colors || card.Colors || [];
+  const effectiveCols = getCardEffectiveColors(card);
+  const colors = (Array.isArray(rawColors) && rawColors.length > 0) ? rawColors : effectiveCols;
+  const colorIdentity = (Array.isArray(rawColorIdentity) && rawColorIdentity.length > 0) ? rawColorIdentity : effectiveCols;
   const quantity = typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1);
   const category = (card.category || card.Category || 'main').toLowerCase();
 
@@ -247,8 +251,11 @@ export function normalizeBinderCard(card: any): CollectionCard {
   const manaCost = card.mana_cost || card.manaCost || card.ManaCost || '';
   const setName = card.setName || card.set_name || card.SetName || '';
   const collectorNumber = card.collectorNumber || card.collector_number || card.CollectorNumber || '';
-  const colorIdentity = card.colorIdentity || card.color_identity || card.ColorIdentity || [];
-  const colors = card.colors || card.Colors || [];
+  const rawColorIdentity = card.colorIdentity || card.color_identity || card.ColorIdentity || [];
+  const rawColors = card.colors || card.Colors || [];
+  const effectiveCols = getCardEffectiveColors(card);
+  const colors = (Array.isArray(rawColors) && rawColors.length > 0) ? rawColors : effectiveCols;
+  const colorIdentity = (Array.isArray(rawColorIdentity) && rawColorIdentity.length > 0) ? rawColorIdentity : effectiveCols;
 
   return {
     ...card,

@@ -27,7 +27,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
-import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi } from '../services/api';
+import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi, handleCardImageError } from '../services/api';
 import { getCommanderData } from '../services/edhrec';
 import { getTcgplayerMarketPrice, formatTcgplayerPrice } from '../utils/priceUtils';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -2376,11 +2376,7 @@ const displayedCards = useMemo(() => {
                     loading="lazy"
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                     referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      if (card.id && !e.currentTarget.src.includes('format=image')) {
-                        e.currentTarget.src = `https://api.scryfall.com/cards/${card.id}?format=image&version=normal`;
-                      }
-                    }}
+                    onError={(e) => handleCardImageError(e, card)}
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                     <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-fuchsia-300 text-xs font-semibold shadow-lg backdrop-blur-xs">
