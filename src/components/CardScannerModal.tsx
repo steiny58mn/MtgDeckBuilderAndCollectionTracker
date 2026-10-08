@@ -30,6 +30,7 @@ import {
   Code
 } from 'lucide-react';
 import { JsonErrorModal } from './JsonErrorModal';
+import { getTcgplayerMarketPrice } from '../utils/priceUtils';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
 import { 
@@ -449,9 +450,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vh = video.videoHeight;
 
     if (vw && vh) {
-      // Generous card crop with safety padding (~1:1.38 aspect ratio) so cards aren't clipped at edges
-      const maxAllowedH = Math.round(vh * 0.94);
-      const maxAllowedW = Math.round(vw * 0.88);
+      // Generous card crop with expanded safety padding (~1:1.38 aspect ratio) for zoomed-out leniency
+      const maxAllowedH = Math.round(vh * 0.97);
+      const maxAllowedW = Math.round(vw * 0.94);
       let cropW = Math.min(maxAllowedW, Math.round(maxAllowedH / 1.38));
       let cropH = Math.min(maxAllowedH, Math.round(cropW * 1.38));
       if (cropH > maxAllowedH) {
@@ -692,7 +693,19 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       const cleanName = item.card.name.split(' // ')[0].trim();
       const prints = await fetchCardPrints(cleanName);
       if (Array.isArray(prints) && prints.length > 0) {
-        setEditPrintsList(prints);
+        const selectedId = item.card.id;
+        const selectedIndex = prints.findIndex((p) => p.id === selectedId);
+        if (selectedIndex > 0) {
+          const selectedPrint = prints[selectedIndex];
+          const reordered = [
+            selectedPrint,
+            ...prints.slice(0, selectedIndex),
+            ...prints.slice(selectedIndex + 1),
+          ];
+          setEditPrintsList(reordered);
+        } else {
+          setEditPrintsList(prints);
+        }
       }
     } catch (err) {
       console.warn('[CardScanner] Error fetching prints for edit:', err);
@@ -1100,9 +1113,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           className="absolute inset-0 w-full h-full object-cover"
         />
 
-        {/* Card Alignment Reticle Frame with Auto-Scan Lock-On Glow */}
+        {/* Card Alignment Reticle Frame with Auto-Scan Lock-On Glow (Zoomed-out for extra placement leniency) */}
         <div
-          className={`relative z-10 w-[82vw] max-w-[320px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3 transition-all duration-200 ${
+          className={`relative z-10 w-[90vw] max-w-[365px] sm:max-w-[390px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 ${
             isCrosshairLocked || isProcessing
               ? 'scale-102 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
               : ''
@@ -2143,8 +2156,10 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[46vh] overflow-y-auto pr-1">
                     {(editPrintsList.length > 0 ? editPrintsList : [editingBatchItem.card]).map((p) => {
                       const isSelected = p.id === selectedEditCard.id;
-                      const regularPrice = p.prices?.usd ? `${parseFloat(p.prices.usd).toFixed(2)}` : null;
-                      const foilPrice = p.prices?.usd_foil ? `${parseFloat(p.prices.usd_foil).toFixed(2)}` : null;
+                      const regP = getTcgplayerMarketPrice(p, false);
+                      const foilP = getTcgplayerMarketPrice(p, true);
+                      const regularPrice = regP > 0 ? `$${regP.toFixed(2)}` : null;
+                      const foilPrice = foilP > 0 ? `$${foilP.toFixed(2)}` : null;
 
                       return (
                         <div

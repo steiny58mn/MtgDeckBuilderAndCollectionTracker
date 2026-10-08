@@ -29,6 +29,7 @@ import {
 import { ScryfallCard, Deck, MTGFormat, CardRarity, DeckCategory, CardCondition, Binder, DeckCard } from '../types/mtg';
 import { searchCards, getAutocomplete, getCardImageUrl, getCardBackImageUrl, SearchResult, fetchAvailablePartnersFromApi } from '../services/api';
 import { getCommanderData } from '../services/edhrec';
+import { getTcgplayerMarketPrice, formatTcgplayerPrice } from '../utils/priceUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { useCardDualClickPeek, DualClickCardModal } from './DualClickCardPopup';
 import { ScrollToTopButton } from './ScrollToTopButton';
@@ -2323,8 +2324,10 @@ const displayedCards = useMemo(() => {
       {displayedCards.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-5 gap-4 sm:gap-5">
           {displayedCards.map((card) => {
-            const price = card.prices?.usd ? `$${parseFloat(card.prices.usd).toFixed(2)}` : '—';
-            const foilPrice = card.prices?.usd_foil ? `$${parseFloat(card.prices.usd_foil).toFixed(2)}` : null;
+            const regVal = getTcgplayerMarketPrice(card, false);
+            const foilVal = getTcgplayerMarketPrice(card, true);
+            const price = regVal > 0 ? formatTcgplayerPrice(regVal) : '—';
+            const foilPrice = foilVal > 0 && foilVal !== regVal ? formatTcgplayerPrice(foilVal) : null;
             const imgUrl = getCardImageUrl(card, 'normal');
 
             // Deck copy stats

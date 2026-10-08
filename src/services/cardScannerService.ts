@@ -387,7 +387,7 @@ export async function lookupExactScryfallCard(
         console.warn('[CardScanner] Fuzzy lookup fallback failed:', err);
       }
 
-      // 4. Normalized variations (remove brackets, showcase tags, split dual-face, clean subtitles)
+      // 4. Normalized variations (remove brackets, showcase tags, split dual-face, clean subtitles, leading noise)
       const variations: string[] = [];
       // Clean bracketed or parenthesized tags like "Sol Ring (Retro Frame)" -> "Sol Ring"
       const noBrackets = cleanName.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
@@ -402,7 +402,22 @@ export async function lookupExactScryfallCard(
       // Clean secondary subtitle after comma e.g. "Urza, Lord High Artificer" -> "Urza"
       if (cleanName.includes(',')) {
         const preComma = cleanName.split(',')[0].trim();
-        if (preComma.length >= 4) variations.push(preComma);
+        if (preComma.length >= 3) variations.push(preComma);
+      }
+
+      // Clean hyphens/dashes e.g. "Boseiju, Who Endures - Showcase" -> "Boseiju, Who Endures"
+      if (cleanName.includes(' - ')) {
+        const preDash = cleanName.split(' - ')[0].trim();
+        if (preDash.length >= 3) variations.push(preDash);
+      }
+
+      // First 2-3 words extraction e.g. "Lightning Bolt Foil Retro" -> "Lightning Bolt"
+      const wordTokens = cleanName.split(/\s+/).filter((w) => w.length >= 2);
+      if (wordTokens.length >= 2) {
+        variations.push(wordTokens.slice(0, 2).join(' '));
+        if (wordTokens.length >= 3) {
+          variations.push(wordTokens.slice(0, 3).join(' '));
+        }
       }
 
       for (const variant of variations) {
@@ -421,7 +436,7 @@ export async function lookupExactScryfallCard(
 
       // 5. Scryfall Autocomplete fallback (resolves minor OCR/AI typos like 1 wrong letter)
       try {
-        const acQuery = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 20);
+        const acQuery = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 24);
         if (acQuery.length >= 3) {
           const acUrl = `https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(acQuery)}`;
           const acRes = await fetch(acUrl, { headers: { Accept: 'application/json' } });

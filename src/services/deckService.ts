@@ -17,6 +17,7 @@ import {
   MTG_COLOR_NAMES,
   isCardGamechanger,
 } from '../utils/deckUtils';
+import { getTcgplayerMarketPrice } from '../utils/priceUtils';
 
 // ============================================================================
 // Types & Interfaces
@@ -2175,12 +2176,8 @@ export class DeckService {
     try {
       if (card.scryfallId) {
         const scryfallCard = await getCardById(card.scryfallId);
-        if (scryfallCard && scryfallCard.prices) {
-          if (newFoil && scryfallCard.prices.usd_foil) {
-            targetPrice = parseFloat(scryfallCard.prices.usd_foil);
-          } else if (!newFoil && scryfallCard.prices.usd) {
-            targetPrice = parseFloat(scryfallCard.prices.usd);
-          }
+        if (scryfallCard) {
+          targetPrice = getTcgplayerMarketPrice(scryfallCard, newFoil) || targetPrice;
         }
       }
     } catch {}

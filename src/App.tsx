@@ -30,6 +30,7 @@ import { getCardImageUrl, getCardBackImageUrl } from './services/api';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
+import { getTcgplayerMarketPrice } from './utils/priceUtils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search' | 'login'>('decks');
@@ -71,6 +72,10 @@ export default function App() {
     actionLabel?: string,
     onAction?: () => void
   ) => {
+    // User request: "Remove the success popup from the bottom of the screen"
+    if (type === 'success' && !actionLabel) {
+      return;
+    }
     setGlobalToast({ message, type, actionLabel, onAction });
     setTimeout(() => {
       setGlobalToast((curr) => (curr?.message === message ? null : curr));
@@ -589,9 +594,7 @@ export default function App() {
       (c) => c.scryfallId === card.id && c.category === category && c.isFoil === isFoil
     );
 
-    const priceUsd = isFoil && card.prices?.usd_foil 
-      ? parseFloat(card.prices.usd_foil) 
-      : (card.prices?.usd ? parseFloat(card.prices.usd) : 0);
+    const priceUsd = getTcgplayerMarketPrice(card, isFoil);
 
     if (existingCardIndex >= 0) {
       currentCards[existingCardIndex] = {
@@ -801,9 +804,7 @@ export default function App() {
         ((c.binderId || 'binder-main') === targetBinderId)
     );
 
-    const priceUsd = isFoil && card.prices?.usd_foil
-      ? parseFloat(card.prices.usd_foil)
-      : (card.prices?.usd ? parseFloat(card.prices.usd) : 0);
+    const priceUsd = getTcgplayerMarketPrice(card, isFoil);
 
     if (existing) {
       const updated: CollectionCard = {
@@ -878,9 +879,7 @@ export default function App() {
     }
 
     // 2. Add or increment new card
-    const newPriceUsd = newFoil && newCard.prices?.usd_foil
-      ? parseFloat(newCard.prices.usd_foil)
-      : (newCard.prices?.usd ? parseFloat(newCard.prices.usd) : 0);
+    const newPriceUsd = getTcgplayerMarketPrice(newCard, newFoil);
 
     const newIdx = binderCards.findIndex(
       (c) => c.scryfallId === newCard.id && c.isFoil === newFoil
@@ -1050,8 +1049,8 @@ export default function App() {
         rarity: newPrinting.rarity || c.rarity,
         imageUrl: newImageUrl || c.imageUrl,
         backImageUrl: newBackImageUrl || c.backImageUrl,
-        priceUsd: newPrinting.prices?.usd ? parseFloat(newPrinting.prices.usd) : c.priceUsd,
-        priceUsdFoil: newPrinting.prices?.usd_foil ? parseFloat(newPrinting.prices.usd_foil) : c.priceUsdFoil,
+        priceUsd: getTcgplayerMarketPrice(newPrinting, false) || c.priceUsd,
+        priceUsdFoil: getTcgplayerMarketPrice(newPrinting, true) || c.priceUsdFoil,
       };
     });
 
