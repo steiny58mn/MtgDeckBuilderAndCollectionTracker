@@ -149,6 +149,7 @@ export interface Deck {
   updatedAt: number;
   coverCardUrl?: string;
   tags?: string[];
+  binderId?: string; // Binder filter for ownership & missing cards checks ('all' or binder.id)
   mtgNexusEditThreadUrl?: string;
   mtgNexusEditThreadURL?: string;
 }

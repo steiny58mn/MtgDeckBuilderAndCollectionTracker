@@ -50,17 +50,20 @@ export const DeckList: React.FC<DeckListProps> = ({
   useBodyScrollLock(showCreateModal);
 
   const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+  const [binders, setBinders] = useState(() => DeckService.getLocalBinders());
   useEffect(() => {
-    return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+    const unsubCol = DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+    const unsubBinders = DeckService.subscribeBinders((b) => setBinders(b));
+    return () => {
+      unsubCol();
+      unsubBinders();
+    };
   }, []);
 
-  const collectionLookup = React.useMemo(() => {
-    return buildCollectionLookup(collectionCards);
-  }, [collectionCards]);
-
   const getDeckCompletion = React.useCallback((d: Deck) => {
-    return calculateDeckCompletion(d, collectionLookup);
-  }, [collectionLookup]);
+    const lookup = buildCollectionLookup(collectionCards, d.binderId);
+    return calculateDeckCompletion(d, lookup);
+  }, [collectionCards]);
 
   // New deck form state
   const [newDeckName, setNewDeckName] = useState('');
@@ -261,7 +264,7 @@ export const DeckList: React.FC<DeckListProps> = ({
                     )}
                   </div>
 
-                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 flex-wrap justify-end">
                     {completion.total > 0 && (
                       <span className={`px-2 py-0.5 rounded-md backdrop-blur-xs border text-[10px] font-bold shadow-xs ${
                         completion.pct === 100
@@ -273,6 +276,19 @@ export const DeckList: React.FC<DeckListProps> = ({
                         {completion.pct === 100 ? '✓ 100% Owned' : `${completion.pct}% Owned`}
                       </span>
                     )}
+                    {completion.unownedCardsCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-500/80 text-[10px] font-bold text-amber-300 shadow-xs backdrop-blur-xs">
+                        {completion.unownedCardsCount} Missing
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="absolute bottom-2.5 left-2.5 flex items-center gap-1">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-950/80 backdrop-blur-xs border border-slate-800 text-[9.5px] font-medium text-slate-400" title="Collection binder evaluated for ownership">
+                      {deck.binderId && deck.binderId !== 'all'
+                        ? `📁 ${binders.find((b) => b.id === deck.binderId)?.name || 'Binder'}`
+                        : '🌐 All Binders'}
+                    </span>
                   </div>
 
                   <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 backdrop-blur-xs px-2 py-0.5 rounded-md border border-slate-800 text-xs font-bold text-emerald-400">

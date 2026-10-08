@@ -66,7 +66,9 @@ import {
   sortWUBRG,
   getDeckCommander,
   isCardLegalInCommander,
-  matchesScryfallTextSearch
+  matchesScryfallTextSearch,
+  buildCollectionLookup,
+  calculateDeckCompletion
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -213,30 +215,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   // Collection tracking
   const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+  const [binders, setBinders] = useState(() => DeckService.getLocalBinders());
   useEffect(() => {
-    return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+    const unsubCol = DeckService.subscribeCollection((cards) => setCollectionCards(cards));
+    const unsubBinders = DeckService.subscribeBinders((b) => setBinders(b));
+    return () => {
+      unsubCol();
+      unsubBinders();
+    };
   }, []);
-
-  const collectionCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    collectionCards.forEach((c) => {
-      const tokens = getAllCardMatchNames(c);
-      const qty = c.quantity || 1;
-      tokens.forEach((token) => {
-        map.set(token, (map.get(token) || 0) + qty);
-      });
-    });
-    return map;
-  }, [collectionCards]);
-
-  const getCardOwnedQuantity = useCallback((cardOrName: { name?: string; scryfallId?: string } | string | null | undefined): number => {
-    if (!cardOrName) return 0;
-    const tokens = getAllCardMatchNames(cardOrName);
-    for (const token of tokens) {
-      if (collectionCountMap.has(token)) return collectionCountMap.get(token)!;
-    }
-    return 0;
-  }, [collectionCountMap]);
 
 
   const handleExportMissingCards = async () => {
@@ -388,6 +375,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
   const isHistoricalView = selectedHistoryId !== 'current';
   const activeDeck: Deck = (isHistoricalView && historicalDeck) ? historicalDeck : deck;
+
+  const collectionLookup = useMemo(() => {
+    return buildCollectionLookup(collectionCards, activeDeck.binderId);
+  }, [collectionCards, activeDeck.binderId]);
+
+  const getCardOwnedQuantity = useCallback((cardOrName: { name?: string; scryfallId?: string } | string | null | undefined): number => {
+    return collectionLookup.getQuantity(cardOrName);
+  }, [collectionLookup]);
   const gamechangers = useMemo(() => detectGamechangers(activeDeck), [activeDeck, gamechangerTick]);
   const totalGamechangerCards = useMemo(() => gamechangers.reduce((sum, g) => sum + (g.card.quantity || 1), 0), [gamechangers]);
 
@@ -450,32 +445,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const watchlistBannedCount = useMemo(() => watchlistItems.filter((i) => i.isBanned).length, [watchlistItems]);
   const watchlistGamechangerCount = useMemo(() => watchlistItems.filter((i) => i.isGamechanger).length, [watchlistItems]);
   const totalWatchlistCards = useMemo(() => watchlistItems.reduce((sum, i) => sum + i.quantity, 0), [watchlistItems]);
+  const deckCompletion = useMemo(() => {
+    return calculateDeckCompletion(activeDeck, collectionLookup);
+  }, [activeDeck, collectionLookup]);
+
   const ownershipStats = useMemo(() => {
-    let owned = 0;
-    let needed = 0;
-    let missingPrice = 0;
-    const missingList: { card: DeckCard; missingQty: number }[] = [];
+    return {
+      owned: deckCompletion.owned,
+      needed: deckCompletion.total,
+      missingPrice: deckCompletion.missingPrice,
+      missingList: deckCompletion.missingList,
+    };
+  }, [deckCompletion]);
 
-    activeDeck.cards.forEach((c) => {
-      const cat = (c.category || 'main').toLowerCase();
-      if (cat === 'sideboard' || cat === 'maybeboard') return;
-      const qty = c.quantity || 1;
-      needed += qty;
-      const inCol = getCardOwnedQuantity(c.name);
-      const ownedCopies = Math.min(qty, inCol);
-      owned += ownedCopies;
-      if (ownedCopies < qty) {
-        const missingQty = qty - ownedCopies;
-        const unitPrice = (c.isFoil && c.priceUsdFoil) ? c.priceUsdFoil : (c.priceUsd || 0);
-        missingPrice += unitPrice * missingQty;
-        missingList.push({ card: c, missingQty });
-      }
-    });
-
-    return { owned, needed, missingPrice, missingList };
-  }, [activeDeck.cards, getCardOwnedQuantity]);
-  const missingCount = Math.max(0, ownershipStats.needed - ownershipStats.owned);
-  const ownedCount = ownershipStats.owned;
+  const missingCount = deckCompletion.unownedCardsCount;
+  const ownedCount = deckCompletion.owned;
 
   interface DeckUsageEntry {
     deckId: string;
@@ -2265,6 +2249,53 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <span>Cards:</span>
                   <span className="font-mono font-bold text-white">{stats.mainboardCount}</span>
                 </button>
+
+                {/* Collection Binder Selector for Ownership Check */}
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/80 text-xs text-slate-300 shadow-xs">
+                  <Layers className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
+                    Binder:
+                  </span>
+                  <select
+                    value={activeDeck.binderId || 'all'}
+                    onChange={async (e) => {
+                      const targetBinderId = e.target.value;
+                      const updatedDeck = { ...activeDeck, binderId: targetBinderId, updatedAt: Date.now() };
+                      await onUpdateDeck(updatedDeck);
+                      const binderObj = binders.find((b) => b.id === targetBinderId);
+                      const binderLabel = targetBinderId === 'all' ? 'All Binders' : (binderObj?.name || 'Selected Binder');
+                      setNexusSyncToast(`Checking deck ownership against ${binderLabel}`);
+                      setTimeout(() => setNexusSyncToast(null), 3000);
+                    }}
+                    className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                    title="Choose which Collection Binder to look at to determine owned vs missing cards for this deck"
+                  >
+                    <option value="all" className="bg-slate-900 text-white">🌐 All Binders (Collection)</option>
+                    {binders.map((b) => (
+                      <option key={b.id} value={b.id} className="bg-slate-900 text-white">
+                        📁 {b.name} ({b.cards?.length || 0} cards)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Owned Percentage Badge */}
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all shadow-xs ${
+                    deckCompletion.pct === 100
+                      ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300'
+                      : 'bg-sky-950/90 border-sky-500/80 text-sky-300'
+                  }`}
+                  title={`${deckCompletion.owned} of ${deckCompletion.total} cards owned in ${
+                    activeDeck.binderId && activeDeck.binderId !== 'all'
+                      ? binders.find((b) => b.id === activeDeck.binderId)?.name || 'Binder'
+                      : 'Entire Collection'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Owned:</span>
+                  <span className="font-mono font-extrabold">{deckCompletion.pct}%</span>
+                </div>
 
                 {/* Missing Cards Badge (filters cards down to what is missing) */}
                 <button

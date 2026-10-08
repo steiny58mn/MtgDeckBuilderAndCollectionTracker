@@ -222,12 +222,20 @@ export interface CollectionLookup {
  * Builds a comprehensive normalized lookup structure for collection cards.
  * Indexes by scryfallId, exact name, normalized quotes, front face of split/DFC cards,
  * and cleaned name (stripped set codes and collector numbers).
+ * Optionally filters to a specific target binder if targetBinderId is provided and not 'all'.
  */
-export function buildCollectionLookup(collectionCards: CollectionCard[]): CollectionLookup {
+export function buildCollectionLookup(
+  collectionCards: CollectionCard[],
+  targetBinderId?: string
+): CollectionLookup {
+  const filteredCards = (!targetBinderId || targetBinderId === 'all')
+    ? (collectionCards || [])
+    : (collectionCards || []).filter((c) => (c.binderId || 'binder-main') === targetBinderId);
+
   const idMap = new Map<string, number>();
   const nameMap = new Map<string, number>();
 
-  (collectionCards || []).forEach((c) => {
+  filteredCards.forEach((c) => {
     if (!c) return;
     const qty = c.quantity || 1;
     if (c.scryfallId) {
@@ -302,6 +310,8 @@ export interface DeckCompletionResult {
   total: number;
   pct: number;
   unownedCardsCount: number;
+  missingList: Array<{ card: DeckCard; missingQty: number }>;
+  missingPrice: number;
 }
 
 /**
@@ -322,6 +332,8 @@ export function calculateDeckCompletion(
   let owned = 0;
   let total = 0;
   let unownedCardsCount = 0;
+  let missingPrice = 0;
+  const missingList: Array<{ card: DeckCard; missingQty: number }> = [];
 
   const cards = deck.cards || [];
   const commanderName = (deck.commanderName || '').trim().toLowerCase();
@@ -355,7 +367,11 @@ export function calculateDeckCompletion(
     const ownedCopies = Math.min(qty, inCol);
     owned += ownedCopies;
     if (ownedCopies < qty) {
-      unownedCardsCount += (qty - ownedCopies);
+      const missingQty = qty - ownedCopies;
+      unownedCardsCount += missingQty;
+      const unitPrice = (c.isFoil && c.priceUsdFoil) ? c.priceUsdFoil : (c.priceUsd || 0);
+      missingPrice += unitPrice * missingQty;
+      missingList.push({ card: c, missingQty });
     }
   });
 
@@ -368,6 +384,18 @@ export function calculateDeckCompletion(
       owned += cmdrOwned;
       if (cmdrOwned < 1) {
         unownedCardsCount += 1;
+        const syntheticCmdrCard: DeckCard = {
+          id: `cmdr-${deck.id}`,
+          scryfallId: deck.commanderId || '',
+          name: deck.commanderName || 'Commander',
+          set: 'CMDR',
+          cmc: 0,
+          type_line: 'Legendary Creature',
+          quantity: 1,
+          category: 'commander',
+          imageUrl: deck.commanderArtUrl,
+        };
+        missingList.push({ card: syntheticCmdrCard, missingQty: 1 });
       }
     }
   }
@@ -378,13 +406,14 @@ export function calculateDeckCompletion(
   if (total > 0) {
     if (unownedCardsCount === 0 || owned >= total) {
       pct = 100;
+      unownedCardsCount = 0;
     } else {
       // If there are unowned cards, never round up to 100% (e.g. 99 out of 100 is 99%, not 100%)
       pct = Math.min(99, Math.floor((owned / total) * 100));
     }
   }
 
-  return { owned, total, pct, unownedCardsCount };
+  return { owned, total, pct, unownedCardsCount, missingList, missingPrice };
 }
 
 export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): DeckStats {
