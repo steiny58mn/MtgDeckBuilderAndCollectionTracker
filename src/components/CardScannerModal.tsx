@@ -26,8 +26,10 @@ import {
   Bot,
   Cpu,
   Sliders,
-  Trash2
+  Trash2,
+  Code
 } from 'lucide-react';
+import { JsonErrorModal } from './JsonErrorModal';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
 import { 
@@ -139,7 +141,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     detail?: string;
     imageUrl?: string;
     isFoil?: boolean;
+    rawJson?: string;
     timestamp: number;
+  } | null>(null);
+
+  // Raw JSON Error Inspector Modal State
+  const [inspectJsonData, setInspectJsonData] = useState<{
+    title: string;
+    errorMessage?: string;
+    rawJson: string;
   } | null>(null);
 
   // Automatic Crosshairs Detection State
@@ -394,11 +404,14 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         }
       }
 
+      const rawJsonText = err?.rawResponseText || err?.rawJson || err?.rawOutput || (typeof err?.message === 'string' && (err.message.includes('{') || err.message.includes('[')) ? err.message : undefined);
+
       // Quick failure notification
       setQuickNotice({
         type: 'failure',
         title: errorTitle,
         detail: errorDetail,
+        rawJson: rawJsonText,
         timestamp: Date.now(),
       });
 
@@ -1312,6 +1325,24 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                           </>
                         )}
                       </button>
+                      {(quickNotice.rawJson || (quickNotice.detail && (quickNotice.detail.includes('{') || quickNotice.detail.includes('[')))) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const jsonText = quickNotice.rawJson || quickNotice.detail || '';
+                            setInspectJsonData({
+                              title: `${quickNotice.title} - Raw JSON Response`,
+                              errorMessage: quickNotice.detail,
+                              rawJson: jsonText,
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-950/80 hover:bg-amber-900 text-amber-200 text-[10px] font-bold transition-colors cursor-pointer border border-amber-600/60 shadow-xs"
+                          title="Display the entire raw JSON text that failed to parse"
+                        >
+                          <Code className="w-3 h-3 text-amber-400" />
+                          <span>View Entire JSON</span>
+                        </button>
+                      )}
                       {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded') || quickNotice.detail?.includes('429') || quickNotice.detail?.includes('RESOURCE_EXHAUSTED') || quickNotice.detail?.includes('free-tier') || quickNotice.detail?.includes('free tier')) && (
                         <button
                           type="button"
@@ -2304,6 +2335,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Raw JSON Error Inspector Modal */}
+      <JsonErrorModal
+        isOpen={Boolean(inspectJsonData)}
+        onClose={() => setInspectJsonData(null)}
+        title={inspectJsonData?.title || 'JSON Error Inspector'}
+        errorMessage={inspectJsonData?.errorMessage}
+        rawJson={inspectJsonData?.rawJson || ''}
+      />
     </div>
   );
 };

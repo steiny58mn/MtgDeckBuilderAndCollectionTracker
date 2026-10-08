@@ -39,6 +39,7 @@ import { hasBasicSupertype } from '../utils/deckUtils';
 export const isBasicLand = (card: { name?: string; type_line?: string }): boolean => {
   return hasBasicSupertype(card);
 };
+import { JsonErrorModal } from './JsonErrorModal';
 import { 
   ExportFormatKey, 
   EXPORT_FORMATS, 
@@ -284,6 +285,11 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   const [isResolvingCards, setIsResolvingCards] = useState(false);
   const [resolveProgress, setResolveProgress] = useState<string>('');
   const [importError, setImportError] = useState<string | null>(null);
+  const [inspectJsonData, setInspectJsonData] = useState<{
+    title: string;
+    errorMessage?: string;
+    rawJson: string;
+  } | null>(null);
 
   // Multi-File Upload Batch Queue State
   const [uploadedBatch, setUploadedBatch] = useState<UploadedBatchDeckItem[]>([]);
@@ -2509,9 +2515,26 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
               {/* Error Display */}
               {importError && (
-                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-xs text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{importError}</span>
+                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-xs text-rose-300 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="break-words">{importError}</span>
+                  </div>
+                  {importText.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setInspectJsonData({
+                        title: 'Import Payload / JSON Error Inspector',
+                        errorMessage: importError,
+                        rawJson: importText,
+                      })}
+                      className="px-2.5 py-1 rounded-md bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-600/60 text-[10.5px] font-bold flex items-center gap-1 cursor-pointer shrink-0 shadow-xs"
+                      title="View the entire imported JSON text in full-screen code inspector"
+                    >
+                      <Code className="w-3.5 h-3.5 text-amber-400" />
+                      <span>View Entire JSON</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2665,6 +2688,15 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Raw JSON Error Inspector Modal */}
+      <JsonErrorModal
+        isOpen={Boolean(inspectJsonData)}
+        onClose={() => setInspectJsonData(null)}
+        title={inspectJsonData?.title || 'JSON Error Inspector'}
+        errorMessage={inspectJsonData?.errorMessage}
+        rawJson={inspectJsonData?.rawJson || ''}
+      />
     </div>
   );
 };
