@@ -2829,15 +2829,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
 
         {/* View Mode Switcher and Add Cards Button */}
-        <div className="flex items-center gap-2 ml-auto flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto sm:ml-auto flex-wrap justify-between sm:justify-end min-w-0 max-w-full">
           {/* Quick Search / Filter Input */}
-          <div className="relative">
+          <div className="relative min-w-0">
             <input
               type="text"
               value={cardFilterQuery}
               onChange={(e) => setCardFilterQuery(e.target.value)}
               placeholder="Filter deck..."
-              className="w-28 sm:w-36 lg:w-44 bg-slate-900 border border-slate-800 rounded-lg text-xs pl-7 pr-6 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:w-48 transition-all"
+              className="w-24 xs:w-28 sm:w-36 lg:w-44 bg-slate-900 border border-slate-800 rounded-lg text-xs pl-7 pr-6 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:w-48 transition-all"
             />
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2 pointer-events-none" />
             {cardFilterQuery && (
@@ -2856,7 +2856,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <select
             value={sortCardsBy}
             onChange={(e) => setSortCardsBy(e.target.value as 'name' | 'cmc' | 'color' | 'category' | 'price')}
-            className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2 py-1.5 text-slate-300 focus:outline-none cursor-pointer"
+            className="bg-slate-900 border border-slate-800 rounded-lg text-xs px-2 py-1.5 text-slate-300 focus:outline-none cursor-pointer max-w-[125px] sm:max-w-none truncate shrink-0"
           >
             <option value="name">Name (A-Z)</option>
             <option value="category">Category (Lands at bottom)</option>
@@ -2865,7 +2865,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <option value="color">Color</option>
           </select>
 
-          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 shrink-0">
             <button
               type="button"
               onClick={() => setViewMode('grid')}

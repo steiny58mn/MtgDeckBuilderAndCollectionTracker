@@ -932,6 +932,43 @@ export default function App() {
     showToast(`Updated to ${newCard.set.toUpperCase()} #${newCard.collector_number} (${newFoil ? 'Foil' : 'Regular'})`);
   };
 
+  const handleDeleteCardFromBinder = async (
+    card: ScryfallCard,
+    isFoil: boolean,
+    quantity: number,
+    targetBinderIdParam?: string
+  ) => {
+    const targetBinderId = targetBinderIdParam || activeBinder?.id || 'binder-main';
+    const targetBinder = binders.find((b) => b.id === targetBinderId) || binders[0];
+    if (!targetBinder) return;
+
+    const binderCards = [...(targetBinder.cards || [])];
+    const oldIdx = binderCards.findIndex(
+      (c) => c.scryfallId === card.id && c.isFoil === isFoil
+    );
+    if (oldIdx >= 0) {
+      if (binderCards[oldIdx].quantity <= quantity) {
+        binderCards.splice(oldIdx, 1);
+      } else {
+        binderCards[oldIdx] = {
+          ...binderCards[oldIdx],
+          quantity: binderCards[oldIdx].quantity - quantity,
+        };
+      }
+    }
+
+    const updatedBinder: Binder = {
+      ...targetBinder,
+      cards: binderCards,
+      cardCount: binderCards.reduce((acc, c) => acc + c.quantity, 0),
+      updatedAt: Date.now(),
+    };
+
+    await DeckService.saveBinder(updatedBinder);
+    setCollectionCards(DeckService.getLocalCollection());
+    showToast(`Removed "${card.name}" from binder`);
+  };
+
   const handleCreateBinder = async (name: string, description?: string) => {
     if (!requireAuth(`Please sign in or create an account to save binder "${name}"!`, () => handleCreateBinder(name, description))) {
       return;
@@ -1060,7 +1097,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-950 to-slate-950 text-slate-100 font-sans flex flex-col selection:bg-fuchsia-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-950 to-slate-950 text-slate-100 font-sans flex flex-col selection:bg-fuchsia-500 selection:text-slate-950 overflow-x-hidden max-w-full w-full">
       {/* Navigation */}
       <Navbar
         binders={binders}
@@ -1084,7 +1121,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-[2560px] w-full mx-auto px-2 sm:px-3 lg:px-4 2xl:px-6 py-4 sm:py-6">
+      <main className="flex-1 max-w-[2560px] w-full mx-auto px-2 sm:px-3 lg:px-4 2xl:px-6 py-4 sm:py-6 overflow-x-hidden">
         {/* Dedicated Login Tab */}
         {activeTab === 'login' && (
           <LoginPage
@@ -1219,6 +1256,7 @@ export default function App() {
           await handleAddCardToCollection(card, qty, isFoil, 'NM', undefined, targetBinderId);
         }}
         onUpdateCardInBinder={handleUpdateCardInBinder}
+        onDeleteCardFromBinder={handleDeleteCardFromBinder}
       />
 
       {/* Card Detail Modal */}

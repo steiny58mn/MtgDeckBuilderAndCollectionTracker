@@ -721,48 +721,48 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full overflow-x-hidden">
       {/* Binder Management Bar */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
+      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-3 max-w-full overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             {onBackToBinders && (
               <button
                 type="button"
                 onClick={onBackToBinders}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer mr-1"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer mr-1 shrink-0"
                 title="Return to main binder screen"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
                 <span>All Binders</span>
               </button>
             )}
-            <Bookmark className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+            <Bookmark className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider truncate">
               {selectedBinderFilter !== 'all' 
                 ? (binders.find((b) => b.id === selectedBinderFilter)?.name || 'Binder')
                 : 'Collection Binders'}
             </span>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-500 shrink-0">
               {selectedBinderFilter !== 'all'
                 ? `(${collection.filter((c) => (c.binderId || 'binder-main') === selectedBinderFilter).length} cards)`
                 : `(${binders.length} ${binders.length === 1 ? 'binder' : 'binders'})`}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
             <button
               onClick={onOpenSearch}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Add Cards to Binder</span>
+              <span>Add Cards</span>
             </button>
             {onOpenScanner && (
               <button
                 type="button"
                 onClick={onOpenScanner}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
                 title="Scan cards with camera to add to this binder"
               >
                 <Camera className="w-3.5 h-3.5" />
@@ -771,8 +771,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             )}
           </div>
         </div>
-
-        </div>
+      </div>
       {/* Summary Dashboard */}
       <div className={`bg-slate-900 border border-slate-800 rounded-2xl shadow-xl transition-all duration-200 ${
         isSummaryCollapsed ? 'p-3 sm:p-4' : 'p-4 sm:p-5 space-y-4'
@@ -1020,7 +1019,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       )}
 
       {/* Category Navigation Bar */}
-      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 text-xs">
+      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 text-xs max-w-full">
         {/* Category Grid Navigation Option */}
         <button
           type="button"
@@ -1087,10 +1086,10 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       </div>
 
       {/* Search and Filters Bar */}
-      <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3">
+      <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3 max-w-full overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Search box */}
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -1101,34 +1100,36 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             />
           </div>
 
-          <button
-            onClick={onOpenSearch}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-lg shadow-emerald-900/20 shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Cards to Binder</span>
-          </button>
-          {onOpenScanner && (
+          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto shrink-0">
             <button
-              type="button"
-              onClick={onOpenScanner}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors shadow-lg shadow-violet-900/20 shrink-0 cursor-pointer"
-              title="Scan cards with camera to add to this binder"
+              onClick={onOpenSearch}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-lg shadow-emerald-900/20 shrink-0"
             >
-              <Camera className="w-4 h-4" />
-              <span>Scan Cards</span>
+              <Plus className="w-4 h-4" />
+              <span>Add Cards</span>
             </button>
-          )}
+            {onOpenScanner && (
+              <button
+                type="button"
+                onClick={onOpenScanner}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors shadow-lg shadow-violet-900/20 shrink-0 cursor-pointer"
+                title="Scan cards with camera to add to this binder"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Scan Cards</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filters Row */}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs border-t border-slate-800/80 pt-3">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 text-xs border-t border-slate-800/80 pt-3">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             {/* Rarity */}
             <select
               value={selectedRarity}
               onChange={(e) => updateRarity(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-slate-300 focus:outline-none shrink-0"
             >
               <option value="all">All Rarities</option>
               <option value="mythic">Mythic</option>
@@ -1141,7 +1142,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             <select
               value={selectedCondition}
               onChange={(e) => updateCondition(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-slate-300 focus:outline-none shrink-0"
             >
               <option value="all">All Conditions</option>
               <option value="NM">Near Mint (NM)</option>
@@ -1152,7 +1153,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             </select>
 
             {/* Foil Toggle */}
-            <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={onlyFoil}
@@ -1165,12 +1166,12 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             </label>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto justify-between sm:justify-end">
             {/* Set Filter */}
             <select
               value={selectedSet}
               onChange={(e) => updateSet(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none max-w-[120px] truncate"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-slate-300 focus:outline-none max-w-[105px] sm:max-w-[120px] truncate shrink-0"
             >
               <option value="all">All Sets</option>
               {availableSets.map(set => (
@@ -1181,7 +1182,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             <select
               value={selectedColor}
               onChange={(e) => updateColor(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-slate-300 focus:outline-none shrink-0"
             >
               <option value="all">All Colors</option>
               <option value="W">White</option>
@@ -1191,19 +1192,20 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               <option value="G">Green</option>
               <option value="colorless">Colorless</option>
             </select>
+
             {/* Sort */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 max-w-full">
               <button
                 type="button"
                 onClick={() => updateSortBy(sortBy === 'price-desc' ? 'price-asc' : 'price-desc')}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shrink-0 ${
                   sortBy === 'price-desc' || sortBy === 'price-asc'
                     ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
                 title="Sort cards by Market Price (toggles High to Low / Low to High). Uses median price for unpriced vintage cards like Timetwister."
               >
-                <span className="text-[11px]">Sort: Price</span>
+                <span className="text-[11px] whitespace-nowrap">Sort: Price</span>
                 {sortBy === 'price-desc' ? (
                   <ArrowDown className="w-3.5 h-3.5 text-emerald-400" />
                 ) : sortBy === 'price-asc' ? (
@@ -1215,7 +1217,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               <select
                 value={sortBy}
                 onChange={(e) => updateSortBy(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-emerald-400 font-semibold focus:outline-none"
+                className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-emerald-400 font-semibold focus:outline-none max-w-[135px] xs:max-w-[165px] sm:max-w-[200px] md:max-w-none truncate min-w-0"
               >
                 <option value="price-desc">Market Price (High to Low)</option>
                 <option value="price-asc">Market Price (Low to High)</option>
@@ -1230,7 +1232,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             </div>
 
             {/* View Mode Toggle */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0 ml-auto sm:ml-0">
               <button
                 type="button"
                 onClick={() => setViewMode('category-grid')}

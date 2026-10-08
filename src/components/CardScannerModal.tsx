@@ -25,7 +25,8 @@ import {
   Copy,
   Bot,
   Cpu,
-  Sliders
+  Sliders,
+  Trash2
 } from 'lucide-react';
 import { ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
@@ -75,6 +76,12 @@ interface CardScannerModalProps {
     quantity: number,
     targetBinderId?: string
   ) => Promise<void> | void;
+  onDeleteCardFromBinder?: (
+    card: ScryfallCard,
+    isFoil: boolean,
+    quantity: number,
+    targetBinderId?: string
+  ) => Promise<void> | void;
 }
 
 export const CardScannerModal: React.FC<CardScannerModalProps> = ({
@@ -84,6 +91,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   activeBinder,
   onAddCardToBinder,
   onUpdateCardInBinder,
+  onDeleteCardFromBinder,
 }) => {
   useBodyScrollLock(isOpen);
   useEscapeKey(isOpen, onClose);
@@ -662,6 +670,26 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
   };
 
+  // Delete scanned card from binder and batch session if scan was incorrect
+  const handleDeleteBatchCard = async (item: BatchScannedCard) => {
+    try {
+      if (onDeleteCardFromBinder) {
+        await onDeleteCardFromBinder(item.card, item.isFoil, item.quantity, selectedBinderId);
+      }
+      setScannedBatchCards((prev) => prev.filter((b) => b.id !== item.id));
+      setSuccessCount((c) => Math.max(0, c - 1));
+      setEditingBatchItem(null);
+      setQuickNotice({
+        type: 'success',
+        title: `Deleted "${item.card.name}"`,
+        detail: 'Removed from binder and batch queue',
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.error('[CardScanner] Error deleting card:', err);
+    }
+  };
+
   const handleSelectManualCard = async (name: string) => {
     setIsSearchingManual(true);
     unlockAudio();
@@ -806,8 +834,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
             {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
             {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
-            <span className="hidden sm:inline font-bold">
-              {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'Local OCR' : 'Gemini AI'}
+            <span className="font-bold text-[11px] sm:text-xs">
+              {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'OCR' : 'Gemini'}
             </span>
           </button>
 
@@ -924,17 +952,45 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           )}
         </div>
 
-        {/* Top Hint Bar over live camera */}
-        <div className="absolute top-3 inset-x-4 z-20 flex justify-center pointer-events-none">
+        {/* Top Hint Bar & Mode Badge over live camera */}
+        <div className="absolute top-3 inset-x-3 sm:inset-x-4 z-20 flex items-center justify-between pointer-events-none gap-2">
+          {/* Prominent Mode Badge (Tap to cycle mode on mobile or desktop) */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
+                hybrid: 'ocr_only',
+                ocr_only: 'gemini_only',
+                gemini_only: 'hybrid',
+              };
+              const next = nextMode[scanEngine];
+              setScanEngine(next);
+              setStoredScanEngine(next);
+            }}
+            className={`pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold backdrop-blur-md border shadow-lg cursor-pointer transition-all active:scale-95 shrink-0 ${
+              scanEngine === 'hybrid'
+                ? 'bg-violet-950/90 border-violet-400 text-violet-200 shadow-violet-500/20'
+                : scanEngine === 'ocr_only'
+                ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-emerald-500/20'
+                : 'bg-indigo-950/90 border-indigo-400 text-indigo-200 shadow-indigo-500/20'
+            }`}
+            title="Click to switch between Hybrid, Local OCR, and Gemini models"
+          >
+            {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />}
+            {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
+            {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
+            <span>{scanEngine === 'hybrid' ? '⚡ Hybrid Model' : scanEngine === 'ocr_only' ? '⚙️ Local OCR Only' : '🤖 Gemini Only'}</span>
+          </button>
+
           <div
-            className={`backdrop-blur-md px-3.5 py-1 rounded-full border text-[11px] text-center shadow-lg transition-colors ${
+            className={`backdrop-blur-md px-3 py-1 rounded-full border text-[10.5px] text-center shadow-lg transition-colors pointer-events-none max-w-[55%] truncate ${
               isCrosshairLocked || isProcessing
                 ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200 font-bold'
                 : 'bg-slate-900/85 border-slate-700/60 text-slate-200'
             }`}
           >
             {isProcessing
-              ? 'Analyzing card...'
+              ? (scanEngine === 'hybrid' ? '⚡ Local OCR reading card...' : 'Analyzing card...')
               : isCrosshairLocked
               ? 'Card locked in — scanning!'
               : autoScanEnabled
@@ -1024,16 +1080,27 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     </div>
                   )}
                   {quickNotice.type === 'success' && scannedBatchCards.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline mt-1 inline-block cursor-pointer"
-                    >
-                      Change version or finish &rarr;
-                    </button>
+                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline inline-block cursor-pointer"
+                      >
+                        Change version or finish &rarr;
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBatchCard(scannedBatchCards[0])}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold inline-flex items-center gap-1 cursor-pointer ml-auto"
+                        title="Delete this card if scan was incorrect"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                        <span>Delete card</span>
+                      </button>
+                    </div>
                   )}
                   {quickNotice.type === 'failure' && (
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <button
                         type="button"
                         onClick={() => {
@@ -1057,6 +1124,25 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                           </>
                         )}
                       </button>
+                      {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded')) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanEngine('ocr_only');
+                            setStoredScanEngine('ocr_only');
+                            setQuickNotice({
+                              type: 'success',
+                              title: 'Switched to Local OCR Only',
+                              detail: '100% on-device WebAssembly recognition. Zero Gemini API calls and unlimited free scans!',
+                              timestamp: Date.now(),
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-sm"
+                        >
+                          <Cpu className="w-3 h-3" />
+                          <span>Switch to Local OCR Only</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1145,11 +1231,23 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                       className="w-full h-full object-cover rounded shadow-xs group-hover:scale-105 transition-transform"
                     />
                     {item.isFoil && (
-                      <div className="absolute top-1 right-1 bg-amber-400/90 text-slate-950 p-0.5 rounded-full shadow">
+                      <div className="absolute top-1 left-1 bg-amber-400/90 text-slate-950 p-0.5 rounded-full shadow">
                         <Sparkles className="w-2.5 h-2.5" />
                       </div>
                     )}
-                    <div className="absolute inset-0 bg-violet-600/0 group-hover:bg-violet-600/30 transition-colors flex items-center justify-center">
+                    {/* Quick Delete Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteBatchCard(item);
+                      }}
+                      className="absolute top-1 right-1 p-1 rounded-md bg-slate-950/85 hover:bg-rose-900 text-slate-400 hover:text-rose-200 border border-slate-700/60 transition-colors z-10 cursor-pointer shadow-sm"
+                      title="Delete this card from binder"
+                    >
+                      <Trash2 className="w-3 h-3 text-rose-400" />
+                    </button>
+                    <div className="absolute inset-0 bg-violet-600/0 group-hover:bg-violet-600/30 transition-colors flex items-center justify-center pointer-events-none">
                       <span className="opacity-0 group-hover:opacity-100 bg-slate-950/85 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow border border-violet-400/50">
                         Edit
                       </span>
@@ -1505,32 +1603,44 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-t border-slate-800">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-t border-slate-800 gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => setEditingBatchItem(null)}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                onClick={() => handleDeleteBatchCard(editingBatchItem)}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-rose-300 hover:text-white bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+                title="Delete this card from binder if the scan was incorrect"
               >
-                Cancel
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Delete Card</span>
               </button>
-              <button
-                type="button"
-                disabled={isSavingEdit}
-                onClick={handleSaveCardEdit}
-                className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-md cursor-pointer flex items-center gap-1.5"
-              >
-                {isSavingEdit ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Updating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Apply Changes</span>
-                  </>
-                )}
-              </button>
+
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setEditingBatchItem(null)}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={handleSaveCardEdit}
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Apply Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

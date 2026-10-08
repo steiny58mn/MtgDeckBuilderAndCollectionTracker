@@ -614,11 +614,11 @@ const IGNORED_SET_CODES = new Set([
 
 /**
  * Parses MTG card footer text for collector number and set code
- * e.g. "242/271 R MH3 • EN", "045 BLB", "123a NEO", "MH3 242", "301/280 LTR"
+ * e.g. "242/271 R MH3 • EN", "045 BLB", "123a NEO", "MH3 242", "301/280 LTR", "312/281 \n BLB - EN"
  */
 export function parseMtgFooterText(text: string): { setCode?: string; collectorNumber?: string } | null {
   if (!text) return null;
-  const clean = text.replace(/[\r\n]+/g, ' ').trim();
+  const clean = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
   // Pattern A: e.g. "242/271 R MH3" or "242/271 MH3" or "045/281 C BLB" or "242 MH3"
   const patA = /(\d{1,4}[a-z]?)\s*(?:\/\s*\d+)?\s*(?:[CURMLSTPcurmlstp]\s+)?([A-Z0-9]{3,5})\b/i.exec(clean);
@@ -630,8 +630,8 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     }
   }
 
-  // Pattern B: e.g. "MH3 242" or "BLB 015"
-  const patB = /\b([A-Z0-9]{3,5})\s+[•\*\.\-]?\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
+  // Pattern B: e.g. "MH3 242" or "BLB 015" or "BLB • 045"
+  const patB = /\b([A-Z0-9]{3,5})\s+[•\*\.\-\_e]?\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
   if (patB) {
     const set = patB[1].trim().toUpperCase();
     const num = patB[2].trim();
@@ -641,12 +641,25 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
   }
 
   // Pattern C: e.g. "MH3 • EN 242/271" or "BLB • EN \n 045"
-  const patC = /\b([A-Z0-9]{3,5})\s*•\s*[A-Z]{2}\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
+  const patC = /\b([A-Z0-9]{3,5})\s*[\•\*\.\-\_]?\s*[A-Z]{2}\s*(\d{1,4}[a-z]?)\b/i.exec(clean);
   if (patC) {
     const set = patC[1].trim().toUpperCase();
     const num = patC[2].trim();
     if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
       return { collectorNumber: num, setCode: set };
+    }
+  }
+
+  // Pattern D: Modern slash fraction anywhere e.g. "242/271" coupled with any 3-letter set code
+  const slashMatch = /(\d{1,4}[a-z]?)\s*\/\s*\d{2,4}/i.exec(clean);
+  if (slashMatch) {
+    const num = slashMatch[1].trim();
+    const words = clean.split(/[^a-zA-Z0-9]/).filter((w) => w.length >= 3 && w.length <= 5);
+    for (const word of words) {
+      const candidateSet = word.toUpperCase();
+      if (!IGNORED_SET_CODES.has(candidateSet) && !/^\d+$/.test(candidateSet)) {
+        return { collectorNumber: num, setCode: candidateSet };
+      }
     }
   }
 
@@ -676,9 +689,9 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
     const h = img.naturalHeight || img.height;
     if (!w || !h) return null;
 
-    // 1. High-contrast Footer Crop (bottom ~15% of modern MTG card)
+    // 1. High-contrast Footer Crop (bottom ~16% of modern MTG card)
     const footerCanvas = document.createElement('canvas');
-    const footerH = Math.max(32, Math.floor(h * 0.15));
+    const footerH = Math.max(36, Math.floor(h * 0.16));
     const footerY = Math.max(0, h - footerH);
     footerCanvas.width = w;
     footerCanvas.height = footerH;
@@ -686,23 +699,30 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
     if (fCtx) {
       fCtx.drawImage(img, 0, footerY, w, footerH, 0, 0, w, footerH);
 
-      // Contrast enhancement: binarize light text on dark card border
-      const imgData = fCtx.getImageData(0, 0, w, footerH);
-      const d = imgData.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-        const bin = lum > 115 ? 255 : 0;
-        d[i] = bin;
-        d[i + 1] = bin;
-        d[i + 2] = bin;
+      // Pass 1A: Raw footer (lets Tesseract's built-in adaptive Otsu/Sauvola binarizer do its work)
+      const rawFooterDataUrl = footerCanvas.toDataURL('image/png');
+      const rawFooterRes = await worker.recognize(rawFooterDataUrl);
+      const rawFooterText = rawFooterRes?.data?.text || '';
+
+      let parsedFooter = parseMtgFooterText(rawFooterText);
+
+      // Pass 1B: If raw failed, try high-contrast binarization
+      if (!parsedFooter) {
+        const imgData = fCtx.getImageData(0, 0, w, footerH);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+          const bin = lum > 115 ? 255 : 0;
+          d[i] = bin;
+          d[i + 1] = bin;
+          d[i + 2] = bin;
+        }
+        fCtx.putImageData(imgData, 0, 0);
+        const binFooterDataUrl = footerCanvas.toDataURL('image/png');
+        const binFooterRes = await worker.recognize(binFooterDataUrl);
+        parsedFooter = parseMtgFooterText(binFooterRes?.data?.text || '');
       }
-      fCtx.putImageData(imgData, 0, 0);
 
-      const footerDataUrl = footerCanvas.toDataURL('image/png');
-      const footerRes = await worker.recognize(footerDataUrl);
-      const footerText = footerRes?.data?.text || '';
-
-      const parsedFooter = parseMtgFooterText(footerText);
       if (parsedFooter?.setCode && parsedFooter?.collectorNumber) {
         console.log('[CardScanner:OCR] 🎯 Parsed footer:', parsedFooter);
         const cardMatch = await lookupExactScryfallCard('', parsedFooter.setCode, parsedFooter.collectorNumber);
@@ -724,9 +744,9 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
       }
     }
 
-    // 2. Title Crop (top ~18% of card)
+    // 2. Title Crop (top ~20% of card)
     const titleCanvas = document.createElement('canvas');
-    const titleH = Math.max(40, Math.floor(h * 0.18));
+    const titleH = Math.max(45, Math.floor(h * 0.20));
     titleCanvas.width = w;
     titleCanvas.height = titleH;
     const tCtx = titleCanvas.getContext('2d');
@@ -740,6 +760,10 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
         .filter((l: string) => l.length >= 3);
 
       for (const candidateName of titleLines) {
+        // Skip generic header words
+        if (/^(creature|instant|sorcery|enchantment|artifact|land|legendary|planeswalker)$/i.test(candidateName)) {
+          continue;
+        }
         console.log('[CardScanner:OCR] 🔍 Testing candidate title line:', candidateName);
         const cardMatch = await lookupExactScryfallCard(candidateName);
         if (cardMatch) {
@@ -832,7 +856,25 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
   "confidence": "high"
 }`;
 
-  const rawResponseText = await queryGeminiVision(apiKey, base64Jpeg, prompt);
+  let rawResponseText: string;
+  try {
+    rawResponseText = await queryGeminiVision(apiKey, base64Jpeg, prompt);
+  } catch (aiErr: any) {
+    if (engine === 'hybrid') {
+      const msg = aiErr?.message || '';
+      if (
+        msg.includes('quota') ||
+        msg.includes('429') ||
+        msg.includes('limit') ||
+        msg.includes('RESOURCE_EXHAUSTED')
+      ) {
+        throw new Error(
+          'Local OCR could not match this card and Gemini AI fallback reached its free-tier rate limit (15 scans/min). Tap "Switch to Local OCR Only" on screen for unlimited scans, or center the card in brighter light.'
+        );
+      }
+    }
+    throw aiErr;
+  }
 
   if (!rawResponseText) {
     throw new Error('Gemini Vision did not return any analysis for the image');
