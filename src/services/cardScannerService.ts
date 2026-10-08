@@ -1,4 +1,4 @@
-﻿import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { ScryfallCard } from '../types/mtg';
 import { normalizeFrostpointCard } from './api';
 
@@ -28,11 +28,24 @@ export const POPULAR_GEMINI_MODELS = [
 
 /**
  * Retrieves the configured Gemini model, defaulting to gemini-3.8-flash.
+ * Automatically clears out and migrates legacy/prohibited models (e.g. gemini-2.0-flash, gemini-1.5-flash).
  */
 export function getStoredGeminiModel(): string {
   if (typeof window === 'undefined') return DEFAULT_GEMINI_MODEL;
   const localModel = localStorage.getItem(STORAGE_KEY_GEMINI_MODEL)?.trim();
-  if (localModel) return localModel;
+  if (localModel) {
+    // Automatically sanitize and migrate deprecated models
+    if (
+      localModel.includes('2.0') ||
+      localModel.includes('1.5') ||
+      localModel.includes('gemini-pro') ||
+      localModel === 'gemini-1.0-pro'
+    ) {
+      localStorage.setItem(STORAGE_KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL);
+      return DEFAULT_GEMINI_MODEL;
+    }
+    return localModel;
+  }
   return DEFAULT_GEMINI_MODEL;
 }
 
@@ -362,13 +375,11 @@ export async function lookupExactScryfallCard(
  * Flash models supported on Google Generative Language v1beta.
  * Primary model is gemini-3.8-flash (as directed by Google API migration notice).
  */
-const SUPPORTED_MODELS = [
+export const SUPPORTED_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.8-flash-lite',
   'gemini-3.5-flash',
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
 ] as const;
 
 // Cache the verified working model in memory so subsequent scans hit it on attempt #1 with 0ms delay
@@ -381,12 +392,30 @@ async function queryGeminiVision(
 ): Promise<string> {
   const preferredModel = getStoredGeminiModel();
   // Candidate sequence:
-  // 1. User preferred model
+  // 1. User preferred model (if valid and not deprecated)
   // 2. Previously cached working model
   // 3. Other supported models in cascade order
+  const rawCandidates = [
+    preferredModel,
+    cachedWorkingModel || '',
+    ...SUPPORTED_MODELS,
+  ];
+
+  // Strictly filter out any deprecated 1.5, 2.0, or legacy pro models
   const candidateModels = Array.from(
-    new Set([preferredModel, cachedWorkingModel || '', ...SUPPORTED_MODELS])
-  ).filter(Boolean);
+    new Set(
+      rawCandidates.filter(
+        (m) =>
+          Boolean(m) &&
+          !m.includes('2.0') &&
+          !m.includes('1.5') &&
+          !m.includes('gemini-pro')
+      )
+    )
+  );
+  if (candidateModels.length === 0) {
+    candidateModels.push(DEFAULT_GEMINI_MODEL);
+  }
 
   let primaryError: Error | null = null;
   let lastError: Error | null = null;
@@ -422,6 +451,7 @@ async function queryGeminiVision(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'User-Agent': 'aistudio-build',
         },
         body: JSON.stringify(payload),
       });
@@ -458,14 +488,12 @@ async function queryGeminiVision(
           continue;
         }
 
-        const modelErr = new Error(`Gemini (${model}): ${rawMsg}`);
-
         // If this model is deprecated, decommissioned or not found, proceed to next candidate without blocking
         if (rawMsg.includes('no longer available') || rawMsg.includes('not found') || res.status === 404) {
-          lastError = modelErr;
           continue;
         }
 
+        const modelErr = new Error(`Gemini (${model}): ${rawMsg}`);
         if (!primaryError) primaryError = modelErr;
         lastError = modelErr;
       }
@@ -486,7 +514,14 @@ async function queryGeminiVision(
   // 2. GoogleGenAI SDK fallback attempts
   for (const sdkModel of candidateModels) {
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
       const sdkResp = await ai.models.generateContent({
         model: sdkModel,
         contents: [
@@ -524,7 +559,7 @@ async function queryGeminiVision(
     }
   }
 
-  throw primaryError || lastError || new Error('Failed to analyze card image with Gemini Vision');
+  throw primaryError || lastError || new Error(`Failed to analyze card image with Gemini (${preferredModel}). Please ensure your Gemini API key is valid and has active quota.`);
 }
 
 /**

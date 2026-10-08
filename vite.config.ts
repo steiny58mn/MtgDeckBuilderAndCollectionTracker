@@ -16,6 +16,11 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    define: {
+      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(
+        process.env.GEMINI_API_KEY || env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || ''
+      ),
+    },
     server: {
       port: 3000,
       host: '0.0.0.0',

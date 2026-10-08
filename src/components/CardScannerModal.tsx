@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Camera, 
   Sparkles, 
@@ -31,6 +31,10 @@ import {
   identifyCardFromImage, 
   getStoredGeminiApiKey, 
   setStoredGeminiApiKey,
+  getStoredGeminiModel,
+  setStoredGeminiModel,
+  POPULAR_GEMINI_MODELS,
+  DEFAULT_GEMINI_MODEL
 } from '../services/cardScannerService';
 import { playScanSuccessSound, playScanErrorSound, unlockAudio } from '../utils/soundUtils';
 import { getCardImageUrl, getAutocomplete, fetchCardPrints } from '../services/api';
@@ -140,6 +144,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // API Key Settings Modal
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState<string>(() => getStoredGeminiApiKey());
+  const [selectedModel, setSelectedModel] = useState<string>(() => getStoredGeminiModel());
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
   // Manual fallback search
@@ -342,11 +347,18 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       playScanErrorSound();
       setFailureCount((c) => c + 1);
 
+      let errorDetail = err?.message || 'Could not recognize card. Ensure card is clear, centered, and well-lit.';
+      if (errorDetail.includes('no longer available') || errorDetail.includes('gemini-2.0')) {
+        setStoredGeminiModel(DEFAULT_GEMINI_MODEL);
+        setSelectedModel(DEFAULT_GEMINI_MODEL);
+        errorDetail = 'Updated scanner to Gemini 3.8 Flash. Please retry your scan.';
+      }
+
       // Quick fade-out failure notification
       setQuickNotice({
         type: 'failure',
         title: 'Scan Failed',
-        detail: err?.message || 'Could not recognize card. Ensure card is clear, centered, and well-lit.',
+        detail: errorDetail,
         timestamp: Date.now(),
       });
 
@@ -1481,8 +1493,31 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             </div>
 
             <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-              Google Gemini Vision (gemini-2.0-flash) powers the automatic recognition of card titles, set codes, and collector numbers directly from your camera in batch.
+              Google Gemini Vision (gemini-3.8-flash) powers the automatic recognition of card titles, set codes, and collector numbers directly from your camera in batch.
             </p>
+
+            <div className="mb-3">
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Gemini Vision Model
+              </label>
+              <select
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  setStoredGeminiModel(e.target.value);
+                }}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 font-sans"
+              >
+                {POPULAR_GEMINI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Default: <span className="text-violet-400 font-mono font-medium">{DEFAULT_GEMINI_MODEL}</span> (Recommended)
+              </p>
+            </div>
 
             <div className="mb-3">
               <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
@@ -1515,7 +1550,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
             {apiKeySavedSuccess && (
               <div className="text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 rounded-lg p-2 mb-3 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                API key saved successfully!
+                Settings saved successfully!
               </div>
             )}
 
@@ -1524,6 +1559,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 type="button"
                 onClick={() => {
                   setStoredGeminiApiKey(apiKeyInput);
+                  setStoredGeminiModel(selectedModel);
                   setApiKeySavedSuccess(true);
                   setTimeout(() => {
                     setApiKeySavedSuccess(false);
@@ -1532,7 +1568,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                 }}
                 className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-bold cursor-pointer"
               >
-                Save API Key
+                Save Settings
               </button>
               <button
                 type="button"
