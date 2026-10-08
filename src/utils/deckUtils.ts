@@ -345,12 +345,14 @@ export function calculateDeckCompletion(
   cards.forEach((c) => {
     const cat = (c.category || 'main').toLowerCase();
     const cName = (c.name || '').trim().toLowerCase();
+    const cleanCName = cName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
+    const cleanCmdrName = commanderName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
 
     // Check if this card is explicitly the commander or designated commander
     const isCmdr =
       cat === 'commander' ||
       Boolean(commanderId && c.scryfallId === commanderId) ||
-      Boolean(commanderName && (cName === commanderName || cName.split('//')[0].trim() === commanderName.split('//')[0].trim()));
+      Boolean(commanderName && (cName === commanderName || (cleanCmdrName && cleanCName === cleanCmdrName)));
 
     if (isCmdr) {
       foundCommanderCard = true;

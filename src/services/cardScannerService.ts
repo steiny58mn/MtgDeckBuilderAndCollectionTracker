@@ -373,17 +373,19 @@ export async function lookupExactScryfallCard(
     }
 
     // 3. Fuzzy card name search
-    try {
-      const fuzzyUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cleanName)}`;
-      const res = await fetch(fuzzyUrl, { headers: { Accept: 'application/json' } });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.id) {
-          return normalizeFrostpointCard(json);
+    if (isValidCardName(cleanName) && !/^(our|market|shows|here|this|the|i|scanning|analyzing|unable|cannot|error)\b/i.test(cleanName)) {
+      try {
+        const fuzzyUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cleanName)}`;
+        const res = await fetch(fuzzyUrl, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.id) {
+            return normalizeFrostpointCard(json);
+          }
         }
+      } catch (err) {
+        console.warn('[CardScanner] Fuzzy lookup fallback failed:', err);
       }
-    } catch (err) {
-      console.warn('[CardScanner] Fuzzy lookup fallback failed:', err);
     }
   }
 
@@ -830,6 +832,16 @@ export function isValidCardName(name: string | undefined | null): boolean {
   ) {
     return false;
   }
+
+  // Reject conversational text, boilerplate, or AI phrases
+  if (
+    /^(our market research|market research|shows that players|here is|analyzing|this image|the card|error|json|i have|i cannot|sorry|as an ai|unable to|could not)/i.test(
+      clean
+    )
+  ) {
+    return false;
+  }
+  if (/our\s+market\s+research/i.test(clean)) return false;
 
   // Must contain at least one letter
   if (!/[a-zA-Z]/.test(clean)) return false;

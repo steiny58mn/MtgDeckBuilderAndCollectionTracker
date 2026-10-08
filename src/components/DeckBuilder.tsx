@@ -1630,12 +1630,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
 
     if (ownershipFilter === 'owned') {
-      const inCol = getCardOwnedQuantity(c.name);
+      const inCol = getCardOwnedQuantity(c);
       return inCol > 0;
     }
 
     if (ownershipFilter === 'unowned') {
-      const inCol = getCardOwnedQuantity(c.name);
+      const inCol = getCardOwnedQuantity(c);
       return inCol < (c.quantity || 1);
     }
 
