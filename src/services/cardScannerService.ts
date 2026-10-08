@@ -812,6 +812,35 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
 }
 
 /**
+ * Validates whether an extracted string is a plausible MTG card name
+ * and filters out JSON schema keys, placeholders (like "card_"), and boilerplate.
+ */
+export function isValidCardName(name: string | undefined | null): boolean {
+  if (!name) return false;
+  const clean = name.trim();
+  if (clean.length < 2 || clean.length > 70) return false;
+
+  // Reject schema keys, prefixes, and partial tokens (e.g. "card_", "card_name", "card-title")
+  if (/^card[_\s-]?/i.test(clean)) return false;
+  if (/[_\s-]name$/i.test(clean) && !/\s/.test(clean)) return false;
+  if (
+    /^(card|name|title|exact card name|card name|unknown|null|undefined|none|n\/a|not found|no card|mtg card|magic card|sample card|sample|collector|collector_number|set_code|json|foil|true|false|front|back|front_face|back_face)$/i.test(
+      clean
+    )
+  ) {
+    return false;
+  }
+
+  // Must contain at least one letter
+  if (!/[a-zA-Z]/.test(clean)) return false;
+
+  // Cannot contain code syntax brackets, braces, or unparsed quotes
+  if (/[{}[\]\\\/=:]/.test(clean)) return false;
+
+  return true;
+}
+
+/**
  * Resiliently extracts MTG card identification fields from raw AI output.
  * Handles strict JSON, markdown codeblocks, trailing commas, single quotes,
  * unquoted keys, bold markdown labels (**Card Name:**), natural language,
@@ -845,12 +874,13 @@ export function parseCardAiResponse(rawResponseText: string): {
     // Attempt direct parse
     try {
       const parsed = JSON.parse(candidateJson);
-      const name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
-      const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim();
-      const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim();
+      let name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
+      if (!isValidCardName(name)) name = '';
+      const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+      const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim().replace(/[^a-zA-Z0-9]/g, '');
       const foil = Boolean(parsed.is_foil ?? parsed.isFoil ?? parsed.foil);
       const conf = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
-      if (name || set) {
+      if (name || (set && num)) {
         return {
           card_name: name,
           set_code: set,
@@ -866,12 +896,13 @@ export function parseCardAiResponse(rawResponseText: string): {
           .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
           .replace(/'/g, '"');
         const parsed = JSON.parse(quotedKeysJson);
-        const name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
-        const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim();
-        const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim();
+        let name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
+        if (!isValidCardName(name)) name = '';
+        const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+        const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim().replace(/[^a-zA-Z0-9]/g, '');
         const foil = Boolean(parsed.is_foil ?? parsed.isFoil ?? parsed.foil);
         const conf = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
-        if (name || set) {
+        if (name || (set && num)) {
           return {
             card_name: name,
             set_code: set,
@@ -887,10 +918,6 @@ export function parseCardAiResponse(rawResponseText: string): {
   }
 
   // 3. Resilient regex extraction across text (handles **, quotes, unquoted keys, line-based output)
-  // Matches: **Card Name:** Sol Ring, "card_name": "Sol Ring", - Card Name: Sol Ring, Name = Sol Ring
-  const nameMatch =
-    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:card[_\s-]?name|card[_\s-]?title|name|card|title)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([^\r\n"',\}\*]+)/i);
-
   const setMatch =
     rawResponseText.match(/(?:\*{1,2}|["'`])?(?:set[_\s-]?code|set|expansion)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([a-zA-Z0-9]{3,5})/i);
 
@@ -900,10 +927,13 @@ export function parseCardAiResponse(rawResponseText: string): {
   const foilMatch =
     rawResponseText.match(/(?:\*{1,2}|["'`])?(?:is[_\s-]?foil|foil|finish)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?(true|false|yes|no|foil|non-foil|regular)/i);
 
+  const nameMatch =
+    rawResponseText.match(/(?:\*{1,2}|["'`])?(?:card[_\s-]?name|card[_\s-]?title|name|title)(?:\*{1,2}|["'`])?\s*[:=]\s*(?:\*{1,2}|["'`])?([^\r\n"',\}\*]+)/i);
+
   if (nameMatch && nameMatch[1]) {
     const rawFoil = foilMatch ? foilMatch[1].toLowerCase() : 'false';
-    const cleanName = nameMatch[1].replace(/^[*\s"']+|[*\s"']+$/g, '').trim();
-    if (cleanName.length >= 2) {
+    const cleanName = nameMatch[1].replace(/^[*\s"':]+|[*\s"':]+$/g, '').trim();
+    if (isValidCardName(cleanName)) {
       return {
         card_name: cleanName,
         set_code: setMatch ? setMatch[1].trim() : '',
@@ -920,7 +950,7 @@ export function parseCardAiResponse(rawResponseText: string): {
     rawResponseText.match(/(?:identified|recognize[d]?|shows)\s+(?:a\s+|an\s+)?["']?([A-Z][a-zA-Z0-9',\s\-]{2,35}?)["']?\s+(?:from|\(|\-|\.)/i);
   if (nlMatch) {
     const foundName = (nlMatch[1] || nlMatch[2] || '').trim();
-    if (foundName && foundName.length >= 2) {
+    if (isValidCardName(foundName)) {
       return {
         card_name: foundName,
         set_code: setMatch ? setMatch[1].trim() : '',
@@ -931,11 +961,11 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
-  // 5. Scan lines for any quoted card title or clean title-like line
+  // 5. Scan lines for any quoted card title
   const lines = rawResponseText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
-    const quoted = line.match(/"([^"]{3,45})"/);
-    if (quoted && !/^(json|card_name|set_code|collector_number|is_foil|confidence|true|false)$/i.test(quoted[1])) {
+    const quoted = line.match(/"([^"]{2,55})"/);
+    if (quoted && isValidCardName(quoted[1])) {
       return {
         card_name: quoted[1].trim(),
         set_code: setMatch ? setMatch[1].trim() : '',
@@ -946,12 +976,11 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
-  // 6. Last resort: first non-empty line between 3 and 40 characters that doesn't look like code or boilerplate
+  // 6. Last resort: clean non-empty line between 3 and 40 characters that passes card name validation
   for (const line of lines) {
-    const stripped = line.replace(/^[*\-#\s"']+|[*\-#\s"']+$/g, '').trim();
+    const stripped = line.replace(/^[*\-#\s"':]+|[*\-#\s"':]+$/g, '').trim();
     if (
-      stripped.length >= 3 &&
-      stripped.length <= 40 &&
+      isValidCardName(stripped) &&
       !/^[{}[\]\/\\]/.test(stripped) &&
       !/^(here is|i have|analyzing|this image|the card|error|json)/i.test(stripped)
     ) {
@@ -965,9 +994,19 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
+  // If set and collector number were found even if card name was illegible
+  if (setMatch && numMatch) {
+    return {
+      card_name: '',
+      set_code: setMatch[1].trim(),
+      collector_number: numMatch[1].trim(),
+      is_foil: false,
+      confidence: 'low',
+    };
+  }
+
   console.warn('[CardScanner] Raw unparseable AI response:', rawResponseText);
-  const snippet = rawResponseText.slice(0, 90).replace(/[\r\n]+/g, ' ').trim();
-  throw new Error(`Could not parse card identification details from AI response: "${snippet || 'Empty output'}"`);
+  throw new Error('Could not read card identification details. Please center the card within the crosshairs under steady light.');
 }
 
 /**
@@ -1062,22 +1101,28 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
   // Resilient JSON and attribute parsing
   const parsed = parseCardAiResponse(rawResponseText);
 
-  const detectedName = (parsed.card_name || '').trim();
-  const detectedSet = (parsed.set_code || '').trim();
-  const detectedNumber = String(parsed.collector_number || '').trim();
+  const detectedName = isValidCardName(parsed.card_name) ? parsed.card_name.trim() : '';
+  const detectedSet = (parsed.set_code || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+  const detectedNumber = String(parsed.collector_number || '').trim().replace(/[^a-zA-Z0-9]/g, '');
   const detectedFoil = Boolean(parsed.is_foil);
   const confidence = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
 
-  if (!detectedName && !detectedSet) {
+  if (!detectedName && (!detectedSet || !detectedNumber)) {
     throw new Error('Could not identify a Magic card in this image. Please ensure the card is well-lit and clearly centered.');
   }
 
   // Lookup the card on Scryfall
   const matchedCard = await lookupExactScryfallCard(detectedName, detectedSet, detectedNumber);
   if (!matchedCard) {
-    throw new Error(
-      `Recognized "${detectedName}" (${detectedSet.toUpperCase()} #${detectedNumber}), but could not find matching card on Scryfall.`
-    );
+    if (detectedName) {
+      throw new Error(
+        `Could not find card "${detectedName}" on Scryfall. Try centering the card under better light, or tap Manual Search to add it.`
+      );
+    } else {
+      throw new Error(
+        `Could not find a card matching set ${detectedSet.toUpperCase()} #${detectedNumber} on Scryfall.`
+      );
+    }
   }
 
   // If Scryfall matched under official rules name but image identified a printed/unofficial title (e.g. "Xenk, Paladin Unbroken"), preserve it!

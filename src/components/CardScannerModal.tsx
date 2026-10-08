@@ -352,6 +352,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       };
 
       setScannedBatchCards((prev) => [batchItem, ...prev]);
+      setShowBatchDrawer(true);
 
       const scanNames = getCardNames(scanResult.card);
       // Quick fade-out success notification
@@ -1384,7 +1385,130 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         )}
       </div>
 
-      {/* Batch Scanned History Tray (Collapsible strip showing all cards added this session) */}
+      {/* Persistent Last Scanned Card Bar (allows instant quantity increase without scanning again) */}
+      {scannedBatchCards.length > 0 && (() => {
+        const lastCard = scannedBatchCards[0];
+        const names = getCardNames(lastCard.card);
+        const qty = lastCard.quantity || 1;
+        return (
+          <div className="bg-slate-950/95 border-t border-emerald-500/60 px-3 py-2 text-white shadow-2xl z-25 backdrop-blur-md">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              {/* Card info & artwork preview */}
+              <div
+                onClick={() => handleOpenVersionEditor(lastCard)}
+                className="flex items-center gap-2.5 min-w-0 cursor-pointer group flex-1"
+                title="Tap to change version, art printing, or finish"
+              >
+                <div className="relative w-8 h-11 shrink-0 rounded overflow-hidden border border-emerald-500/60 shadow-md">
+                  <img
+                    src={getCardImageUrl(lastCard.card, 'small')}
+                    alt={lastCard.card.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  />
+                  {lastCard.isFoil && (
+                    <div className="absolute top-0.5 left-0.5 bg-amber-400 text-slate-950 p-0.5 rounded-full shadow z-10">
+                      <Sparkles className="w-2 h-2" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors truncate">
+                      {names.actualName}
+                    </span>
+                    {lastCard.isFoil && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5 font-semibold">
+                        <Sparkles className="w-2.5 h-2.5" /> Foil
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate">
+                    {lastCard.card.set?.toUpperCase()} #{lastCard.card.collector_number} · In {currentBinder?.name || 'Binder'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quantity Stepper & Direct Multiplier Shortcuts */}
+              <div className="flex items-center gap-1.5 ml-auto shrink-0">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider hidden xs:inline">
+                  Copies:
+                </span>
+                <div className="flex items-center bg-slate-900 border border-emerald-500/60 rounded-lg p-0.5 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateBatchCardQuantity(lastCard, -1)}
+                    className="w-6 h-6 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-90 transition-transform"
+                    title="Decrease copies (-1)"
+                  >
+                    -
+                  </button>
+                  <span className="px-2 font-mono font-extrabold text-xs text-emerald-300">
+                    {qty}x
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 1)}
+                    className="w-6 h-6 rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-90 transition-transform shadow-xs"
+                    title="Add another copy (+1)"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Quick Add Shortcuts: +1, +2, or Make 4x Playset */}
+                <button
+                  type="button"
+                  onClick={() => handleUpdateBatchCardQuantity(lastCard, 1)}
+                  className="px-2 py-1 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-600/60 text-[10px] font-bold cursor-pointer transition-colors active:scale-95 shadow-xs"
+                  title="Add 1 more copy without scanning again"
+                >
+                  +1
+                </button>
+
+                {qty < 4 ? (
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 4 - qty)}
+                    className="px-2 py-1 rounded-md bg-emerald-800 hover:bg-emerald-700 text-white border border-emerald-400 text-[10px] font-extrabold cursor-pointer transition-colors active:scale-95 shadow-xs"
+                    title="Make it a full 4x playset (add remaining copies)"
+                  >
+                    Make 4x
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 4)}
+                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-[10px] font-bold cursor-pointer transition-colors active:scale-95 shadow-xs"
+                    title="Add 4 more copies"
+                  >
+                    +4
+                  </button>
+                )}
+
+                {/* Quick Edit Version */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenVersionEditor(lastCard)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Change version, art or foil finish"
+                >
+                  <Layers className="w-3.5 h-3.5 text-violet-400" />
+                </button>
+
+                {/* Quick Delete */}
+                <button
+                  type="button"
+                  onClick={() => handleDeleteBatchCard(lastCard)}
+                  className="p-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800/60 transition-colors cursor-pointer"
+                  title="Delete this card from binder"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {scannedBatchCards.length > 0 && (
         <div className="bg-slate-900 border-t border-slate-800 z-20">
           <div
