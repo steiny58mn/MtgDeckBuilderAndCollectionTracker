@@ -17,10 +17,24 @@ export interface CardScanResult {
 }
 
 export type ScanEngineMode = 'hybrid' | 'gemini_only' | 'ocr_only';
+export type ScanTargetMode = 'full' | 'footer';
 
 const STORAGE_KEY_GEMINI_API_KEY = 'mtg_gemini_api_key';
 const STORAGE_KEY_GEMINI_MODEL = 'mtg_gemini_model';
 const STORAGE_KEY_SCAN_ENGINE = 'mtg_scan_engine';
+const STORAGE_KEY_SCAN_TARGET = 'mtg_scan_target';
+
+export function getStoredScanTarget(): ScanTargetMode {
+  if (typeof window === 'undefined') return 'full';
+  const val = localStorage.getItem(STORAGE_KEY_SCAN_TARGET)?.trim() as ScanTargetMode;
+  if (val === 'footer' || val === 'full') return val;
+  return 'full';
+}
+
+export function setStoredScanTarget(target: ScanTargetMode): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY_SCAN_TARGET, target);
+}
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
@@ -767,7 +781,10 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
  * Fast client-side OCR recognition targeting MTG card footer & title banner.
  * Runs in WebAssembly via Tesseract.js with 0 API cost.
  */
-export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<CardScanResult | null> {
+export async function recognizeCardWithLocalOcr(
+  base64Jpeg: string,
+  scanTarget?: ScanTargetMode
+): Promise<CardScanResult | null> {
   if (typeof window === 'undefined' || typeof document === 'undefined') return null;
 
   try {
@@ -785,6 +802,61 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
     if (!w || !h) return null;
+
+    // If scanTarget === 'footer', the input image is ALREADY a focused zoom on the card's bottom border!
+    if (scanTarget === 'footer') {
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = w * 2;
+      fullCanvas.height = h * 2;
+      const ctx = fullCanvas.getContext('2d');
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h, 0, 0, w * 2, h * 2);
+
+        // Pass 1: Raw zoomed footer
+        const rawFooterDataUrl = fullCanvas.toDataURL('image/png');
+        const rawFooterRes = await worker.recognize(rawFooterDataUrl);
+        let parsedFooter = parseMtgFooterText(rawFooterRes?.data?.text || '');
+
+        // Pass 2: High-contrast binarization of zoomed footer
+        if (!parsedFooter) {
+          const imgData = ctx.getImageData(0, 0, w * 2, h * 2);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+            const bin = lum > 115 ? 255 : 0;
+            d[i] = bin;
+            d[i + 1] = bin;
+            d[i + 2] = bin;
+          }
+          ctx.putImageData(imgData, 0, 0);
+          const binFooterDataUrl = fullCanvas.toDataURL('image/png');
+          const binFooterRes = await worker.recognize(binFooterDataUrl);
+          parsedFooter = parseMtgFooterText(binFooterRes?.data?.text || '');
+        }
+
+        if (parsedFooter?.setCode && parsedFooter?.collectorNumber) {
+          console.log('[CardScanner:OCR:FooterMode] 🎯 Parsed footer:', parsedFooter);
+          const cardMatch = await lookupExactScryfallCard('', parsedFooter.setCode, parsedFooter.collectorNumber);
+          if (cardMatch) {
+            return {
+              card: cardMatch,
+              isFoil: false,
+              confidence: 'high',
+              scanEngine: 'ocr',
+              rawDetected: {
+                card_name: cardMatch.name,
+                set_code: parsedFooter.setCode,
+                collector_number: parsedFooter.collectorNumber,
+                is_foil: false,
+                engine: 'ocr',
+              },
+            };
+          }
+        }
+      }
+    }
 
     // 1. High-contrast Footer Crop (bottom ~16% of modern MTG card, upscaled 2x for OCR clarity)
     const footerCanvas = document.createElement('canvas');
@@ -1118,14 +1190,15 @@ export function parseCardAiResponse(rawResponseText: string): {
 export async function identifyCardFromImage(
   base64Jpeg: string,
   customApiKey?: string,
-  preferredEngine?: ScanEngineMode
+  preferredEngine?: ScanEngineMode,
+  scanTarget?: ScanTargetMode
 ): Promise<CardScanResult> {
   const engine = preferredEngine || getStoredScanEngine();
 
   // Tier 1: Fast Local OCR
   if (engine === 'hybrid' || engine === 'ocr_only') {
     try {
-      const ocrResult = await recognizeCardWithLocalOcr(base64Jpeg);
+      const ocrResult = await recognizeCardWithLocalOcr(base64Jpeg, scanTarget);
       if (ocrResult) {
         console.log('[CardScanner] ⚡ Card recognized via Fast Local OCR:', ocrResult.card.name);
         return ocrResult;
@@ -1136,7 +1209,9 @@ export async function identifyCardFromImage(
 
     if (engine === 'ocr_only') {
       throw new Error(
-        'Local OCR could not read card title or set info. Please ensure card is clear and well-lit, or switch to Hybrid/AI mode.'
+        scanTarget === 'footer'
+          ? 'Local OCR could not read footer set/collector code. Ensure the bottom text is well-lit and aligned inside the frame.'
+          : 'Local OCR could not read card title or set info. Please ensure card is clear and well-lit, or switch to Hybrid/AI mode.'
       );
     }
   }
@@ -1154,7 +1229,25 @@ export async function identifyCardFromImage(
     );
   }
 
-  const prompt = `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
+  const prompt = scanTarget === 'footer'
+    ? `You are an expert Magic: The Gathering (MTG) card scanner.
+This photo is a zoomed-in close-up of the BOTTOM FOOTER / BOTTOM BORDER of an MTG card.
+
+CARD FOOTER INSTRUCTIONS:
+1. Extract the 3 to 5 letter uppercase expansion SET CODE (e.g. "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK").
+2. Extract the COLLECTOR NUMBER (e.g. "045", "242", "123a", "301").
+3. If any card title text is visible in the frame, provide it in "card_name". Otherwise leave "card_name" as "".
+4. Check if holographic foil sheen or star stamp is visible.
+
+Respond ONLY with a valid, raw JSON object:
+{
+  "card_name": "",
+  "set_code": "BLB",
+  "collector_number": "045",
+  "is_foil": false,
+  "confidence": "high"
+}`
+    : `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
 Analyze this MTG card photo and identify the card.
 
 CARD RECOGNITION PRIORITIES:

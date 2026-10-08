@@ -42,7 +42,10 @@ import {
   setStoredGeminiModel,
   getStoredScanEngine,
   setStoredScanEngine,
+  getStoredScanTarget,
+  setStoredScanTarget,
   ScanEngineMode,
+  ScanTargetMode,
   POPULAR_GEMINI_MODELS,
   DEFAULT_GEMINI_MODEL
 } from '../services/cardScannerService';
@@ -174,6 +177,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [apiKeyInput, setApiKeyInput] = useState<string>(() => getStoredGeminiApiKey());
   const [selectedModel, setSelectedModel] = useState<string>(() => getStoredGeminiModel());
   const [scanEngine, setScanEngine] = useState<ScanEngineMode>(() => getStoredScanEngine());
+  const [scanTarget, setScanTarget] = useState<ScanTargetMode>(() => getStoredScanTarget());
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
   // Manual fallback search
@@ -341,7 +345,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         setStatusMessage('Identifying card with Gemini...');
       }
 
-      const scanResult = await identifyCardFromImage(base64Only, apiKey, scanEngine);
+      const scanResult = await identifyCardFromImage(base64Only, apiKey, scanEngine, scanTarget);
 
       const finalIsFoil = overrideFoil !== null ? overrideFoil : scanResult.isFoil;
       const engineLabel = scanResult.scanEngine === 'ocr' ? '⚡ Local OCR' : '🤖 Gemini 3.8 Flash';
@@ -450,6 +454,28 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vh = video.videoHeight;
 
     if (vw && vh) {
+      if (scanTarget === 'footer') {
+        // Zoom in specifically on the lower ~28% of the video frame where the card footer sits
+        const cropH = Math.round(vh * 0.28);
+        const cropW = Math.min(vw * 0.96, Math.round(cropH * 3.8));
+        const cropX = Math.max(0, Math.round((vw - cropW) / 2));
+        const cropY = Math.max(0, Math.round(vh * 0.52));
+
+        const canvas = document.createElement('canvas');
+        const targetW = 950;
+        const targetH = 250;
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+          handleProcessImage(canvas);
+          return;
+        }
+      }
+
       // Generous card crop with expanded safety padding (~1:1.38 aspect ratio) for zoomed-out leniency
       const maxAllowedH = Math.round(vh * 0.97);
       const maxAllowedW = Math.round(vw * 0.94);
@@ -1113,111 +1139,187 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           className="absolute inset-0 w-full h-full object-cover"
         />
 
-        {/* Card Alignment Reticle Frame with Auto-Scan Lock-On Glow (Zoomed-out for extra placement leniency) */}
-        <div
-          className={`relative z-10 w-[90vw] max-w-[365px] sm:max-w-[390px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 ${
-            isCrosshairLocked || isProcessing
-              ? 'scale-102 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
-              : ''
-          }`}
-        >
-          {/* Corner brackets (turn emerald green when card is locked in!) */}
-          <div className="flex justify-between">
-            <div
-              className={`w-7 h-7 border-t-3 border-l-3 rounded-tl-lg shadow-sm transition-colors duration-200 ${
-                isCrosshairLocked || isProcessing
-                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
-                  : 'border-violet-500'
-              }`}
-            />
-            <div
-              className={`w-7 h-7 border-t-3 border-r-3 rounded-tr-lg shadow-sm transition-colors duration-200 ${
-                isCrosshairLocked || isProcessing
-                  ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
-                  : 'border-violet-500'
-              }`}
-            />
-          </div>
+        {/* Card Alignment Reticle Frame (Full Card vs Footer Text Only) */}
+        {scanTarget === 'footer' ? (
+          <div
+            className={`relative z-10 w-[92vw] max-w-[420px] h-[105px] sm:h-[120px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-slate-950/40 backdrop-blur-xs border-2 ${
+              isCrosshairLocked || isProcessing
+                ? 'border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.5)] bg-emerald-950/20'
+                : 'border-amber-400/90 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+            }`}
+          >
+            <div className="flex justify-between items-center">
+              <div
+                className={`w-6 h-6 border-t-3 border-l-3 rounded-tl-lg ${
+                  isCrosshairLocked || isProcessing ? 'border-emerald-400' : 'border-amber-400'
+                }`}
+              />
+              <span className="text-[10px] font-mono font-extrabold uppercase tracking-wider text-amber-300 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40">
+                🔎 ALIGN FOOTER TEXT (e.g. 045 BLB)
+              </span>
+              <div
+                className={`w-6 h-6 border-t-3 border-r-3 rounded-tr-lg ${
+                  isCrosshairLocked || isProcessing ? 'border-emerald-400' : 'border-amber-400'
+                }`}
+              />
+            </div>
+            <div className="flex justify-between items-center">
+              <div
+                className={`w-6 h-6 border-b-3 border-l-3 rounded-bl-lg ${
+                  isCrosshairLocked || isProcessing ? 'border-emerald-400' : 'border-amber-400'
+                }`}
+              />
+              <span className="text-[9.5px] font-mono text-slate-200">
+                {isProcessing ? 'Reading footer...' : 'Center bottom border text'}
+              </span>
+              <div
+                className={`w-6 h-6 border-b-3 border-r-3 rounded-br-lg ${
+                  isCrosshairLocked || isProcessing ? 'border-emerald-400' : 'border-amber-400'
+                }`}
+              />
+            </div>
 
-          {/* Set & Number Highlight Region */}
-          <div className="w-full flex items-end justify-between">
-            <div
-              className={`border rounded px-2 py-1 text-[10px] font-mono shadow-sm backdrop-blur-xs flex items-center gap-1 transition-colors ${
-                isCrosshairLocked || isProcessing
-                  ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200'
-                  : 'bg-violet-900/70 border-violet-400/60 text-violet-200'
-              }`}
-            >
-              <span>{isCrosshairLocked ? 'CARD LOCKED IN' : 'SET & # ↓'}</span>
-              {cardQuantity > 1 && (
-                <span className="ml-1 pl-1 border-l border-white/30 font-bold text-amber-300">
-                  +{cardQuantity}x copies
-                </span>
-              )}
+            {/* Continuous Scanning Active Light */}
+            {isProcessing && (
+              <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.9)] animate-pulse" />
+            )}
+          </div>
+        ) : (
+          <div
+            className={`relative z-10 w-[90vw] max-w-[365px] sm:max-w-[390px] aspect-[1/1.4] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 ${
+              isCrosshairLocked || isProcessing
+                ? 'scale-102 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
+                : ''
+            }`}
+          >
+            {/* Corner brackets (turn emerald green when card is locked in!) */}
+            <div className="flex justify-between">
+              <div
+                className={`w-7 h-7 border-t-3 border-l-3 rounded-tl-lg shadow-sm transition-colors duration-200 ${
+                  isCrosshairLocked || isProcessing
+                    ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                    : 'border-violet-500'
+                }`}
+              />
+              <div
+                className={`w-7 h-7 border-t-3 border-r-3 rounded-tr-lg shadow-sm transition-colors duration-200 ${
+                  isCrosshairLocked || isProcessing
+                    ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                    : 'border-violet-500'
+                }`}
+              />
+            </div>
+
+            {/* Set & Number Highlight Region */}
+            <div className="w-full flex items-end justify-between">
+              <div
+                className={`border rounded px-2 py-1 text-[10px] font-mono shadow-sm backdrop-blur-xs flex items-center gap-1 transition-colors ${
+                  isCrosshairLocked || isProcessing
+                    ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200'
+                    : 'bg-violet-900/70 border-violet-400/60 text-violet-200'
+                }`}
+              >
+                <span>{isCrosshairLocked ? 'CARD LOCKED IN' : 'SET & # ↓'}</span>
+                {cardQuantity > 1 && (
+                  <span className="ml-1 pl-1 border-l border-white/30 font-bold text-amber-300">
+                    +{cardQuantity}x copies
+                  </span>
+                )}
+              </div>
+              <div
+                className={`w-7 h-7 border-b-3 border-r-3 rounded-br-lg shadow-sm transition-colors duration-200 ${
+                  isCrosshairLocked || isProcessing
+                    ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
+                    : 'border-violet-500'
+                }`}
+              />
             </div>
             <div
-              className={`w-7 h-7 border-b-3 border-r-3 rounded-br-lg shadow-sm transition-colors duration-200 ${
+              className={`absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 rounded-bl-lg shadow-sm transition-colors duration-200 ${
                 isCrosshairLocked || isProcessing
                   ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
                   : 'border-violet-500'
               }`}
             />
+
+            {/* Continuous Scanning Active Light */}
+            {isProcessing && (
+              <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(52,211,153,0.8)] animate-pulse" />
+            )}
           </div>
-          <div
-            className={`absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 rounded-bl-lg shadow-sm transition-colors duration-200 ${
-              isCrosshairLocked || isProcessing
-                ? 'border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]'
-                : 'border-violet-500'
-            }`}
-          />
+        )}
 
-          {/* Continuous Scanning Active Light */}
-          {isProcessing && (
-            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(52,211,153,0.8)] animate-pulse" />
-          )}
-        </div>
-
-        {/* Top Hint Bar & Mode Badge over live camera */}
+        {/* Top Hint Bar & Mode Badges over live camera */}
         <div className="absolute top-3 inset-x-3 sm:inset-x-4 z-20 flex items-center justify-between pointer-events-none gap-2">
-          {/* Prominent Mode Badge (Tap to cycle mode on mobile or desktop) */}
-          <button
-            type="button"
-            onClick={() => {
-              const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
-                hybrid: 'ocr_only',
-                ocr_only: 'gemini_only',
-                gemini_only: 'hybrid',
-              };
-              const next = nextMode[scanEngine];
-              setScanEngine(next);
-              setStoredScanEngine(next);
-            }}
-            className={`pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold backdrop-blur-md border shadow-lg cursor-pointer transition-all active:scale-95 shrink-0 ${
-              scanEngine === 'hybrid'
-                ? 'bg-violet-950/90 border-violet-400 text-violet-200 shadow-violet-500/20'
-                : scanEngine === 'ocr_only'
-                ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-emerald-500/20'
-                : 'bg-indigo-950/90 border-indigo-400 text-indigo-200 shadow-indigo-500/20'
-            }`}
-            title="Click to switch between Hybrid, Local OCR, and Gemini models"
-          >
-            {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />}
-            {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
-            {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
-            <span>{scanEngine === 'hybrid' ? '⚡ Hybrid Model' : scanEngine === 'ocr_only' ? '⚙️ Local OCR Only' : '🤖 Gemini Only'}</span>
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap pointer-events-auto">
+            {/* Prominent Target Framing Switcher: Full Card vs Footer Only */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextTarget: ScanTargetMode = scanTarget === 'full' ? 'footer' : 'full';
+                setScanTarget(nextTarget);
+                setStoredScanTarget(nextTarget);
+              }}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold backdrop-blur-md border shadow-lg cursor-pointer transition-all active:scale-95 shrink-0 ${
+                scanTarget === 'footer'
+                  ? 'bg-amber-950/90 border-amber-400 text-amber-200 shadow-amber-500/20 ring-1 ring-amber-400/50'
+                  : 'bg-slate-900/90 border-slate-700 text-slate-200 hover:border-slate-500'
+              }`}
+              title="Click to toggle between Full Card scan and Footer Text Only scan"
+            >
+              {scanTarget === 'footer' ? (
+                <>
+                  <Search className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  <span>🔎 Footer Text Mode</span>
+                </>
+              ) : (
+                <>
+                  <Layers className="w-3.5 h-3.5 text-violet-400" />
+                  <span>🃏 Full Card</span>
+                </>
+              )}
+            </button>
+
+            {/* Engine Mode Badge */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
+                  hybrid: 'ocr_only',
+                  ocr_only: 'gemini_only',
+                  gemini_only: 'hybrid',
+                };
+                const next = nextMode[scanEngine];
+                setScanEngine(next);
+                setStoredScanEngine(next);
+              }}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold backdrop-blur-md border shadow-lg cursor-pointer transition-all active:scale-95 shrink-0 ${
+                scanEngine === 'hybrid'
+                  ? 'bg-violet-950/90 border-violet-400 text-violet-200 shadow-violet-500/20'
+                  : scanEngine === 'ocr_only'
+                  ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow-emerald-500/20'
+                  : 'bg-indigo-950/90 border-indigo-400 text-indigo-200 shadow-indigo-500/20'
+              }`}
+              title="Click to switch between Hybrid, Local OCR, and Gemini models"
+            >
+              {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
+              {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
+              {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
+              <span>{scanEngine === 'hybrid' ? '⚡ Hybrid' : scanEngine === 'ocr_only' ? '⚙️ Local OCR' : '🤖 Gemini'}</span>
+            </button>
+          </div>
 
           <div
-            className={`backdrop-blur-md px-3 py-1 rounded-full border text-[10.5px] text-center shadow-lg transition-colors pointer-events-none max-w-[55%] truncate ${
+            className={`backdrop-blur-md px-3 py-1 rounded-full border text-[10.5px] text-center shadow-lg transition-colors pointer-events-none max-w-[45%] truncate ${
               isCrosshairLocked || isProcessing
                 ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200 font-bold'
                 : 'bg-slate-900/85 border-slate-700/60 text-slate-200'
             }`}
           >
             {isProcessing
-              ? (scanEngine === 'hybrid' ? '⚡ Local OCR reading card...' : 'Analyzing card...')
+              ? (scanEngine === 'hybrid' ? '⚡ Reading text...' : 'Analyzing card...')
               : isCrosshairLocked
-              ? 'Card locked in — scanning!'
+              ? 'Card locked in!'
               : autoScanEnabled
               ? swapGuidanceText
               : 'Center card & tap camera button'}
