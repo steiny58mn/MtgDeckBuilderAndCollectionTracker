@@ -301,11 +301,17 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [scanTarget, setScanTarget] = useState<ScanTargetMode>(() => getStoredScanTarget());
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
-  // Manual fallback search
+  // Manual fallback search & version picker
   const [manualSearchOpen, setManualSearchOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
   const [manualSuggestions, setManualSuggestions] = useState<string[]>([]);
   const [isSearchingManual, setIsSearchingManual] = useState(false);
+  const [manualPrints, setManualPrints] = useState<ScryfallCard[]>([]);
+  const [selectedManualVersion, setSelectedManualVersion] = useState<ScryfallCard | null>(null);
+  const [selectedManualFoil, setSelectedManualFoil] = useState<boolean>(false);
+  const [selectedManualQuantity, setSelectedManualQuantity] = useState<number>(1);
+  const [manualVersionFilter, setManualVersionFilter] = useState<string>('');
+  const [manualAddSuccess, setManualAddSuccess] = useState<string | null>(null);
 
   // Edit Card Version / Finish state
   const [editingBatchItem, setEditingBatchItem] = useState<BatchScannedCard | null>(null);
@@ -315,6 +321,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [selectedEditFoil, setSelectedEditFoil] = useState<boolean>(false);
   const [selectedEditQuantity, setSelectedEditQuantity] = useState<number>(1);
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+  const [editVersionFilter, setEditVersionFilter] = useState<string>('');
 
   // Auto fade-out timer for quick success/failure notification toast (all toasts fade out automatically in 3.5s)
   useEffect(() => {
@@ -529,18 +536,6 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       };
 
       setScannedBatchCards((prev) => [batchItem, ...prev]);
-      setShowBatchDrawer(true);
-
-      const scanNames = getCardNames(scanResult.card);
-      // Quick fade-out success notification
-      setQuickNotice({
-        type: 'success',
-        title: `Added ${cardQuantity}x ${scanNames.actualName}`,
-        detail: `${scanResult.scanEngine === 'ocr' ? '⚡ Local OCR · ' : '🤖 Gemini 3.8 Flash · '}${scanNames.hasAlternateName && scanNames.subtitle ? `${scanNames.subtitle} · ` : ''}${scanResult.card.set?.toUpperCase()} #${scanResult.card.collector_number} · ${currentBinder?.name || 'Binder'}`,
-        imageUrl: getCardImageUrl(scanResult.card, 'small'),
-        isFoil: finalIsFoil,
-        timestamp: Date.now(),
-      });
 
       lastScanTimestampRef.current = Date.now();
       setStatusMessage('');
@@ -593,17 +588,6 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               scanEngine: fallbackResult.scanEngine,
             };
             setScannedBatchCards((prev) => [batchItem, ...prev]);
-            setShowBatchDrawer(true);
-
-            const scanNames = getCardNames(fallbackResult.card);
-            setQuickNotice({
-              type: 'success',
-              title: `Added ${cardQuantity}x ${scanNames.actualName}`,
-              detail: `[Full Frame Rescan] ${fallbackResult.scanEngine === 'ocr' ? '⚡ Local OCR · ' : '🤖 Gemini 3.8 Flash · '}${fallbackResult.card.set?.toUpperCase()} #${fallbackResult.card.collector_number}`,
-              imageUrl: getCardImageUrl(fallbackResult.card, 'small'),
-              isFoil: finalIsFoil,
-              timestamp: Date.now(),
-            });
 
             lastScanTimestampRef.current = Date.now();
             setStatusMessage('');
@@ -1135,33 +1119,11 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     try {
       const prints = await fetchCardPrints(name);
       if (prints.length > 0) {
-        const cardToAdd = prints[0];
-        const isFoil = overrideFoil ?? false;
-        await onAddCardToBinder(cardToAdd, cardQuantity, isFoil, selectedBinderId);
-        playScanSuccessSound();
-        setSuccessCount((c) => c + 1);
-
-        const batchItem: BatchScannedCard = {
-          id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          card: cardToAdd,
-          quantity: cardQuantity,
-          isFoil,
-          timestamp: Date.now(),
-        };
-        setScannedBatchCards((prev) => [batchItem, ...prev]);
-
-        setQuickNotice({
-          type: 'success',
-          title: `Added ${cardQuantity}x ${cardToAdd.name}`,
-          detail: `${cardToAdd.set?.toUpperCase()} #${cardToAdd.collector_number} · ${currentBinder?.name || 'Binder'}`,
-          imageUrl: getCardImageUrl(cardToAdd, 'small'),
-          isFoil,
-          timestamp: Date.now(),
-        });
-
-        setManualQuery('');
-        setManualSuggestions([]);
-        setManualSearchOpen(false);
+        setManualPrints(prints);
+        setSelectedManualVersion(prints[0]);
+        setSelectedManualFoil(overrideFoil ?? false);
+        setSelectedManualQuantity(cardQuantity || 1);
+        setManualVersionFilter('');
       } else {
         playScanErrorSound();
         setFailureCount((c) => c + 1);
@@ -1181,6 +1143,37 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         detail: err?.message || 'Failed to fetch card details.',
         timestamp: Date.now(),
       });
+    } finally {
+      setIsSearchingManual(false);
+    }
+  };
+
+  const handleConfirmAddManualCard = async () => {
+    if (!selectedManualVersion) return;
+    setIsSearchingManual(true);
+    setManualAddSuccess(null);
+    try {
+      const cardToAdd = selectedManualVersion;
+      const isFoil = selectedManualFoil;
+      const qty = selectedManualQuantity;
+      await onAddCardToBinder(cardToAdd, qty, isFoil, selectedBinderId);
+      playScanSuccessSound();
+      setSuccessCount((c) => c + 1);
+
+      const batchItem: BatchScannedCard = {
+        id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        card: cardToAdd,
+        quantity: qty,
+        isFoil,
+        timestamp: Date.now(),
+      };
+      setScannedBatchCards((prev) => [batchItem, ...prev]);
+
+      // Set inline success feedback banner inside the modal (no bottom popup banner)
+      setManualAddSuccess(`Added ${qty}x ${cardToAdd.name} [${cardToAdd.set?.toUpperCase()} #${cardToAdd.collector_number}] ${isFoil ? '✨ Foil' : ''} to binder!`);
+    } catch (err: any) {
+      playScanErrorSound();
+      setFailureCount((c) => c + 1);
     } finally {
       setIsSearchingManual(false);
     }
@@ -2193,55 +2186,331 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         </div>
       </div>
 
-      {/* Manual Search Fallback Drawer */}
+      {/* Manual Search Fallback & Version Picker Drawer */}
       {manualSearchOpen && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl">
-            <div className="flex items-center justify-between mb-3">
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2.5">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Search className="w-4 h-4 text-violet-400" />
-                Manual Card Lookup
+                <span>Manual Card Addition</span>
               </h3>
               <button
                 type="button"
-                onClick={() => setManualSearchOpen(false)}
-                className="text-slate-400 hover:text-white"
+                onClick={() => {
+                  setManualSearchOpen(false);
+                  setManualPrints([]);
+                  setSelectedManualVersion(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-xs text-slate-400 mb-3">
-              Type the card name to add it to <strong>{currentBinder?.name}</strong>:
-            </p>
-            <div className="relative mb-3">
-              <input
-                type="text"
-                autoFocus
-                value={manualQuery}
-                onChange={(e) => setManualQuery(e.target.value)}
-                placeholder="e.g. Birds of Paradise, Sol Ring..."
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500"
-              />
-              {isSearchingManual && (
-                <Loader2 className="w-4 h-4 text-violet-400 animate-spin absolute right-3 top-2.5" />
-              )}
-            </div>
 
-            {/* Suggestions list */}
-            {manualSuggestions.length > 0 && (
-              <div className="space-y-1 max-h-48 overflow-y-auto mb-3">
-                {manualSuggestions.map((name) => (
+            {/* Version Selection Mode if prints are loaded */}
+            {manualPrints.length > 0 && selectedManualVersion ? (
+              <div className="space-y-3.5 overflow-y-auto pr-1 flex-1">
+                {/* Active Card Header */}
+                <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded-xl border border-slate-800 gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-extrabold text-violet-400 tracking-wider block">Selected Card</span>
+                    <h4 className="text-sm font-extrabold text-white truncate">{selectedManualVersion.name}</h4>
+                  </div>
                   <button
-                    key={name}
                     type="button"
-                    onClick={() => handleSelectManualCard(name)}
-                    className="w-full text-left px-3 py-2 bg-slate-800/70 hover:bg-violet-900/40 rounded-lg text-xs text-slate-200 hover:text-white transition-colors flex items-center justify-between cursor-pointer"
+                    onClick={() => {
+                      setManualPrints([]);
+                      setSelectedManualVersion(null);
+                      setManualAddSuccess(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold shrink-0 cursor-pointer transition-colors"
                   >
-                    <span>{name}</span>
-                    <Plus className="w-3.5 h-3.5 text-violet-400" />
+                    Search Different Card
                   </button>
-                ))}
+                </div>
+
+                {/* Inline Success Notice & Add Another Version CTA */}
+                {manualAddSuccess && (
+                  <div className="p-3 rounded-xl bg-emerald-950/90 border border-emerald-500/80 text-emerald-100 text-xs flex flex-col gap-2.5 shadow-lg animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2 font-bold text-emerald-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{manualAddSuccess}</span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1 border-t border-emerald-800/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualAddSuccess(null);
+                        }}
+                        className="flex-1 py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-all active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Another Version</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualPrints([]);
+                          setSelectedManualVersion(null);
+                          setManualAddSuccess(null);
+                        }}
+                        className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs cursor-pointer transition-colors"
+                      >
+                        Search Different Card
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dropdown Version Selector & Filter */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <label className="font-bold text-slate-200 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-violet-400" />
+                      <span>Select Card Version ({manualPrints.length} versions found)</span>
+                    </label>
+                  </div>
+
+                  {/* Filter Box for 100+ Versions */}
+                  {manualPrints.length > 3 && (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={manualVersionFilter}
+                        onChange={(e) => setManualVersionFilter(e.target.value)}
+                        placeholder='Search set name, year, code, or collector # (e.g. "Revised", "CMM", "#402")...'
+                        className="w-full px-3 py-1.5 bg-slate-800/90 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-400 focus:outline-none focus:border-violet-500 pr-7"
+                      />
+                      {manualVersionFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setManualVersionFilter('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Select Dropdown */}
+                  <div className="relative">
+                    <select
+                      value={selectedManualVersion.id}
+                      onChange={(e) => {
+                        const found = manualPrints.find((p) => p.id === e.target.value);
+                        if (found) setSelectedManualVersion(found);
+                      }}
+                      className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:border-violet-500 cursor-pointer appearance-none pr-8"
+                    >
+                      {manualPrints
+                        .filter((p) => {
+                          if (!manualVersionFilter.trim()) return true;
+                          const q = manualVersionFilter.toLowerCase().trim();
+                          const setCode = (p.set || '').toLowerCase();
+                          const setName = (p.set_name || '').toLowerCase();
+                          const num = String(p.collector_number || '').toLowerCase();
+                          return setCode.includes(q) || setName.includes(q) || num.includes(q);
+                        })
+                        .map((p) => {
+                          const regP = getTcgplayerMarketPrice(p, false);
+                          const foilP = getTcgplayerMarketPrice(p, true);
+                          const priceStr = selectedManualFoil
+                            ? (foilP > 0 ? `$${foilP.toFixed(2)}` : (regP > 0 ? `$${regP.toFixed(2)}` : 'N/A'))
+                            : (regP > 0 ? `$${regP.toFixed(2)}` : (foilP > 0 ? `$${foilP.toFixed(2)}` : 'N/A'));
+                          const year = p.released_at ? p.released_at.slice(0, 4) : '';
+                          return (
+                            <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                              [{p.set?.toUpperCase()}] {p.set_name || p.set} #{p.collector_number} {year ? `(${year})` : ''} - {priceStr}
+                            </option>
+                          );
+                        })}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-2.5 top-3" />
+                  </div>
+                </div>
+
+                {/* Selected Version Preview Card Box */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex gap-3 items-center">
+                  <div className="w-16 h-22 rounded-lg bg-slate-900 overflow-hidden shrink-0 border border-slate-800 shadow">
+                    <img
+                      src={getCardImageUrl(selectedManualVersion, 'small')}
+                      alt={selectedManualVersion.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-violet-950 text-violet-300 border border-violet-800/60">
+                        {selectedManualVersion.set?.toUpperCase()}
+                      </span>
+                      <span className="text-xs text-slate-200 font-bold truncate">
+                        {selectedManualVersion.set_name}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Collector #{selectedManualVersion.collector_number} · Rarity: <span className="capitalize">{selectedManualVersion.rarity}</span>
+                    </p>
+                    <div className="text-xs font-mono font-bold text-emerald-400">
+                      Market Price: {(() => {
+                        const rP = getTcgplayerMarketPrice(selectedManualVersion, false);
+                        const fP = getTcgplayerMarketPrice(selectedManualVersion, true);
+                        if (selectedManualFoil) return fP > 0 ? `$${fP.toFixed(2)} (Foil)` : (rP > 0 ? `$${rP.toFixed(2)}` : 'N/A');
+                        return rP > 0 ? `$${rP.toFixed(2)}` : (fP > 0 ? `$${fP.toFixed(2)} (Foil)` : 'N/A');
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Finish / Foil Selector */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Finish / Printing Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedManualFoil(false)}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        !selectedManualFoil
+                          ? 'bg-slate-800 text-white shadow border border-slate-700'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>Regular</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedManualFoil(true)}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        selectedManualFoil
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Foil ✨</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quantity Selector */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                      Quantity to Add
+                    </label>
+                    <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                      {selectedManualQuantity} {selectedManualQuantity === 1 ? 'copy' : 'copies'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-xl border border-slate-800 flex-wrap">
+                    <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedManualQuantity((q) => Math.max(1, q - 1))}
+                        className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white flex items-center justify-center font-bold text-sm cursor-pointer active:scale-95 transition-transform"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={selectedManualQuantity}
+                        onChange={(e) => setSelectedManualQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-12 text-center bg-transparent font-extrabold text-xs text-white focus:outline-none font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedManualQuantity((q) => q + 1)}
+                        className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white flex items-center justify-center font-bold text-sm cursor-pointer active:scale-95 transition-transform"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4].map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setSelectedManualQuantity(q)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                            selectedManualQuantity === q
+                              ? 'bg-emerald-600 text-white border-emerald-400 shadow-xs'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          {q === 4 ? '4x' : `${q}x`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Primary Add Button */}
+                <button
+                  type="button"
+                  onClick={handleConfirmAddManualCard}
+                  disabled={isSearchingManual}
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                >
+                  {isSearchingManual ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      <span>Add Selected Version to {currentBinder?.name || 'Binder'}</span>
+                    </>
+                  )}
+                </button>
               </div>
+            ) : (
+              /* Search Query View */
+              <>
+                <p className="text-xs text-slate-400 mb-3">
+                  Type card name to select from version list & add to <strong>{currentBinder?.name}</strong>:
+                </p>
+                <div className="relative mb-3">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={manualQuery}
+                    onChange={(e) => setManualQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && manualQuery.trim()) {
+                        handleSelectManualCard(manualQuery.trim());
+                      }
+                    }}
+                    placeholder="e.g. Birds of Paradise, Sol Ring, Swamp..."
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-violet-500 pr-8"
+                  />
+                  {isSearchingManual && (
+                    <Loader2 className="w-4 h-4 text-violet-400 animate-spin absolute right-3 top-2.5" />
+                  )}
+                </div>
+
+                {/* Suggestions List */}
+                {manualSuggestions.length > 0 && (
+                  <div className="space-y-1 max-h-52 overflow-y-auto mb-3">
+                    {manualSuggestions.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => handleSelectManualCard(name)}
+                        className="w-full text-left px-3 py-2 bg-slate-800/70 hover:bg-violet-900/40 rounded-lg text-xs text-slate-200 hover:text-white transition-colors flex items-center justify-between cursor-pointer"
+                      >
+                        <span>{name}</span>
+                        <div className="flex items-center gap-1 text-[11px] text-violet-400 font-semibold">
+                          <span>Select Version</span>
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -2396,13 +2665,73 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               {/* Version Selector */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    Select Card Printing & Art
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Select Card Printing & Art</span>
                   </label>
                   <span className="text-[11px] text-slate-400 font-mono">
                     {editPrintsList.length > 0 ? `${editPrintsList.length} printings available` : ''}
                   </span>
                 </div>
+
+                {/* Dropdown Version Selector & Search Filter for cards with many versions */}
+                {editPrintsList.length > 0 && (
+                  <div className="space-y-2 mb-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={editVersionFilter}
+                        onChange={(e) => setEditVersionFilter(e.target.value)}
+                        placeholder='Search / weed through versions by set name, code, or collector # (e.g. "Revised", "CMM", "#402")...'
+                        className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-400 focus:outline-none focus:border-violet-500 pr-7"
+                      />
+                      {editVersionFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setEditVersionFilter('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <select
+                        value={selectedEditCard.id}
+                        onChange={(e) => {
+                          const found = editPrintsList.find((p) => p.id === e.target.value);
+                          if (found) setSelectedEditCard(found);
+                        }}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-white focus:outline-none focus:border-violet-500 cursor-pointer appearance-none pr-8"
+                      >
+                        {editPrintsList
+                          .filter((p) => {
+                            if (!editVersionFilter.trim()) return true;
+                            const q = editVersionFilter.toLowerCase().trim();
+                            const setCode = (p.set || '').toLowerCase();
+                            const setName = (p.set_name || '').toLowerCase();
+                            const num = String(p.collector_number || '').toLowerCase();
+                            return setCode.includes(q) || setName.includes(q) || num.includes(q);
+                          })
+                          .map((p) => {
+                            const regP = getTcgplayerMarketPrice(p, false);
+                            const foilP = getTcgplayerMarketPrice(p, true);
+                            const priceStr = selectedEditFoil
+                              ? (foilP > 0 ? `$${foilP.toFixed(2)}` : (regP > 0 ? `$${regP.toFixed(2)}` : 'N/A'))
+                              : (regP > 0 ? `$${regP.toFixed(2)}` : (foilP > 0 ? `$${foilP.toFixed(2)}` : 'N/A'));
+                            const year = p.released_at ? p.released_at.slice(0, 4) : '';
+                            return (
+                              <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                                [{p.set?.toUpperCase()}] {p.set_name || p.set} #{p.collector_number} {year ? `(${year})` : ''} - {priceStr}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-2.5 top-2.5" />
+                    </div>
+                  </div>
+                )}
 
                 {isLoadingEditPrints ? (
                   <div className="p-8 flex flex-col items-center justify-center text-slate-400 gap-2">
@@ -2410,50 +2739,59 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                     <span className="text-xs">Loading all printings from Scryfall...</span>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[46vh] overflow-y-auto pr-1">
-                    {(editPrintsList.length > 0 ? editPrintsList : [editingBatchItem.card]).map((p) => {
-                      const isSelected = p.id === selectedEditCard.id;
-                      const regP = getTcgplayerMarketPrice(p, false);
-                      const foilP = getTcgplayerMarketPrice(p, true);
-                      const regularPrice = regP > 0 ? `$${regP.toFixed(2)}` : null;
-                      const foilPrice = foilP > 0 ? `$${foilP.toFixed(2)}` : null;
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[42vh] overflow-y-auto pr-1">
+                    {(editPrintsList.length > 0 ? editPrintsList : [editingBatchItem.card])
+                      .filter((p) => {
+                        if (!editVersionFilter.trim()) return true;
+                        const q = editVersionFilter.toLowerCase().trim();
+                        const setCode = (p.set || '').toLowerCase();
+                        const setName = (p.set_name || '').toLowerCase();
+                        const num = String(p.collector_number || '').toLowerCase();
+                        return setCode.includes(q) || setName.includes(q) || num.includes(q);
+                      })
+                      .map((p) => {
+                        const isSelected = p.id === selectedEditCard.id;
+                        const regP = getTcgplayerMarketPrice(p, false);
+                        const foilP = getTcgplayerMarketPrice(p, true);
+                        const regularPrice = regP > 0 ? `$${regP.toFixed(2)}` : null;
+                        const foilPrice = foilP > 0 ? `$${foilP.toFixed(2)}` : null;
 
-                      return (
-                        <div
-                          key={p.id}
-                          onClick={() => setSelectedEditCard(p)}
-                          className={`relative p-2 rounded-xl border text-left cursor-pointer transition-all flex flex-col items-center ${
-                            isSelected
-                              ? 'bg-violet-950/60 border-violet-400 ring-2 ring-violet-500/40 shadow-lg'
-                              : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-950'
-                          }`}
-                        >
-                          <div className="relative w-full aspect-[2.5/3.5] rounded-lg overflow-hidden mb-1.5 bg-slate-900">
-                            <img
-                              src={getCardImageUrl(p, 'small')}
-                              alt={p.name}
-                              loading="lazy"
-                              className="w-full h-full object-cover"
-                            />
-                            {isSelected && (
-                              <div className="absolute top-1 right-1 bg-emerald-500 text-slate-950 rounded-full p-0.5 shadow">
-                                <Check className="w-3 h-3 stroke-[3]" />
-                              </div>
-                            )}
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => setSelectedEditCard(p)}
+                            className={`relative p-2 rounded-xl border text-left cursor-pointer transition-all flex flex-col items-center ${
+                              isSelected
+                                ? 'bg-violet-950/60 border-violet-400 ring-2 ring-violet-500/40 shadow-lg'
+                                : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-950'
+                            }`}
+                          >
+                            <div className="relative w-full aspect-[2.5/3.5] rounded-lg overflow-hidden mb-1.5 bg-slate-900">
+                              <img
+                                src={getCardImageUrl(p, 'small')}
+                                alt={p.name}
+                                loading="lazy"
+                                className="w-full h-full object-cover"
+                              />
+                              {isSelected && (
+                                <div className="absolute top-1 right-1 bg-emerald-500 text-slate-950 rounded-full p-0.5 shadow">
+                                  <Check className="w-3 h-3 stroke-[3]" />
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-bold text-white truncate w-full text-center">
+                              {p.set_name || p.set?.toUpperCase()}
+                            </span>
+                            <div className="flex items-center justify-center gap-1.5 text-[9px] text-slate-400 font-mono mt-0.5">
+                              <span className="uppercase font-bold text-slate-300">{p.set}</span>
+                              <span>#{p.collector_number}</span>
+                            </div>
+                            <div className="text-[9px] font-mono text-emerald-400 mt-0.5">
+                              {selectedEditFoil ? (foilPrice || regularPrice || '—') : (regularPrice || foilPrice || '—')}
+                            </div>
                           </div>
-                          <span className="text-[10px] font-bold text-white truncate w-full text-center">
-                            {p.set_name || p.set?.toUpperCase()}
-                          </span>
-                          <div className="flex items-center justify-center gap-1.5 text-[9px] text-slate-400 font-mono mt-0.5">
-                            <span className="uppercase font-bold text-slate-300">{p.set}</span>
-                            <span>#{p.collector_number}</span>
-                          </div>
-                          <div className="text-[9px] font-mono text-emerald-400 mt-0.5">
-                            {selectedEditFoil ? (foilPrice || regularPrice || '—') : (regularPrice || foilPrice || '—')}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
                   </div>
                 )}
               </div>

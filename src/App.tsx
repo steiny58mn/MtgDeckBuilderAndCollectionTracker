@@ -837,16 +837,6 @@ export default function App() {
       };
       await DeckService.saveCollectionCard(newColCard);
     }
-
-    showToast(
-      `Added ${quantity}x "${card.name}" to ${targetBinder.name}!`,
-      'success',
-      'View Binder →',
-      () => {
-        setActiveBinder(targetBinder);
-        setActiveTab('collection');
-      }
-    );
   };
 
   const handleUpdateCardInBinder = async (
