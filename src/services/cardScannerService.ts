@@ -480,6 +480,9 @@ async function queryGeminiVision(
         const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
           cachedWorkingModel = model;
+          if (model !== preferredModel) {
+            setStoredGeminiModel(model);
+          }
           return text;
         }
       } else {
@@ -562,6 +565,9 @@ async function queryGeminiVision(
       });
       if (sdkResp && sdkResp.text) {
         cachedWorkingModel = sdkModel;
+        if (sdkModel !== preferredModel) {
+          setStoredGeminiModel(sdkModel);
+        }
         return sdkResp.text;
       }
     } catch (sdkErr: any) {
