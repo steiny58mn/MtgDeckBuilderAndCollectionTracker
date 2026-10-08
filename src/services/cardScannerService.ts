@@ -990,12 +990,12 @@ export function isValidCardName(name: string | undefined | null): boolean {
   const clean = name.trim();
   if (clean.length < 2 || clean.length > 70) return false;
 
-  // Reject JSON keys, variable identifiers, and field names (e.g. "is_foil", "set_code", "collector_number", "card_name", "confidence")
-  if (/^[a-z]+_[a-z0-9_]+$/i.test(clean)) return false;
+  // Reject JSON keys, variable identifiers, schema fields, and values (e.g. "is_foil", "set_code", "collector_number", "card_name", "confidence")
+  if (/^[a-z0-9]+_[a-z0-9_]+$/i.test(clean)) return false;
   if (/^is[_\s-]?foil$/i.test(clean) || /^set[_\s-]?code$/i.test(clean) || /^collector[_\s-]?num/i.test(clean) || /^card[_\s-]?/i.test(clean) || /^confidence$/i.test(clean)) return false;
   if (/[_\s-]name$/i.test(clean) && !/\s/.test(clean)) return false;
   if (
-    /^(card|name|title|exact card name|card name|unknown|null|undefined|none|n\/a|not found|no card|mtg card|magic card|sample card|sample|collector|collector_number|set_code|json|foil|is_foil|isFoil|true|false|front|back|front_face|back_face|confidence)$/i.test(
+    /^(card|name|title|exact card name|card name|unknown|null|undefined|none|n\/a|not found|no card|mtg card|magic card|sample card|sample|collector|collector_number|collectorNumber|set_code|setCode|json|foil|is_foil|isFoil|true|false|front|back|front_face|back_face|confidence|high|medium|low)$/i.test(
       clean
     )
   ) {

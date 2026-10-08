@@ -150,6 +150,17 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     suggestions?: string[];
   } | null>(null);
 
+  // Error Log History State (View on demand)
+  const [errorLogs, setErrorLogs] = useState<{
+    id: string;
+    title: string;
+    detail?: string;
+    rawJson?: string;
+    suggestions?: string[];
+    timestamp: number;
+  }[]>([]);
+  const [showErrorDropdown, setShowErrorDropdown] = useState<boolean>(false);
+
   // Raw JSON Error Inspector Modal State
   const [inspectJsonData, setInspectJsonData] = useState<{
     title: string;
@@ -195,11 +206,10 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [selectedEditQuantity, setSelectedEditQuantity] = useState<number>(1);
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
-  // Auto fade-out timer for quick success/failure notification toast
+  // Auto fade-out timer for quick success/failure notification toast (all toasts fade out automatically in 3.5s)
   useEffect(() => {
     if (!quickNotice) return;
-    if (quickNotice.type === 'failure') return;
-    const duration = 4000;
+    const duration = 3500;
     const timer = setTimeout(() => {
       setQuickNotice(null);
     }, duration);
@@ -426,7 +436,18 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         } catch {}
       }
 
-      // Quick failure notification
+      // Store error log in error history list for on-demand dropdown viewing
+      const errorLogItem = {
+        id: `err-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        title: errorTitle,
+        detail: errorDetail,
+        rawJson: rawJsonText,
+        suggestions: suggestions.length > 0 ? suggestions : undefined,
+        timestamp: Date.now(),
+      };
+      setErrorLogs((prev) => [errorLogItem, ...prev]);
+
+      // Quick fade-out failure notification
       setQuickNotice({
         type: 'failure',
         title: errorTitle,
@@ -442,7 +463,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     }
   };
 
-  // Capture current live video frame with generous framing so borders and text are never clipped
+  // Capture current live video frame with exact screen-to-video source coordinates
   const handleCaptureFrame = () => {
     if (!videoRef.current || isProcessing) return;
     try {
@@ -454,12 +475,27 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     const vh = video.videoHeight;
 
     if (vw && vh) {
+      const clientW = video.clientWidth || window.innerWidth;
+      const clientH = video.clientHeight || window.innerHeight;
+
+      // Calculate object-cover scale and offsets
+      const scale = Math.max(clientW / vw, clientH / vh);
+      const scaledW = vw * scale;
+      const scaledH = vh * scale;
+      const offsetX = (clientW - scaledW) / 2;
+      const offsetY = (clientH - scaledH) / 2;
+
       if (scanTarget === 'footer') {
-        // Zoom in specifically on the center reticle box where the user aligns the footer text
-        const cropW = Math.min(Math.round(vw * 0.92), 950);
-        const cropH = Math.round(cropW * 0.28);
-        const cropX = Math.max(0, Math.round((vw - cropW) / 2));
-        const cropY = Math.max(0, Math.round((vh - cropH) / 2));
+        // Match the footer reticle on screen (wide banner reticle)
+        const boxW = Math.min(clientW * 0.94, 460);
+        const boxH = 125;
+        const boxX = (clientW - boxW) / 2;
+        const boxY = (clientH - boxH) / 2;
+
+        const cropX = Math.max(0, Math.round((boxX - offsetX) / scale));
+        const cropY = Math.max(0, Math.round((boxY - offsetY) / scale));
+        const cropW = Math.min(vw - cropX, Math.round(boxW / scale));
+        const cropH = Math.min(vh - cropY, Math.round(boxH / scale));
 
         const canvas = document.createElement('canvas');
         const targetW = 950;
@@ -476,17 +512,16 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         }
       }
 
-      // Generous card crop with expanded safety padding (~1:1.38 aspect ratio) for zoomed-out leniency
-      const maxAllowedH = Math.round(vh * 0.97);
-      const maxAllowedW = Math.round(vw * 0.94);
-      let cropW = Math.min(maxAllowedW, Math.round(maxAllowedH / 1.38));
-      let cropH = Math.min(maxAllowedH, Math.round(cropW * 1.38));
-      if (cropH > maxAllowedH) {
-        cropH = maxAllowedH;
-        cropW = Math.round(cropH / 1.38);
-      }
-      const cropX = Math.max(0, Math.round((vw - cropW) / 2));
-      const cropY = Math.max(0, Math.round((vh - cropH) / 2));
+      // Generous card crop reticle matching full card frame on screen
+      const boxW = Math.min(clientW * 0.92, 380);
+      const boxH = Math.round(boxW * 1.38);
+      const boxX = (clientW - boxW) / 2;
+      const boxY = (clientH - boxH) / 2;
+
+      const cropX = Math.max(0, Math.round((boxX - offsetX) / scale));
+      const cropY = Math.max(0, Math.round((boxY - offsetY) / scale));
+      const cropW = Math.min(vw - cropX, Math.round(boxW / scale));
+      const cropH = Math.min(vh - cropY, Math.round(boxH / scale));
 
       const canvas = document.createElement('canvas');
       const targetW = 750;
@@ -495,6 +530,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       canvas.height = targetH;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
         handleProcessImage(canvas);
         return;
@@ -594,10 +631,10 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       // -------------------------------------------------------------
       if (cardSwapStateRef.current === 'WAITING_FOR_SWAP') {
         // Transition to SETTLING if:
-        // - Motion detected over card (motion > 10)
-        // - Visual change from last scanned card (diffFromLast > 10)
-        // - Physical removal/empty background (stdDev < 15 or mean < 30)
-        const isNewCardOrMotion = stdDev < 15 || mean < 30 || mean > 240 || motion > 10 || diffFromLast > 10;
+        // - Motion detected over card (motion > 3.5)
+        // - Visual change from last scanned card (diffFromLast > 4)
+        // - Physical removal/empty background (stdDev < 12 or mean < 30)
+        const isNewCardOrMotion = stdDev < 12 || mean < 30 || mean > 240 || motion > 3.5 || diffFromLast > 4;
 
         if (isNewCardOrMotion) {
           hasSeenCardRemovalRef.current = true;
@@ -621,7 +658,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         return;
       }
 
-      const isCardInFrame = mean >= 30 && mean <= 240 && stdDev >= 15;
+      const isCardInFrame = mean >= 30 && mean <= 240 && stdDev >= 12;
       if (!isCardInFrame) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
@@ -629,25 +666,25 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         return;
       }
 
-      // Enforce minimum time interval between scans (~1.4s)
+      // Enforce minimum time interval between scans (~1.2s)
       const timeSinceLastScan = Date.now() - lastScanTimestampRef.current;
-      if (timeSinceLastScan < 1400) {
+      if (timeSinceLastScan < 1200) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Ready for next card...');
         return;
       }
 
-      // If current frame visual is still identical to the last scanned card (and < 3.5s elapsed)
-      if (diffFromLast < 10 && timeSinceLastScan < 3500) {
+      // If current frame visual is identical to last scan and no motion occurred
+      if (diffFromLast < 4 && motion < 3 && timeSinceLastScan < 2500) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Same card detected — place new card...');
         return;
       }
 
-      // Require low motion (motion < 10) for lock-on
-      if (motion > 10) {
+      // Require low motion (motion < 8) for lock-on
+      if (motion > 8) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
         setSwapGuidanceText('Hold card steady in crosshairs...');
@@ -979,14 +1016,21 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               <span className="font-normal text-[11px] text-emerald-300/80">Added</span>
             </span>
             <span className="text-slate-600 font-normal">|</span>
-            <span
-              className="flex items-center gap-1 text-rose-400 font-bold"
-              title="Failed card lookups"
+            <button
+              type="button"
+              onClick={() => setShowErrorDropdown((prev) => !prev)}
+              className={`flex items-center gap-1 font-bold cursor-pointer transition-all px-2 py-0.5 rounded-full ${
+                errorLogs.length > 0
+                  ? 'text-rose-300 bg-rose-950/90 border border-rose-600/70 hover:bg-rose-900'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Click to view error log on demand"
             >
-              <XCircle className="w-3.5 h-3.5" />
+              <XCircle className="w-3.5 h-3.5 text-rose-400" />
               <span>{failureCount}</span>
-              <span className="font-normal text-[11px] text-rose-300/80">Failed</span>
-            </span>
+              <span className="font-normal text-[11px]">Errors</span>
+              {errorLogs.length > 0 && <ChevronDown className="w-3 h-3 text-rose-300" />}
+            </button>
           </div>
 
           {/* Prominent Center Hybrid Mode Badge (100% visible on mobile and desktop) */}
@@ -1080,11 +1124,20 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               <span className="font-normal text-[10px] text-emerald-300/80">Added</span>
             </span>
             <span className="text-slate-600 font-normal">|</span>
-            <span className="flex items-center gap-1 text-rose-400 font-bold">
-              <XCircle className="w-3 h-3" />
+            <button
+              type="button"
+              onClick={() => setShowErrorDropdown((prev) => !prev)}
+              className={`flex items-center gap-1 font-bold cursor-pointer transition-all px-1.5 py-0.5 rounded ${
+                errorLogs.length > 0
+                  ? 'text-rose-300 bg-rose-950/90 border border-rose-600/70 hover:bg-rose-900'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Click to view error log on demand"
+            >
+              <XCircle className="w-3 h-3 text-rose-400" />
               <span>{failureCount}</span>
-              <span className="font-normal text-[10px] text-rose-300/80">Failed</span>
-            </span>
+              <span className="font-normal text-[10px]">Errors</span>
+            </button>
           </div>
 
           {/* Quick Tools on Mobile */}
@@ -1142,7 +1195,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         {/* Card Alignment Reticle Frame (Full Card vs Footer Text Only) */}
         {scanTarget === 'footer' ? (
           <div
-            className={`relative z-10 w-[92vw] max-w-[420px] h-[105px] sm:h-[120px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-black/10 border-2 ${
+            className={`relative z-10 w-[94vw] max-w-[460px] h-[125px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-black/5 border-2 ${
               isCrosshairLocked || isProcessing
                 ? 'border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.5)]'
                 : 'border-amber-400/90 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
@@ -1350,231 +1403,195 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
           </button>
         </div>
 
-        {/* Quick Fade-out Notification Toast (Success) or Persistent Error Card (Failure) */}
+        {/* On-Demand Error Log History Dropdown Panel */}
+        {showErrorDropdown && (
+          <div className="absolute top-12 right-3 sm:right-6 z-50 w-[92vw] max-w-sm sm:max-w-md bg-slate-900/98 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 p-3.5 sm:p-4 text-white backdrop-blur-md">
+            <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-rose-200">
+                  Scan Error Log ({errorLogs.length})
+                </h4>
+              </div>
+              <div className="flex items-center gap-2">
+                {errorLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setErrorLogs([])}
+                    className="text-[10px] text-slate-400 hover:text-rose-300 font-semibold underline cursor-pointer"
+                  >
+                    Clear History
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowErrorDropdown(false)}
+                  className="text-slate-400 hover:text-white p-1 cursor-pointer font-bold text-base leading-none"
+                  title="Close log dropdown"
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+
+            {errorLogs.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400">
+                No scan errors in this session. All clear!
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1 scrollbar-thin">
+                {errorLogs.map((log) => (
+                  <div key={log.id} className="p-3 rounded-xl bg-slate-950/90 border border-rose-900/50 text-xs">
+                    <div className="flex items-center justify-between text-rose-300 font-bold text-[11px] mb-1">
+                      <span>{log.title}</span>
+                      <span className="text-[9.5px] font-mono text-slate-500 font-normal">
+                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                    </div>
+                    {log.detail && (
+                      <p className="text-[10.5px] font-mono text-rose-200/90 leading-relaxed bg-black/50 p-2 rounded-lg border border-rose-900/60 break-words mb-2">
+                        {log.detail}
+                      </p>
+                    )}
+
+                    {/* Suggestions recovery */}
+                    {log.suggestions && log.suggestions.length > 0 && (
+                      <div className="mb-2 pt-1.5 border-t border-slate-800">
+                        <div className="text-[10px] text-amber-300 font-bold mb-1 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>Did you mean to scan:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {log.suggestions.map((sug) => (
+                            <button
+                              key={sug}
+                              type="button"
+                              onClick={() => {
+                                handleSelectManualCard(sug);
+                                setShowErrorDropdown(false);
+                              }}
+                              className="px-2 py-1 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/50 text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1 active:scale-95"
+                            >
+                              <span>+ Add</span>
+                              <span className="underline">{sug}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualSearchOpen(true);
+                          setShowErrorDropdown(false);
+                        }}
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold cursor-pointer border border-slate-700 inline-flex items-center gap-1"
+                      >
+                        <Search className="w-3 h-3 text-emerald-400" />
+                        <span>Search Manually</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${log.title}: ${log.detail || ''}`);
+                          setHasCopiedError(true);
+                          setTimeout(() => setHasCopiedError(false), 2000);
+                        }}
+                        className="px-2.5 py-1 rounded bg-rose-950 hover:bg-rose-900 text-rose-200 text-[10px] font-semibold cursor-pointer border border-rose-800 inline-flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>Copy Error</span>
+                      </button>
+                      {log.rawJson && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInspectJsonData({
+                              title: `${log.title} - Raw JSON Response`,
+                              errorMessage: log.detail,
+                              rawJson: log.rawJson || '',
+                            });
+                            setShowErrorDropdown(false);
+                          }}
+                          className="px-2.5 py-1 rounded bg-amber-950 hover:bg-amber-900 text-amber-200 text-[10px] font-bold cursor-pointer border border-amber-600 inline-flex items-center gap-1"
+                        >
+                          <Code className="w-3 h-3 text-amber-400" />
+                          <span>View JSON</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Quick 3.5s Fade-out Notification Toast (Success or Subtle Error) */}
         {quickNotice && (
           <div className="absolute top-14 inset-x-3 sm:inset-x-4 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-3 fade-in duration-200">
             <div
-              className={`rounded-2xl p-3 sm:p-3.5 shadow-2xl backdrop-blur-md max-w-md w-full flex items-start justify-between gap-3 pointer-events-auto border transition-all duration-300 ${
+              className={`rounded-xl px-3.5 py-2.5 shadow-2xl backdrop-blur-md max-w-md w-full flex items-center justify-between gap-3 pointer-events-auto border transition-all duration-300 ${
                 quickNotice.type === 'success'
-                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100 items-center'
+                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100'
                   : 'bg-rose-950/95 border-rose-500/80 text-rose-100'
               }`}
             >
-              <div className="flex items-start gap-2.5 min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 {quickNotice.imageUrl ? (
                   <img
                     src={quickNotice.imageUrl}
                     alt="Card"
-                    className="w-10 h-14 object-cover rounded shadow border border-emerald-500/40 shrink-0"
+                    className="w-8 h-11 object-cover rounded shadow border border-emerald-500/40 shrink-0"
                   />
                 ) : quickNotice.type === 'success' ? (
-                  <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
+                  <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-4 h-4" />
                   </div>
                 ) : (
-                  <div className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <AlertCircle className="w-5 h-5" />
+                  <div className="w-7 h-7 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-4 h-4" />
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-xs font-bold flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs font-bold truncate">
                     {quickNotice.type === 'success' ? (
-                      <span className="text-emerald-300 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        {quickNotice.title}
-                      </span>
+                      <span className="text-emerald-300 truncate">{quickNotice.title}</span>
                     ) : (
-                      <span className="text-rose-300 flex items-center gap-1">
-                        <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        {quickNotice.title}
-                      </span>
+                      <span className="text-rose-300 truncate">{quickNotice.title}</span>
                     )}
                     {quickNotice.isFoil && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5">
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5 shrink-0">
                         <Sparkles className="w-2.5 h-2.5" /> Foil
                       </span>
                     )}
                   </div>
                   {quickNotice.detail && (
-                    <div
-                      className={`text-[11px] mt-1 select-text ${
-                        quickNotice.type === 'success'
-                          ? 'text-emerald-200/90 truncate'
-                          : 'text-rose-200/90 break-words max-h-36 overflow-y-auto font-mono text-[10.5px] leading-relaxed bg-black/40 p-2.5 rounded-lg border border-rose-900/60 cursor-text'
-                      }`}
-                    >
+                    <div className="text-[10.5px] text-slate-300/90 truncate mt-0.5 font-mono">
                       {quickNotice.detail}
-                    </div>
-                  )}
-                  {quickNotice.type === 'success' && scannedBatchCards.length > 0 && (
-                    <div className="space-y-1.5 mt-2 pt-1.5 border-t border-emerald-500/20">
-                      {/* Quantity Stepper for just-scanned card */}
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">
-                            Copies:
-                          </span>
-                          <div className="inline-flex items-center bg-slate-900/90 rounded-md border border-emerald-500/40 p-0.5 shadow-xs">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], -1)}
-                              className="w-5 h-5 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95 transition-transform"
-                              title="Decrease copies (-1)"
-                            >
-                              -
-                            </button>
-                            <span className="px-2 font-mono font-extrabold text-xs text-white">
-                              {scannedBatchCards[0].quantity}x
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], 1)}
-                              className="w-5 h-5 rounded bg-emerald-700/80 hover:bg-emerald-600 text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95 transition-transform shadow-xs"
-                              title="Add another copy (+1)"
-                            >
-                              +
-                            </button>
-                          </div>
-                          {/* Quick Playset Button: bumps from 1x directly to 4x */}
-                          {scannedBatchCards[0].quantity === 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateBatchCardQuantity(scannedBatchCards[0], 3)}
-                              className="px-2 py-0.5 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-600/50 text-[10px] font-bold cursor-pointer transition-colors active:scale-95"
-                              title="Make it 4 copies (Full Playset) without scanning again"
-                            >
-                              +3 (Playset)
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2.5 ml-auto">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenVersionEditor(scannedBatchCards[0])}
-                            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline cursor-pointer"
-                          >
-                            Change version &rarr;
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBatchCard(scannedBatchCards[0])}
-                            className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
-                            title="Delete this card if scan was incorrect"
-                          >
-                            <Trash2 className="w-2.5 h-2.5" />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {quickNotice.type === 'failure' && (
-                    <div className="space-y-2 mt-2">
-                      {/* One-tap recovery suggestions */}
-                      {quickNotice.suggestions && quickNotice.suggestions.length > 0 && (
-                        <div className="pt-2 border-t border-rose-500/20">
-                          <div className="text-[10px] text-amber-300 font-bold mb-1.5 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-amber-400" />
-                            <span>Did you mean to scan:</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {quickNotice.suggestions.map((sugName) => (
-                              <button
-                                key={sugName}
-                                type="button"
-                                onClick={() => handleSelectManualCard(sugName)}
-                                className="px-2.5 py-1 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/50 text-[10px] font-bold cursor-pointer transition-colors shadow-xs flex items-center gap-1 active:scale-95"
-                                title={`Add "${sugName}" directly`}
-                              >
-                                <span>+ Add</span>
-                                <span className="underline">{sugName}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => setManualSearchOpen(true)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold transition-colors cursor-pointer border border-slate-700 shadow-xs"
-                          title="Search for card title manually"
-                        >
-                          <Search className="w-3 h-3 text-emerald-400" />
-                          <span>Search Manually</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const errorText = `${quickNotice.title}: ${quickNotice.detail || ''}`;
-                            navigator.clipboard.writeText(errorText);
-                            setHasCopiedError(true);
-                            setTimeout(() => setHasCopiedError(false), 2000);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 text-[10px] font-semibold transition-colors cursor-pointer border border-rose-700/50"
-                          title="Copy error message to clipboard"
-                        >
-                          {hasCopiedError ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span className="text-emerald-300">Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>Copy Error</span>
-                            </>
-                          )}
-                        </button>
-                        {(quickNotice.rawJson || (quickNotice.detail && (quickNotice.detail.includes('{') || quickNotice.detail.includes('[')))) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const jsonText = quickNotice.rawJson || quickNotice.detail || '';
-                              setInspectJsonData({
-                                title: `${quickNotice.title} - Raw JSON Response`,
-                                errorMessage: quickNotice.detail,
-                                rawJson: jsonText,
-                              });
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-950/80 hover:bg-amber-900 text-amber-200 text-[10px] font-bold transition-colors cursor-pointer border border-amber-600/60 shadow-xs"
-                            title="Display the entire raw JSON text that failed to parse"
-                          >
-                            <Code className="w-3 h-3 text-amber-400" />
-                            <span>View Entire JSON</span>
-                          </button>
-                        )}
-                        {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded') || quickNotice.detail?.includes('429') || quickNotice.detail?.includes('RESOURCE_EXHAUSTED') || quickNotice.detail?.includes('free-tier') || quickNotice.detail?.includes('free tier')) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setScanEngine('ocr_only');
-                              setStoredScanEngine('ocr_only');
-                              setQuickNotice({
-                                type: 'success',
-                                title: 'Switched to Local OCR Only',
-                                detail: '100% on-device WebAssembly recognition. Zero Gemini API calls and unlimited free scans!',
-                                timestamp: Date.now(),
-                              });
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-sm"
-                          >
-                            <Cpu className="w-3 h-3" />
-                            <span>Switch to Local OCR Only</span>
-                          </button>
-                        )}
-                      </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {quickNotice.type === 'failure' && errorLogs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowErrorDropdown(true)}
+                  className="px-2 py-1 rounded bg-rose-900/80 hover:bg-rose-800 text-rose-200 border border-rose-600/60 text-[10px] font-bold cursor-pointer shrink-0 transition-colors"
+                  title="View full error details in dropdown"
+                >
+                  Details
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setQuickNotice(null)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 font-bold text-sm"
-                title="Dismiss message"
+                className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 font-bold text-sm leading-none"
+                title="Dismiss toast"
               >
                 &times;
               </button>
@@ -1620,130 +1637,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         )}
       </div>
 
-      {/* Persistent Last Scanned Card Bar (allows instant quantity increase without scanning again) */}
-      {scannedBatchCards.length > 0 && (() => {
-        const lastCard = scannedBatchCards[0];
-        const names = getCardNames(lastCard.card);
-        const qty = lastCard.quantity || 1;
-        return (
-          <div className="bg-slate-950/95 border-t border-emerald-500/60 px-3 py-2 text-white shadow-2xl z-25 backdrop-blur-md">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              {/* Card info & artwork preview */}
-              <div
-                onClick={() => handleOpenVersionEditor(lastCard)}
-                className="flex items-center gap-2.5 min-w-0 cursor-pointer group flex-1"
-                title="Tap to change version, art printing, or finish"
-              >
-                <div className="relative w-8 h-11 shrink-0 rounded overflow-hidden border border-emerald-500/60 shadow-md">
-                  <img
-                    src={getCardImageUrl(lastCard.card, 'small')}
-                    alt={lastCard.card.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                  />
-                  {lastCard.isFoil && (
-                    <div className="absolute top-0.5 left-0.5 bg-amber-400 text-slate-950 p-0.5 rounded-full shadow z-10">
-                      <Sparkles className="w-2 h-2" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors truncate">
-                      {names.actualName}
-                    </span>
-                    {lastCard.isFoil && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 inline-flex items-center gap-0.5 font-semibold">
-                        <Sparkles className="w-2.5 h-2.5" /> Foil
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono truncate">
-                    {lastCard.card.set?.toUpperCase()} #{lastCard.card.collector_number} · In {currentBinder?.name || 'Binder'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Quantity Stepper & Direct Multiplier Shortcuts */}
-              <div className="flex items-center gap-1.5 ml-auto shrink-0">
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider hidden xs:inline">
-                  Copies:
-                </span>
-                <div className="flex items-center bg-slate-900 border border-emerald-500/60 rounded-lg p-0.5 shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateBatchCardQuantity(lastCard, -1)}
-                    className="w-6 h-6 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-90 transition-transform"
-                    title="Decrease copies (-1)"
-                  >
-                    -
-                  </button>
-                  <span className="px-2 font-mono font-extrabold text-xs text-emerald-300">
-                    {qty}x
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 1)}
-                    className="w-6 h-6 rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center font-bold text-xs cursor-pointer active:scale-90 transition-transform shadow-xs"
-                    title="Add another copy (+1)"
-                  >
-                    +
-                  </button>
-                </div>
-
-                {/* Quick Add Shortcuts: +1, +2, or Make 4x Playset */}
-                <button
-                  type="button"
-                  onClick={() => handleUpdateBatchCardQuantity(lastCard, 1)}
-                  className="px-2 py-1 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-600/60 text-[10px] font-bold cursor-pointer transition-colors active:scale-95 shadow-xs"
-                  title="Add 1 more copy without scanning again"
-                >
-                  +1
-                </button>
-
-                {qty < 4 ? (
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 4 - qty)}
-                    className="px-2 py-1 rounded-md bg-emerald-800 hover:bg-emerald-700 text-white border border-emerald-400 text-[10px] font-extrabold cursor-pointer transition-colors active:scale-95 shadow-xs"
-                    title="Make it a full 4x playset (add remaining copies)"
-                  >
-                    Make 4x
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateBatchCardQuantity(lastCard, 4)}
-                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-[10px] font-bold cursor-pointer transition-colors active:scale-95 shadow-xs"
-                    title="Add 4 more copies"
-                  >
-                    +4
-                  </button>
-                )}
-
-                {/* Quick Edit Version */}
-                <button
-                  type="button"
-                  onClick={() => handleOpenVersionEditor(lastCard)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                  title="Change version, art or foil finish"
-                >
-                  <Layers className="w-3.5 h-3.5 text-violet-400" />
-                </button>
-
-                {/* Quick Delete */}
-                <button
-                  type="button"
-                  onClick={() => handleDeleteBatchCard(lastCard)}
-                  className="p-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800/60 transition-colors cursor-pointer"
-                  title="Delete this card from binder"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* Expandable Current Batch Drawer (collapsible at bottom) */}
       {scannedBatchCards.length > 0 && (
         <div className="bg-slate-900 border-t border-slate-800 z-20">
           <div
