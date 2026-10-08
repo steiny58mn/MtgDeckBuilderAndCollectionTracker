@@ -589,74 +589,74 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
       // -------------------------------------------------------------
       // STATE 1: WAITING_FOR_SWAP (Previous card was scanned)
-      // Requires verifying that the previous card was actually moved/removed!
+      // Detects when a new card comes into frame or motion/visual change occurs,
+      // without requiring the old card to leave the frame first.
       // -------------------------------------------------------------
       if (cardSwapStateRef.current === 'WAITING_FOR_SWAP') {
-        // Physical removal / transition criteria:
-        // - Card pulled out of reticle: low contrast (stdDev < 15) or very dark/bright frame
-        // - Heavy deliberate swap movement: motion > 24
-        // - Distinct visual change from last card: diffFromLast > 32
-        const isCardRemovedOrMoved = stdDev < 15 || mean < 30 || mean > 240 || motion > 24 || diffFromLast > 32;
+        // Transition to SETTLING if:
+        // - Motion detected over card (motion > 10)
+        // - Visual change from last scanned card (diffFromLast > 10)
+        // - Physical removal/empty background (stdDev < 15 or mean < 30)
+        const isNewCardOrMotion = stdDev < 15 || mean < 30 || mean > 240 || motion > 10 || diffFromLast > 10;
 
-        if (isCardRemovedOrMoved) {
+        if (isNewCardOrMotion) {
           hasSeenCardRemovalRef.current = true;
           cardSwapStateRef.current = 'SETTLING';
           steadyCountRef.current = 0;
           setIsCrosshairLocked(false);
-          setSwapGuidanceText('Card swapped — hold new card steady');
+          setSwapGuidanceText('New card detected — hold steady');
         } else {
-          setSwapGuidanceText('Card added! Swap card to scan next...');
+          setSwapGuidanceText('Card added! Place next card in crosshairs...');
         }
         return;
       }
 
       // -------------------------------------------------------------
       // STATE 2: SETTLING (New card is arriving into frame)
-      // Must verify it's a DIFFERENT card and completely steady before locking
+      // Lock on when steady and verify it's a new card or new placement
       // -------------------------------------------------------------
       if (!hasSeenCardRemovalRef.current) {
         cardSwapStateRef.current = 'WAITING_FOR_SWAP';
-        setSwapGuidanceText('Card added! Swap card to scan next...');
+        setSwapGuidanceText('Card added! Place next card in crosshairs...');
         return;
       }
 
-      const isCardInFrame = mean >= 35 && mean <= 230 && stdDev >= 18;
+      const isCardInFrame = mean >= 30 && mean <= 240 && stdDev >= 15;
       if (!isCardInFrame) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
-        setSwapGuidanceText('Position new card in crosshairs');
+        setSwapGuidanceText('Position card in crosshairs');
         return;
       }
 
-      // If current frame visual is still almost identical to the last scanned card,
-      // require the user to swap out the card first.
-      if (diffFromLast < 22) {
-        steadyCountRef.current = 0;
-        setIsCrosshairLocked(false);
-        setSwapGuidanceText('Same card detected — please swap cards');
-        return;
-      }
-
-      // Enforce minimum time interval (at least 1.8s between scans)
+      // Enforce minimum time interval between scans (~1.4s)
       const timeSinceLastScan = Date.now() - lastScanTimestampRef.current;
-      if (timeSinceLastScan < 1800) {
+      if (timeSinceLastScan < 1400) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
-        setSwapGuidanceText('Card added! Ready for next card...');
+        setSwapGuidanceText('Ready for next card...');
         return;
       }
 
-      // Require very low motion (motion < 8)
-      if (motion > 8) {
+      // If current frame visual is still identical to the last scanned card (and < 3.5s elapsed)
+      if (diffFromLast < 10 && timeSinceLastScan < 3500) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
-        setSwapGuidanceText('Hold new card steady in crosshairs...');
+        setSwapGuidanceText('Same card detected — place new card...');
+        return;
+      }
+
+      // Require low motion (motion < 10) for lock-on
+      if (motion > 10) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Hold card steady in crosshairs...');
       } else {
         steadyCountRef.current += 1;
-        setSwapGuidanceText('New card detected — hold still...');
+        setSwapGuidanceText('Card detected — hold still...');
 
-        // Must stay stationary for 3 consecutive samples (~840ms)
-        if (steadyCountRef.current >= 3) {
+        // Lock on after 2 consecutive steady samples (~560ms)
+        if (steadyCountRef.current >= 2) {
           setIsCrosshairLocked(true);
           setSwapGuidanceText('Card locked in — scanning!');
           steadyCountRef.current = 0;

@@ -727,8 +727,12 @@ const IGNORED_SET_CODES = new Set([
  * Parses MTG card footer text for collector number and set code
  * e.g. "242/271 R MH3 • EN", "045 BLB", "123a NEO", "MH3 242", "301/280 LTR", "312/281 \n BLB - EN"
  */
-export function parseMtgFooterText(text: string): { setCode?: string; collectorNumber?: string } | null {
+export function parseMtgFooterText(text: string): { setCode?: string; collectorNumber?: string; isFoil?: boolean } | null {
   if (!text) return null;
+
+  // Modern MTG cards print a STAR symbol ★ in the bottom border text for FOIL printings, or a DOT/CIRCLE • for NON-FOIL
+  const hasFoilStar = /[\u2605\u2606★\*]|star/i.test(text);
+
   const clean = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
   // Pattern A: e.g. "242/271 R MH3" or "242/271 MH3" or "045/281 C BLB" or "242 MH3"
@@ -737,7 +741,7 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     const num = patA[1].trim();
     const set = patA[2].trim().toUpperCase();
     if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
-      return { collectorNumber: num, setCode: set };
+      return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
     }
   }
 
@@ -747,7 +751,7 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     const set = patB[1].trim().toUpperCase();
     const num = patB[2].trim();
     if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
-      return { collectorNumber: num, setCode: set };
+      return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
     }
   }
 
@@ -757,7 +761,7 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     const set = patC[1].trim().toUpperCase();
     const num = patC[2].trim();
     if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
-      return { collectorNumber: num, setCode: set };
+      return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
     }
   }
 
@@ -769,7 +773,7 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     for (const word of words) {
       const candidateSet = word.toUpperCase();
       if (!IGNORED_SET_CODES.has(candidateSet) && !/^\d+$/.test(candidateSet)) {
-        return { collectorNumber: num, setCode: candidateSet };
+        return { collectorNumber: num, setCode: candidateSet, isFoil: hasFoilStar };
       }
     }
   }
@@ -840,16 +844,17 @@ export async function recognizeCardWithLocalOcr(
           console.log('[CardScanner:OCR:FooterMode] 🎯 Parsed footer:', parsedFooter);
           const cardMatch = await lookupExactScryfallCard('', parsedFooter.setCode, parsedFooter.collectorNumber);
           if (cardMatch) {
+            const detectedFoil = Boolean(parsedFooter.isFoil);
             return {
               card: cardMatch,
-              isFoil: false,
+              isFoil: detectedFoil,
               confidence: 'high',
               scanEngine: 'ocr',
               rawDetected: {
                 card_name: cardMatch.name,
                 set_code: parsedFooter.setCode,
                 collector_number: parsedFooter.collectorNumber,
-                is_foil: false,
+                is_foil: detectedFoil,
                 engine: 'ocr',
               },
             };
@@ -899,16 +904,17 @@ export async function recognizeCardWithLocalOcr(
         console.log('[CardScanner:OCR] 🎯 Parsed footer:', parsedFooter);
         const cardMatch = await lookupExactScryfallCard('', parsedFooter.setCode, parsedFooter.collectorNumber);
         if (cardMatch) {
+          const detectedFoil = Boolean(parsedFooter.isFoil);
           return {
             card: cardMatch,
-            isFoil: false,
+            isFoil: detectedFoil,
             confidence: 'high',
             scanEngine: 'ocr',
             rawDetected: {
               card_name: cardMatch.name,
               set_code: parsedFooter.setCode,
               collector_number: parsedFooter.collectorNumber,
-              is_foil: false,
+              is_foil: detectedFoil,
               engine: 'ocr',
             },
           };
@@ -1242,8 +1248,12 @@ This photo is a zoomed-in close-up of the BOTTOM FOOTER / BOTTOM BORDER of an MT
 CARD FOOTER INSTRUCTIONS:
 1. Extract the 3 to 5 letter uppercase expansion SET CODE (e.g. "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK").
 2. Extract the COLLECTOR NUMBER (e.g. "045", "242", "123a", "301").
-3. If any card title text is visible in the frame, provide it in "card_name". Otherwise leave "card_name" as "".
-4. Check if holographic foil sheen or star stamp is visible.
+3. FOOTER FOIL SYMBOL RULE:
+   - Modern MTG cards feature a STAR symbol ★ in the bottom border text (next to collector number or set code) for FOIL printings.
+   - Non-foil cards feature a DOT/CIRCLE symbol • in the bottom border text.
+   - If a STAR symbol ★ is present in the bottom text, set "is_foil": true.
+   - If a DOT/CIRCLE • is present, set "is_foil": false.
+4. If any card title text is visible in the frame, provide it in "card_name". Otherwise leave "card_name" as "".
 
 Respond ONLY with a valid, raw JSON object:
 {
@@ -1267,8 +1277,9 @@ CARD RECOGNITION PRIORITIES:
    - If clearly readable, provide "set_code" (e.g. "MH3", "OTJ", "BLB", "FDN", "ONE") and "collector_number".
    - If the bottom of the card is cut off, blurry, or absent: Leave "set_code" and "collector_number" as empty strings (""). DO NOT invent numbers or abort—identifying the card name and artwork is the most important!
 
-3. FOILING:
-   - Check if the card exhibits rainbow holographic foil sheen or a shooting-star stamp.
+3. FOIL SYMBOL RULE:
+   - Modern MTG cards print a STAR symbol ★ in the bottom border text for FOIL printings, and a DOT/CIRCLE symbol • for NON-FOIL printings.
+   - If a STAR symbol ★ is in the bottom text or rainbow sheen/shooting star stamp is visible, set "is_foil": true. Otherwise set "is_foil": false.
    - Return "confidence": "high", "medium", or "low".
 
 Respond ONLY with a valid, raw JSON object matching this exact schema:
