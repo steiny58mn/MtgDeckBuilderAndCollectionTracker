@@ -48,6 +48,8 @@ import {
   setStoredScanEngine,
   getStoredScanTarget,
   setStoredScanTarget,
+  getStoredRescanFull,
+  setStoredRescanFull,
   ScanEngineMode,
   ScanTargetMode,
   POPULAR_GEMINI_MODELS,
@@ -300,6 +302,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [selectedModel, setSelectedModel] = useState<string>(() => getStoredGeminiModel());
   const [scanEngine, setScanEngine] = useState<ScanEngineMode>(() => getStoredScanEngine());
   const [scanTarget, setScanTarget] = useState<ScanTargetMode>(() => getStoredScanTarget());
+  const [enableRescanFull, setEnableRescanFull] = useState<boolean>(() => getStoredRescanFull());
   const [apiKeySavedSuccess, setApiKeySavedSuccess] = useState(false);
 
   // Manual fallback search & version picker
@@ -543,8 +546,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       setIsProcessing(false);
       setIsCrosshairLocked(false);
     } catch (err: any) {
-      // 2nd Chance Fallback: If reticle crop scan failed, automatically attempt full-frame uncropped camera view!
-      if (isCroppedReticle && videoRef.current && videoRef.current.readyState >= 2) {
+      // 2nd Chance Fallback: If reticle crop scan failed, optionally attempt full-frame uncropped camera view
+      // (Only when enabled by user in settings, and NEVER in footer mode where full video frame is redundant)
+      if (enableRescanFull && scanTarget !== 'footer' && isCroppedReticle && videoRef.current && videoRef.current.readyState >= 2) {
         try {
           setStatusMessage('Rescanning full video view...');
           const video = videoRef.current;
@@ -3053,6 +3057,34 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
               </div>
             )}
 
+            {/* 2nd-Chance Full Frame Rescan Option */}
+            <div className="border-t border-slate-800 pt-3 mb-4">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/60 border border-slate-700/80 gap-3">
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-bold text-white block">
+                    2nd-Chance Full Frame Rescan
+                  </span>
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    If cropped reticle scan fails, automatically triggers a 2nd scan of the entire video view. Turn off for maximum scanning speed.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEnableRescanFull((v) => !v)}
+                  className={`w-11 h-6 shrink-0 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                    enableRescanFull ? 'bg-violet-600' : 'bg-slate-700'
+                  }`}
+                  title="Toggle 2nd-chance full frame rescan"
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                      enableRescanFull ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
             {apiKeySavedSuccess && (
               <div className="text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 rounded-lg p-2 mb-3 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -3067,6 +3099,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                   setStoredScanEngine(scanEngine);
                   setStoredGeminiApiKey(apiKeyInput);
                   setStoredGeminiModel(selectedModel);
+                  setStoredRescanFull(enableRescanFull);
                   setApiKeySavedSuccess(true);
                   setTimeout(() => {
                     setApiKeySavedSuccess(false);

@@ -24,6 +24,19 @@ const STORAGE_KEY_GEMINI_API_KEY = 'mtg_gemini_api_key';
 const STORAGE_KEY_GEMINI_MODEL = 'mtg_gemini_model';
 const STORAGE_KEY_SCAN_ENGINE = 'mtg_scan_engine';
 const STORAGE_KEY_SCAN_TARGET = 'mtg_scan_target';
+const STORAGE_KEY_RESCAN_FULL = 'mtg_rescan_full';
+
+export function getStoredRescanFull(): boolean {
+  if (typeof window === 'undefined') return false;
+  const val = localStorage.getItem(STORAGE_KEY_RESCAN_FULL);
+  // Default to false so scanning fails fast without slow 2nd-chance passes
+  return val === 'true';
+}
+
+export function setStoredRescanFull(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY_RESCAN_FULL, String(enabled));
+}
 
 export function getStoredScanTarget(): ScanTargetMode {
   if (typeof window === 'undefined') return 'full';
@@ -333,7 +346,7 @@ export async function lookupExactScryfallCard(
     ).filter(Boolean);
 
     const numCandidates = Array.from(
-      new Set([rawNum.toLowerCase(), unpaddedNum.toLowerCase()])
+      new Set([unpaddedNum.toLowerCase(), rawNum.toLowerCase()])
     ).filter(Boolean);
 
     for (const candSet of setCandidates) {
@@ -794,8 +807,9 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
 
   let clean = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // 1. Separate fused single-letter rarity indicator from set code (e.g. "UCM2" -> "U CM2", "CBLB" -> "C BLB")
+  // 1. Separate fused single-letter rarity indicator from set code or collector number (e.g. "UCM2" -> "U CM2", "CBLB" -> "C BLB", "R0014" -> "R 0014")
   clean = clean.replace(/\b([CURMLSTP])([A-Z0-9]{3,5})\b/g, '$1 $2');
+  clean = clean.replace(/\b([CURMLSTP])([0-9OIQlSZb]{3,4})\b/gi, '$1 $2');
 
   // 2. Re-attach split alphanumeric set codes where OCR inserted a space before digits (e.g. "CM 2" -> "CM2", "GN 2" -> "GN2", "MH 3" -> "MH3", "M 21" -> "M21")
   clean = clean.replace(/\b([A-Z]{1,4})\s+([0-9]{1,2})\b/g, '$1$2');
@@ -880,8 +894,8 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     }
   }
 
-  // Pattern C: e.g. "MH3 • EN 242/271" or "BLB • EN 045"
-  const patC = /\b([A-Z0-9]{3,5})\s*[\•\*\.\-\_]?\s*[A-Z]{2}\s*([0-9OIQlSZb]{1,4}[a-z]?)\b/i.exec(clean);
+  // Pattern C: e.g. "MH3 • EN 242/271", "BLB • EN 045", or reversed multi-line "SPM * EN R 0014"
+  const patC = /\b([A-Z0-9]{3,5})\s*[•\*\.\-\_e★]?\s*(?:[A-Z]{2}\s+)?(?:[CURMLS]\s+)?([0-9OIQlSZb]{1,4}[a-z]?)\b/i.exec(clean);
   if (patC) {
     const rawSet = patC[1].trim().toUpperCase();
     const set = fixSet(rawSet);
