@@ -984,11 +984,12 @@ export function isValidCardName(name: string | undefined | null): boolean {
   const clean = name.trim();
   if (clean.length < 2 || clean.length > 70) return false;
 
-  // Reject schema keys, prefixes, and partial tokens (e.g. "card_", "card_name", "card-title")
-  if (/^card[_\s-]?/i.test(clean)) return false;
+  // Reject JSON keys, variable identifiers, and field names (e.g. "is_foil", "set_code", "collector_number", "card_name", "confidence")
+  if (/^[a-z]+_[a-z0-9_]+$/i.test(clean)) return false;
+  if (/^is[_\s-]?foil$/i.test(clean) || /^set[_\s-]?code$/i.test(clean) || /^collector[_\s-]?num/i.test(clean) || /^card[_\s-]?/i.test(clean) || /^confidence$/i.test(clean)) return false;
   if (/[_\s-]name$/i.test(clean) && !/\s/.test(clean)) return false;
   if (
-    /^(card|name|title|exact card name|card name|unknown|null|undefined|none|n\/a|not found|no card|mtg card|magic card|sample card|sample|collector|collector_number|set_code|json|foil|true|false|front|back|front_face|back_face)$/i.test(
+    /^(card|name|title|exact card name|card name|unknown|null|undefined|none|n\/a|not found|no card|mtg card|magic card|sample card|sample|collector|collector_number|set_code|json|foil|is_foil|isFoil|true|false|front|back|front_face|back_face|confidence)$/i.test(
       clean
     )
   ) {
@@ -1008,7 +1009,7 @@ export function isValidCardName(name: string | undefined | null): boolean {
   // Must contain at least one letter
   if (!/[a-zA-Z]/.test(clean)) return false;
 
-  // Cannot contain code syntax brackets, braces, or unparsed quotes
+  // Cannot contain code syntax brackets, braces, unparsed quotes, or key-value colons
   if (/[{}[\]\\\/=:]/.test(clean)) return false;
 
   return true;
@@ -1135,9 +1136,23 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
-  // 5. Scan lines for any quoted card title
+  // 5. If set code and collector number were extracted, prefer exact set/collector lookup over line guessing
+  if (setMatch && numMatch) {
+    const rawFoil = foilMatch ? foilMatch[1].toLowerCase() : 'false';
+    return {
+      card_name: '',
+      set_code: setMatch[1].trim(),
+      collector_number: numMatch[1].trim(),
+      is_foil: rawFoil === 'true' || rawFoil === 'yes' || rawFoil === 'foil',
+      confidence: 'medium',
+    };
+  }
+
+  // 6. Scan lines for any quoted card title
   const lines = rawResponseText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
+    // Skip JSON key-value lines (e.g. "is_foil": false)
+    if (/^[":'a-z_]+\s*:/i.test(line)) continue;
     const quoted = line.match(/"([^"]{2,55})"/);
     if (quoted && isValidCardName(quoted[1])) {
       return {
@@ -1150,8 +1165,9 @@ export function parseCardAiResponse(rawResponseText: string): {
     }
   }
 
-  // 6. Last resort: clean non-empty line between 3 and 40 characters that passes card name validation
+  // 7. Last resort: clean non-empty line between 3 and 40 characters that passes card name validation
   for (const line of lines) {
+    if (/^[":'a-z_]+\s*:/i.test(line)) continue;
     const stripped = line.replace(/^[*\-#\s"':]+|[*\-#\s"':]+$/g, '').trim();
     if (
       isValidCardName(stripped) &&
@@ -1166,17 +1182,6 @@ export function parseCardAiResponse(rawResponseText: string): {
         confidence: 'low',
       };
     }
-  }
-
-  // If set and collector number were found even if card name was illegible
-  if (setMatch && numMatch) {
-    return {
-      card_name: '',
-      set_code: setMatch[1].trim(),
-      collector_number: numMatch[1].trim(),
-      is_foil: false,
-      confidence: 'low',
-    };
   }
 
   console.warn('[CardScanner] Raw unparseable AI response:', rawResponseText);

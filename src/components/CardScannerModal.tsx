@@ -455,15 +455,15 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
     if (vw && vh) {
       if (scanTarget === 'footer') {
-        // Zoom in specifically on the lower ~28% of the video frame where the card footer sits
-        const cropH = Math.round(vh * 0.28);
-        const cropW = Math.min(vw * 0.96, Math.round(cropH * 3.8));
+        // Zoom in specifically on the center reticle box where the user aligns the footer text
+        const cropW = Math.min(Math.round(vw * 0.92), 950);
+        const cropH = Math.round(cropW * 0.28);
         const cropX = Math.max(0, Math.round((vw - cropW) / 2));
-        const cropY = Math.max(0, Math.round(vh * 0.52));
+        const cropY = Math.max(0, Math.round((vh - cropH) / 2));
 
         const canvas = document.createElement('canvas');
         const targetW = 950;
-        const targetH = 250;
+        const targetH = 260;
         canvas.width = targetW;
         canvas.height = targetH;
         const ctx = canvas.getContext('2d');
@@ -1142,9 +1142,9 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         {/* Card Alignment Reticle Frame (Full Card vs Footer Text Only) */}
         {scanTarget === 'footer' ? (
           <div
-            className={`relative z-10 w-[92vw] max-w-[420px] h-[105px] sm:h-[120px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-slate-950/40 backdrop-blur-xs border-2 ${
+            className={`relative z-10 w-[92vw] max-w-[420px] h-[105px] sm:h-[120px] pointer-events-none flex flex-col justify-between p-3.5 transition-all duration-200 rounded-2xl bg-black/10 border-2 ${
               isCrosshairLocked || isProcessing
-                ? 'border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.5)] bg-emerald-950/20'
+                ? 'border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.5)]'
                 : 'border-amber-400/90 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
             }`}
           >
