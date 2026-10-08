@@ -157,6 +157,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   const [isCrosshairLocked, setIsCrosshairLocked] = useState<boolean>(false);
   const [swapGuidanceText, setSwapGuidanceText] = useState<string>('Position card in crosshairs');
   const cardSwapStateRef = useRef<'SETTLING' | 'WAITING_FOR_SWAP'>('SETTLING');
+  const hasSeenCardRemovalRef = useRef<boolean>(false);
   const prevFrameLumaRef = useRef<Float32Array | null>(null);
   const steadyCountRef = useRef<number>(0);
   const lastScannedLumaRef = useRef<Float32Array | null>(null);
@@ -466,7 +467,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
   // Automatically detects when a previous card is removed / motion occurs,
   // then locks on when a new card comes into frame and settles steady.
   useEffect(() => {
-    if (!cameraActive || !autoScanEnabled || isProcessing) return;
+    // Pauses scanning automatically if camera disabled, autoScan off, scanner processing, or card detail editor/settings open
+    if (!cameraActive || !autoScanEnabled || isProcessing || editingBatchItem !== null || showApiKeyModal) return;
 
     const sampleW = 60;
     const sampleH = 84;
@@ -479,7 +481,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
     let isMounted = true;
 
     const interval = setInterval(() => {
-      if (!isMounted || isProcessing || !videoRef.current) return;
+      if (!isMounted || isProcessing || !videoRef.current || editingBatchItem !== null) return;
       const video = videoRef.current;
       if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
 
@@ -533,33 +535,33 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       }
       const stdDev = Math.sqrt(varianceSum / count);
 
+      // Measure visual difference from the last scanned card
+      let diffFromLast = 0;
+      if (lastScannedLumaRef.current) {
+        let lastDiffSum = 0;
+        for (let i = 0; i < count; i++) {
+          lastDiffSum += Math.abs(currLuma[i] - lastScannedLumaRef.current[i]);
+        }
+        diffFromLast = lastDiffSum / count;
+      }
+
       // -------------------------------------------------------------
       // STATE 1: WAITING_FOR_SWAP (Previous card was scanned)
-      // Must detect motion or card removal before allowing another scan
+      // Requires verifying that the previous card was actually moved/removed!
       // -------------------------------------------------------------
       if (cardSwapStateRef.current === 'WAITING_FOR_SWAP') {
-        // Measure difference from the previously scanned card
-        let diffFromLast = 0;
-        if (lastScannedLumaRef.current) {
-          let lastDiffSum = 0;
-          for (let i = 0; i < count; i++) {
-            lastDiffSum += Math.abs(currLuma[i] - lastScannedLumaRef.current[i]);
-          }
-          diffFromLast = lastDiffSum / count;
-        }
+        // Physical removal / transition criteria:
+        // - Card pulled out of reticle: low contrast (stdDev < 15) or very dark/bright frame
+        // - Heavy deliberate swap movement: motion > 24
+        // - Distinct visual change from last card: diffFromLast > 32
+        const isCardRemovedOrMoved = stdDev < 15 || mean < 30 || mean > 240 || motion > 24 || diffFromLast > 32;
 
-        // Card transition detected if:
-        // - Significant movement: motion > 14 (hand moving card)
-        // - Large change in frame: diffFromLast > 20 (new card in view)
-        // - Card removed: low contrast (stdDev < 14) or frame blank
-        const isTransitionDetected = motion > 14 || diffFromLast > 20 || stdDev < 14;
-
-        if (isTransitionDetected) {
-          // Card swap initiated! Re-arm the settling detector
+        if (isCardRemovedOrMoved) {
+          hasSeenCardRemovalRef.current = true;
           cardSwapStateRef.current = 'SETTLING';
           steadyCountRef.current = 0;
           setIsCrosshairLocked(false);
-          setSwapGuidanceText('New card detected — hold steady');
+          setSwapGuidanceText('Card swapped — hold new card steady');
         } else {
           setSwapGuidanceText('Card added! Swap card to scan next...');
         }
@@ -568,32 +570,55 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
       // -------------------------------------------------------------
       // STATE 2: SETTLING (New card is arriving into frame)
-      // Wait for it to become completely steady in the crosshairs
+      // Must verify it's a DIFFERENT card and completely steady before locking
       // -------------------------------------------------------------
-      const isCardInFrame = mean >= 35 && mean <= 230 && stdDev >= 18;
-
-      if (!isCardInFrame) {
-        steadyCountRef.current = 0;
-        setIsCrosshairLocked(false);
-        setSwapGuidanceText('Position card in crosshairs');
+      if (!hasSeenCardRemovalRef.current) {
+        cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+        setSwapGuidanceText('Card added! Swap card to scan next...');
         return;
       }
 
-      if (motion > 10) {
-        // Still moving into position
+      const isCardInFrame = mean >= 35 && mean <= 230 && stdDev >= 18;
+      if (!isCardInFrame) {
         steadyCountRef.current = 0;
         setIsCrosshairLocked(false);
-        setSwapGuidanceText('Hold card steady in crosshairs...');
-      } else {
-        // Card is stationary!
-        steadyCountRef.current += 1;
-        setSwapGuidanceText('Card detected — hold still...');
+        setSwapGuidanceText('Position new card in crosshairs');
+        return;
+      }
 
-        // Steady for 2 consecutive samples (~600ms) with low motion
-        if (steadyCountRef.current >= 2) {
+      // If current frame visual is still almost identical to the last scanned card,
+      // require the user to swap out the card first.
+      if (diffFromLast < 22) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Same card detected — please swap cards');
+        return;
+      }
+
+      // Enforce minimum time interval (at least 1.8s between scans)
+      const timeSinceLastScan = Date.now() - lastScanTimestampRef.current;
+      if (timeSinceLastScan < 1800) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Card added! Ready for next card...');
+        return;
+      }
+
+      // Require very low motion (motion < 8)
+      if (motion > 8) {
+        steadyCountRef.current = 0;
+        setIsCrosshairLocked(false);
+        setSwapGuidanceText('Hold new card steady in crosshairs...');
+      } else {
+        steadyCountRef.current += 1;
+        setSwapGuidanceText('New card detected — hold still...');
+
+        // Must stay stationary for 3 consecutive samples (~840ms)
+        if (steadyCountRef.current >= 3) {
           setIsCrosshairLocked(true);
           setSwapGuidanceText('Card locked in — scanning!');
           steadyCountRef.current = 0;
+          hasSeenCardRemovalRef.current = false;
           lastScannedLumaRef.current = currLuma;
           lastScanTimestampRef.current = Date.now();
           cardSwapStateRef.current = 'WAITING_FOR_SWAP';
@@ -606,7 +631,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [cameraActive, autoScanEnabled, isProcessing]);
+  }, [cameraActive, autoScanEnabled, isProcessing, editingBatchItem, showApiKeyModal]);
 
   // File upload input change (supports all image files without forcing camera)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -634,6 +659,13 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   // Open Version & Finish Editor for a scanned batch card
   const handleOpenVersionEditor = async (item: BatchScannedCard) => {
+    // Reset swap state so scanner requires card removal when editor closes
+    cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+    hasSeenCardRemovalRef.current = false;
+    lastScanTimestampRef.current = Date.now();
+    steadyCountRef.current = 0;
+    setIsCrosshairLocked(false);
+
     setEditingBatchItem(item);
     setSelectedEditCard(item.card);
     setSelectedEditFoil(item.isFoil);
@@ -656,6 +688,13 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   // Adjust quantity of a previously scanned card in the batch
   const handleUpdateBatchCardQuantity = async (item: BatchScannedCard, delta: number) => {
+    // Re-arm swap requirement so stepper clicks don't re-trigger scanning
+    cardSwapStateRef.current = 'WAITING_FOR_SWAP';
+    hasSeenCardRemovalRef.current = false;
+    lastScanTimestampRef.current = Date.now();
+    steadyCountRef.current = 0;
+    setIsCrosshairLocked(false);
+
     const currentQty = item.quantity || 1;
     const newQty = currentQty + delta;
 
