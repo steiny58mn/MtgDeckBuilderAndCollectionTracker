@@ -835,6 +835,18 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     }
   }
 
+  // Pattern EA: Extended Art / Showcase layout e.g. "307  R \n BRO ★ EN Kekai Kotaki", "307 R BRO", "045 C BLB"
+  // Collector number [1-4 digits], optional rarity indicator [CURMLS], then set code [3-5 chars]
+  const patEA = /\b([0-9OIQlSZb]{1,4}[a-z]?)\s+(?:[CURMLS]\s+)?([A-Z0-9]{3,5})\b/i.exec(clean);
+  if (patEA) {
+    const num = fixNum(patEA[1]);
+    const rawSet = patEA[2].trim().toUpperCase();
+    const set = fixSet(rawSet);
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set) && /^\d+[a-z]?$/i.test(num)) {
+      return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
+    }
+  }
+
   // Pattern A: Modern fraction layout e.g. "242/271 R MH3", "045/281 C BLB", "123a/280 M FDN", "301/280 LTR"
   // Note: allows ANY single-letter rarity indicator [A-Za-z] (C, U, R, M, L, S, T, P, A, F, B, E, N, H)
   const patA = /([0-9OIQlSZb]{1,4}[a-z]?)\s*\/\s*\d{2,4}\s*(?:[A-Za-z]\s+)?([A-Z0-9]{3,5})\b/i.exec(clean);
@@ -874,7 +886,7 @@ export function parseMtgFooterText(text: string): { setCode?: string; collectorN
     const rawSet = patC[1].trim().toUpperCase();
     const set = fixSet(rawSet);
     const num = fixNum(patC[2]);
-    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set)) {
+    if (set.length >= 3 && set.length <= 5 && !IGNORED_SET_CODES.has(set) && /^\d+[a-z]?$/i.test(num)) {
       return { collectorNumber: num, setCode: set, isFoil: hasFoilStar };
     }
   }
@@ -1397,6 +1409,7 @@ DETECTION INSTRUCTIONS:
      * Note: If a bright glare spot partially obscures the set code or collector number, deduce them from the visible letters and remaining clues!
    - Extract the COLLECTOR NUMBER:
      * Standard cards: "045", "242", "050/312" (extract "050").
+     * Extended Art / Showcase cards (e.g. BRO, BLB): formatted as "[NUMBER]  [RARITY]" (e.g. "307  R") stacked above "[SET] ★ [LANG] [ARTIST]" (e.g. "BRO ★ EN Kekai Kotaki") -> extract "307" and set "BRO".
      * Universes Beyond / Modern Borderless cards (like SPM): often formatted as "R 0014" or "M 0014" stacked above the set code (extract "0014" or "14").
    - PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (e.g. VMA, ME1-ME4, TPR, Alchemy).
 
@@ -1404,8 +1417,8 @@ DETECTION INSTRUCTIONS:
    - If the card title banner or illustration is visible, identify the card name.
    - If ONLY the bottom slice of the card is visible:
      * Look at the VISIBLE FLAVOR TEXT (e.g. quote "Have no fear. Spidey is here!"), rules text, or card frame style.
-     * Look at the ARTIST CREDIT (e.g. "Roberta Ingranata", "Dan Murayama Scott", etc.).
-     * Use these clues to deduce and output the exact official English card name in "card_name" (e.g. artist "Roberta Ingranata" + flavor text "Have no fear. Spidey is here" + set "SPM" #0014 = "Spectacular Spider-Man")!
+     * Look at the ARTIST CREDIT (e.g. "Kekai Kotaki" on BRO #307 Soul Partition, "Roberta Ingranata", "Dan Murayama Scott", etc.).
+     * Use these clues to deduce and output the exact official English card name in "card_name" (e.g. artist "Kekai Kotaki" + set "BRO" #307 = "Soul Partition")!
 
 3. FOIL SYMBOL RULE:
    - Modern MTG cards feature a STAR symbol ★ in the bottom border text (next to collector number or set code) or rainbow sheen / shooting star stamp for FOIL printings.
@@ -1414,9 +1427,9 @@ DETECTION INSTRUCTIONS:
 
 Respond ONLY with a valid, raw JSON object:
 {
-  "card_name": "Spectacular Spider-Man",
-  "set_code": "SPM",
-  "collector_number": "0014",
+  "card_name": "Official Card Name",
+  "set_code": "BRO",
+  "collector_number": "307",
   "is_foil": true,
   "confidence": "high"
 }`;
