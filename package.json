@@ -28,5 +28,8 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "wrangler": "^3.114.0"
+  },
+  "optionalDependencies": {
+    "@cloudflare/workerd-linux-64": "1.20250718.0"
   }
 }

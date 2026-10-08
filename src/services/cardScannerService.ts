@@ -314,6 +314,11 @@ export async function lookupExactScryfallCard(
   const unpaddedNum = rawNum.replace(/^0+(?=\d)/, ''); // e.g. "045" -> "45"
   const cleanName = (cardName || '').trim();
 
+  const scryHeaders: HeadersInit = {
+    Accept: 'application/json',
+    ...(typeof window === 'undefined' ? { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MTGCardScanner/1.0' } : {}),
+  };
+
   // 1. Direct Set + Collector Number lookup on Scryfall (/cards/:set/:number)
   if (cleanSet && rawNum) {
     // Generate candidate set codes (including OCR letter fixes e.g. "8lb" -> "blb", "0tj" -> "otj", "1tr" -> "ltr")
@@ -335,7 +340,7 @@ export async function lookupExactScryfallCard(
       for (const num of numCandidates) {
         try {
           const url = `https://api.scryfall.com/cards/${encodeURIComponent(candSet)}/${encodeURIComponent(num)}`;
-          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          const res = await fetch(url, { headers: scryHeaders });
           if (res.ok) {
             const json = await res.json();
             if (json && json.id) {
@@ -353,7 +358,7 @@ export async function lookupExactScryfallCard(
     // Direct search on Scryfall for set + collector number e.g. "e:blb cn:045" or "e:blb cn:45"
     try {
       const searchUrl = `https://api.scryfall.com/cards/search?q=e%3A${encodeURIComponent(cleanSet)}+cn%3A${encodeURIComponent(unpaddedNum || rawNum)}+game%3Apaper+not%3Adigital`;
-      const searchRes = await fetch(searchUrl, { headers: { Accept: 'application/json' } });
+      const searchRes = await fetch(searchUrl, { headers: scryHeaders });
       if (searchRes.ok) {
         const searchJson = await searchRes.json();
         if (Array.isArray(searchJson?.data) && searchJson.data.length > 0) {
@@ -369,7 +374,7 @@ export async function lookupExactScryfallCard(
   if (cleanName) {
     try {
       const printsUrl = `https://api.scryfall.com/cards/search?q=%21%22${encodeURIComponent(cleanName)}%22+unique%3Aprints+game%3Apaper+not%3Adigital&order=released&dir=desc`;
-      const res = await fetch(printsUrl, { headers: { Accept: 'application/json' } });
+      const res = await fetch(printsUrl, { headers: scryHeaders });
       if (res.ok) {
         const json = await res.json();
         if (Array.isArray(json?.data) && json.data.length > 0) {
@@ -445,7 +450,7 @@ export async function lookupExactScryfallCard(
     if (isValidCardName(cleanName) && !/^(our|market|shows|here|this|the|i|scanning|analyzing|unable|cannot|error)\b/i.test(cleanName)) {
       try {
         const fuzzyUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cleanName)}`;
-        const res = await fetch(fuzzyUrl, { headers: { Accept: 'application/json' } });
+        const res = await fetch(fuzzyUrl, { headers: scryHeaders });
         if (res.ok) {
           const json = await res.json();
           if (json && json.id) {
@@ -489,7 +494,7 @@ export async function lookupExactScryfallCard(
         if (!isValidCardName(variant)) continue;
         try {
           const varUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(variant)}`;
-          const varRes = await fetch(varUrl, { headers: { Accept: 'application/json' } });
+          const varRes = await fetch(varUrl, { headers: scryHeaders });
           if (varRes.ok) {
             const varJson = await varRes.json();
             if (varJson && varJson.id) {
@@ -505,13 +510,13 @@ export async function lookupExactScryfallCard(
         const acQuery = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 24);
         if (acQuery.length >= 3) {
           const acUrl = `https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(acQuery)}`;
-          const acRes = await fetch(acUrl, { headers: { Accept: 'application/json' } });
+          const acRes = await fetch(acUrl, { headers: scryHeaders });
           if (acRes.ok) {
             const acJson = await acRes.json();
             if (Array.isArray(acJson?.data) && acJson.data.length > 0) {
               const bestMatch = acJson.data[0];
               const matchUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(bestMatch)}`;
-              const matchRes = await fetch(matchUrl, { headers: { Accept: 'application/json' } });
+              const matchRes = await fetch(matchUrl, { headers: scryHeaders });
               if (matchRes.ok) {
                 const matchJson = await matchRes.json();
                 if (matchJson && matchJson.id) {
@@ -531,7 +536,7 @@ export async function lookupExactScryfallCard(
         const searchWords = cleanName.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
         if (searchWords.length >= 3) {
           const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchWords)}+game%3Apaper+not%3Adigital&order=relevance`;
-          const sRes = await fetch(searchUrl, { headers: { Accept: 'application/json' } });
+          const sRes = await fetch(searchUrl, { headers: scryHeaders });
           if (sRes.ok) {
             const sJson = await sRes.json();
             if (Array.isArray(sJson?.data) && sJson.data.length > 0) {
@@ -1378,22 +1383,34 @@ export async function identifyCardFromImage(
     );
   }
 
-  const prompt = scanTarget === 'footer'
-    ? `You are an expert Magic: The Gathering (MTG) card scanner.
-This photo is a zoomed-in close-up of the BOTTOM FOOTER / BOTTOM BORDER of an MTG card.
+  // Unified, robust Gemini card vision prompt that handles full cards, macro footer crops,
+  // visible flavor text, artist credits, and foil glare reflections gracefully.
+  const prompt = `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
+Analyze this MTG card photo and identify the card with high precision.
 
-CARD FOOTER INSTRUCTIONS:
-1. Extract the 3 to 5 character uppercase expansion SET CODE (e.g. "SPM", "CM2", "GN2", "2X2", "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK"). Note: Set codes often contain numbers (like CM2, GN2, 2X2, MH3) or represent Universes Beyond sets (like SPM for Spider-Man).
-2. PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (e.g. VMA, ME1, ME2, ME3, ME4, TPR, Magic Online Promos, Alchemy). Always map to physical paper set codes.
-3. Extract the COLLECTOR NUMBER:
-   - On traditional cards: written as a fraction like "050/312" (extract "050") or "045".
-   - On Universes Beyond / modern borderless cards (e.g. SPM, WHO, PIP): often stacked on two lines with rarity in front, e.g. "R 0014" over "SPM ★ EN" (extract "0014").
-4. FOOTER FOIL SYMBOL RULE:
-   - Modern MTG cards feature a STAR symbol ★ in the bottom border text (next to collector number or set code) for FOIL printings.
+NOTE: This image may be a FULL CARD, or it may be a ZOOMED-IN CLOSE-UP of the BOTTOM BORDER / FOOTER / RULES BOX.
+
+DETECTION INSTRUCTIONS:
+1. FOOTER SET CODE & COLLECTOR NUMBER (Bottom Border):
+   - Extract the 3 to 5 character uppercase expansion SET CODE (e.g. "SPM", "CM2", "GN2", "2X2", "BLB", "MH3", "OTJ", "FDN", "ONE", "LTR", "M21", "FIN", "DSK").
+     * Universes Beyond and special sets often use letters like SPM (Spider-Man), WHO (Doctor Who), PIP (Fallout), etc.
+     * Note: If a bright glare spot partially obscures the set code or collector number, deduce them from the visible letters and remaining clues!
+   - Extract the COLLECTOR NUMBER:
+     * Standard cards: "045", "242", "050/312" (extract "050").
+     * Universes Beyond / Modern Borderless cards (like SPM): often formatted as "R 0014" or "M 0014" stacked above the set code (extract "0014" or "14").
+   - PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (e.g. VMA, ME1-ME4, TPR, Alchemy).
+
+2. CARD IDENTIFICATION (Card Title, Artwork, Flavor Text, Rules, & Artist):
+   - If the card title banner or illustration is visible, identify the card name.
+   - If ONLY the bottom slice of the card is visible:
+     * Look at the VISIBLE FLAVOR TEXT (e.g. quote "Have no fear. Spidey is here!"), rules text, or card frame style.
+     * Look at the ARTIST CREDIT (e.g. "Roberta Ingranata", "Dan Murayama Scott", etc.).
+     * Use these clues to deduce and output the exact official English card name in "card_name" (e.g. artist "Roberta Ingranata" + flavor text "Have no fear. Spidey is here" + set "SPM" #0014 = "Spectacular Spider-Man")!
+
+3. FOIL SYMBOL RULE:
+   - Modern MTG cards feature a STAR symbol ★ in the bottom border text (next to collector number or set code) or rainbow sheen / shooting star stamp for FOIL printings.
    - Non-foil cards feature a DOT/CIRCLE symbol • in the bottom border text.
-   - If a STAR symbol ★ is present in the bottom text, set "is_foil": true.
-   - If a DOT/CIRCLE • is present, set "is_foil": false.
-5. If any card title text, artist name (e.g. "Roberta Ingranata" on SPM #14 Spectacular Spider-Man), or distinctive rules text is visible in the frame, identify the exact official English card name in "card_name". Otherwise leave "card_name" as "".
+   - Set "is_foil": true if a star ★ or rainbow foil sheen is visible; otherwise false.
 
 Respond ONLY with a valid, raw JSON object:
 {
@@ -1401,34 +1418,6 @@ Respond ONLY with a valid, raw JSON object:
   "set_code": "SPM",
   "collector_number": "0014",
   "is_foil": true,
-  "confidence": "high"
-}`
-    : `You are an expert Magic: The Gathering (MTG) card scanner and multimodal card recognizer.
-Analyze this MTG card photo and identify the card.
-
-CARD RECOGNITION PRIORITIES:
-1. PRIMARY IDENTIFICATION (Card Artwork, Illustration, & Title):
-   - Identify the card primarily by its distinctive CARD ARTWORK illustration, card title banner, mana cost symbols, and card type!
-   - MTG card illustrations are iconic and unique. Even if the bottom text, set code, or collector number is blurry, cut off, obscured by a hand/sleeve, or if this is an older vintage card without bottom collector numbers, IDENTIFY THE CARD ACCURATELY BY ITS ARTWORK AND VISUAL DESIGN!
-   - Extract the exact official English card name.
-
-2. SECONDARY / OPTIONAL PRINTING DETAILS (Bottom-left footer):
-   - On modern cards, the bottom-left footer displays "[collector_number] [SET_CODE]" or "[collector_number]/[total] [rarity] [SET_CODE]".
-   - PHYSICAL PAPER SETS ONLY: NEVER output digital-only or Magic Online sets (such as VMA, ME1, ME2, ME3, ME4, TPR, Magic Online Promos, Alchemy). Always map to physical paper set codes.
-   - If clearly readable, provide "set_code" (e.g. "MH3", "OTJ", "BLB", "FDN", "ONE") and "collector_number".
-   - If the bottom of the card is cut off, blurry, or absent: Leave "set_code" and "collector_number" as empty strings (""). DO NOT invent numbers or abort—identifying the card name and artwork is the most important!
-
-3. FOIL SYMBOL RULE:
-   - Modern MTG cards print a STAR symbol ★ in the bottom border text for FOIL printings, and a DOT/CIRCLE symbol • for NON-FOIL printings.
-   - If a STAR symbol ★ is in the bottom text or rainbow sheen/shooting star stamp is visible, set "is_foil": true. Otherwise set "is_foil": false.
-   - Return "confidence": "high", "medium", or "low".
-
-Respond ONLY with a valid, raw JSON object matching this exact schema:
-{
-  "card_name": "Exact Card Name",
-  "set_code": "SET",
-  "collector_number": "123",
-  "is_foil": false,
   "confidence": "high"
 }`;
 
