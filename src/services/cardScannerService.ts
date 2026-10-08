@@ -462,7 +462,8 @@ async function queryGeminiVision(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 250,
+          maxOutputTokens: 300,
+          responseMimeType: 'application/json',
         },
       };
 
@@ -562,6 +563,11 @@ async function queryGeminiVision(
             ],
           },
         ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          maxOutputTokens: 300,
+        },
       });
       if (sdkResp && sdkResp.text) {
         cachedWorkingModel = sdkModel;
@@ -759,27 +765,34 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
         .map((l: string) => l.replace(/[^a-zA-Z0-9\s,'\-\/\(\)]/g, '').trim())
         .filter((l: string) => l.length >= 3);
 
-      for (const candidateName of titleLines) {
+      for (const rawLine of titleLines) {
         // Skip generic header words
-        if (/^(creature|instant|sorcery|enchantment|artifact|land|legendary|planeswalker)$/i.test(candidateName)) {
+        if (/^(creature|instant|sorcery|enchantment|artifact|land|legendary|planeswalker|battle|tribal)$/i.test(rawLine)) {
           continue;
         }
-        console.log('[CardScanner:OCR] 🔍 Testing candidate title line:', candidateName);
-        const cardMatch = await lookupExactScryfallCard(candidateName);
-        if (cardMatch) {
-          return {
-            card: cardMatch,
-            isFoil: false,
-            confidence: 'medium',
-            scanEngine: 'ocr',
-            rawDetected: {
-              card_name: cardMatch.name,
-              set_code: cardMatch.set,
-              collector_number: cardMatch.collector_number,
-              is_foil: false,
-              engine: 'ocr',
-            },
-          };
+
+        // Test raw line and cleaned line (stripping trailing mana noise like "UU", "2G", "(2)", etc.)
+        const cleanedCandidate = rawLine.replace(/\s+([0-9WUBRGwubrg]{1,4}|[\(\[\{].*[\)\]\}])$/, '').trim();
+        const candidates = Array.from(new Set([rawLine, cleanedCandidate])).filter((c) => c.length >= 3);
+
+        for (const candidateName of candidates) {
+          console.log('[CardScanner:OCR] 🔍 Testing candidate title line:', candidateName);
+          const cardMatch = await lookupExactScryfallCard(candidateName);
+          if (cardMatch) {
+            return {
+              card: cardMatch,
+              isFoil: false,
+              confidence: 'medium',
+              scanEngine: 'ocr',
+              rawDetected: {
+                card_name: cardMatch.name,
+                set_code: cardMatch.set,
+                collector_number: cardMatch.collector_number,
+                is_foil: false,
+                engine: 'ocr',
+              },
+            };
+          }
         }
       }
     }
@@ -789,6 +802,101 @@ export async function recognizeCardWithLocalOcr(base64Jpeg: string): Promise<Car
     console.warn('[CardScanner] Local OCR recognition attempt error:', ocrErr);
     return null;
   }
+}
+
+/**
+ * Resiliently extracts MTG card identification fields from raw AI output.
+ * Handles strict JSON, markdown codeblocks, trailing commas, single quotes,
+ * and key variations across different Gemini models.
+ */
+export function parseCardAiResponse(rawResponseText: string): {
+  card_name: string;
+  set_code: string;
+  collector_number: string;
+  is_foil: boolean;
+  confidence: 'high' | 'medium' | 'low';
+} {
+  if (!rawResponseText) {
+    throw new Error('Gemini Vision did not return any analysis for the image');
+  }
+
+  // 1. Clean code fences anywhere in the response text
+  const cleanFences = rawResponseText
+    .replace(/```(?:json)?/gi, '')
+    .trim();
+
+  // 2. Extract JSON bracketed object {...} if present
+  const firstBrace = cleanFences.indexOf('{');
+  const lastBrace = cleanFences.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const candidateJson = cleanFences
+      .substring(firstBrace, lastBrace + 1)
+      .replace(/,\s*([\}\]])/g, '$1'); // strip trailing commas
+    try {
+      const parsed = JSON.parse(candidateJson);
+      const name = (parsed.card_name || parsed.name || parsed.cardName || parsed.title || parsed.cardTitle || '').trim();
+      const set = (parsed.set_code || parsed.setCode || parsed.set || parsed.expansion || '').trim();
+      const num = String(parsed.collector_number || parsed.collectorNumber || parsed.number || parsed.collector_no || '').trim();
+      const foil = Boolean(parsed.is_foil ?? parsed.isFoil ?? parsed.foil);
+      const conf = (parsed.confidence || 'medium') as 'high' | 'medium' | 'low';
+      if (name || set) {
+        return {
+          card_name: name,
+          set_code: set,
+          collector_number: num,
+          is_foil: foil,
+          confidence: conf,
+        };
+      }
+    } catch (_err) {
+      // Fall through to regex extraction
+    }
+  }
+
+  // 3. Resilient regex extraction across the text (handling quotes, unquoted keys, line-based output)
+  const nameMatch =
+    rawResponseText.match(/"?(?:card_name|cardName|card_title|cardTitle|name|title)"?\s*[:=]\s*["']?([^"',\n\r\}]+)["']?/i) ||
+    rawResponseText.match(/(?:Card Name|Card|Title)\s*[:=]\s*([^\n\r,\}]+)/i);
+
+  const setMatch =
+    rawResponseText.match(/"?(?:set_code|setCode|set|expansion)"?\s*[:=]\s*["']?([a-zA-Z0-9]{3,5})["']?/i) ||
+    rawResponseText.match(/(?:Set Code|Set|Expansion)\s*[:=]\s*([a-zA-Z0-9]{3,5})/i);
+
+  const numMatch =
+    rawResponseText.match(/"?(?:collector_number|collectorNumber|number|collector_no)"?\s*[:=]\s*["']?([0-9]{1,4}[a-zA-Z]?)["']?/i) ||
+    rawResponseText.match(/(?:Collector Number|Number|#)\s*[:=]\s*([0-9]{1,4}[a-zA-Z]?)/i);
+
+  const foilMatch =
+    rawResponseText.match(/"?(?:is_foil|foil)"?\s*[:=]\s*["']?(true|false|yes|no)["']?/i) ||
+    rawResponseText.match(/(?:Foil)\s*[:=]\s*(true|false|yes|no)/i);
+
+  if (nameMatch && nameMatch[1]) {
+    const rawFoil = foilMatch ? foilMatch[1].toLowerCase() : 'false';
+    return {
+      card_name: nameMatch[1].trim(),
+      set_code: setMatch ? setMatch[1].trim() : '',
+      collector_number: numMatch ? numMatch[1].trim() : '',
+      is_foil: rawFoil === 'true' || rawFoil === 'yes',
+      confidence: 'medium',
+    };
+  }
+
+  // 4. Last resort: scan lines for any quoted card title
+  const lines = rawResponseText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const quoted = line.match(/"([^"]{3,40})"/);
+    if (quoted && !/^(json|card_name|set_code|collector_number|is_foil|confidence)$/i.test(quoted[1])) {
+      return {
+        card_name: quoted[1].trim(),
+        set_code: setMatch ? setMatch[1].trim() : '',
+        collector_number: numMatch ? numMatch[1].trim() : '',
+        is_foil: false,
+        confidence: 'low',
+      };
+    }
+  }
+
+  throw new Error('Could not parse card identification details from AI response');
 }
 
 /**
@@ -880,35 +988,8 @@ Respond ONLY with a valid, raw JSON object matching this exact schema:
     throw new Error('Gemini Vision did not return any analysis for the image');
   }
 
-  // Parse JSON from model response (cleaning any markdown code blocks)
-  const cleanJsonText = rawResponseText
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```$/i, '')
-    .trim();
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(cleanJsonText);
-  } catch (_jsonErr) {
-    // Attempt regex extraction if JSON parsing failed
-    const nameMatch = rawResponseText.match(/"card_name"\s*:\s*"([^"]+)"/i);
-    const setMatch = rawResponseText.match(/"set_code"\s*:\s*"([^"]+)"/i);
-    const numMatch = rawResponseText.match(/"collector_number"\s*:\s*"([^"]+)"/i);
-    const foilMatch = rawResponseText.match(/"is_foil"\s*:\s*(true|false)/i);
-
-    if (nameMatch) {
-      parsed = {
-        card_name: nameMatch[1],
-        set_code: setMatch ? setMatch[1] : '',
-        collector_number: numMatch ? numMatch[1] : '',
-        is_foil: foilMatch ? foilMatch[1].toLowerCase() === 'true' : false,
-        confidence: 'medium',
-      };
-    } else {
-      throw new Error('Could not parse card identification details from AI response');
-    }
-  }
+  // Resilient JSON and attribute parsing
+  const parsed = parseCardAiResponse(rawResponseText);
 
   const detectedName = (parsed.card_name || '').trim();
   const detectedSet = (parsed.set_code || '').trim();

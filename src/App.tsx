@@ -1279,6 +1279,7 @@ export default function App() {
           handleUpdateCardPrinting(targetCard, newPrinting);
         }}
         onToggleCardFoil={handleToggleCardFoil}
+        onDeleteCollectionCard={handleDeleteCollectionCard}
       />
 
       {/* Auth Modal (Sign In / Register / Change Password) */}

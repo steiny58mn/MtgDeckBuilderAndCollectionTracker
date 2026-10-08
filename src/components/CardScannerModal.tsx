@@ -753,132 +753,191 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white overflow-hidden animate-in fade-in duration-200">
-      {/* Top Header: Binder Selector, Persistent Live Counts Badge & Controls */}
-      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-30">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
-            <Camera className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-xs sm:text-sm font-bold text-white truncate">
-              Scan Cards to Binder
-            </h2>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
-              <select
-                value={selectedBinderId}
-                onChange={(e) => setSelectedBinderId(e.target.value)}
-                className="bg-transparent text-slate-300 font-medium hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[130px] sm:max-w-[180px]"
-                title="Target Binder"
-              >
-                {binders.map((b) => (
-                  <option key={b.id} value={b.id} className="bg-slate-900 text-white">
-                    {b.name} ({b.cards?.length || 0})
-                  </option>
-                ))}
-              </select>
+      {/* Top Header: Responsive Multi-tier Layout ensuring Hybrid Badge & Controls are 100% visible on mobile */}
+      <div className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 z-30 px-3 sm:px-4 py-2 space-y-2 sm:space-y-0">
+        {/* Top Row: Binder + Hybrid Engine Badge + Done Button */}
+        <div className="flex items-center justify-between gap-2">
+          {/* Target Binder Selector */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 max-w-[45%] sm:max-w-none">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
+              <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="hidden sm:block text-[11px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">
+                Target Binder
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+                <select
+                  value={selectedBinderId}
+                  onChange={(e) => setSelectedBinderId(e.target.value)}
+                  className="bg-transparent text-slate-200 font-semibold hover:text-white border-none focus:outline-none focus:ring-0 p-0 text-xs cursor-pointer truncate max-w-[110px] sm:max-w-[170px]"
+                  title="Target Binder"
+                >
+                  {binders.map((b) => (
+                    <option key={b.id} value={b.id} className="bg-slate-900 text-white">
+                      {b.name} ({b.cards?.length || 0})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
+
+          {/* Realtime Success & Failure Persistent Badge (Desktop only inline) */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700/80 shadow-inner text-xs font-semibold shrink-0">
+            <span
+              className="flex items-center gap-1 text-emerald-400 font-bold"
+              title="Successful card scans added to binder"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{successCount}</span>
+              <span className="font-normal text-[11px] text-emerald-300/80">Added</span>
+            </span>
+            <span className="text-slate-600 font-normal">|</span>
+            <span
+              className="flex items-center gap-1 text-rose-400 font-bold"
+              title="Failed card lookups"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span>{failureCount}</span>
+              <span className="font-normal text-[11px] text-rose-300/80">Failed</span>
+            </span>
+          </div>
+
+          {/* Mobile Center & Desktop Right: Prominent Hybrid Mode Badge */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
+                  hybrid: 'ocr_only',
+                  ocr_only: 'gemini_only',
+                  gemini_only: 'hybrid',
+                };
+                const next = nextMode[scanEngine];
+                setScanEngine(next);
+                setStoredScanEngine(next);
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer shadow-md active:scale-95 ${
+                scanEngine === 'hybrid'
+                  ? 'bg-gradient-to-r from-violet-900/90 to-fuchsia-900/90 border-violet-400/80 text-violet-100 shadow-violet-500/20 ring-1 ring-violet-500/50'
+                  : scanEngine === 'ocr_only'
+                  ? 'bg-emerald-950/90 border-emerald-400/80 text-emerald-100 shadow-emerald-500/20 ring-1 ring-emerald-500/50'
+                  : 'bg-indigo-950/90 border-indigo-400/80 text-indigo-100 shadow-indigo-500/20 ring-1 ring-indigo-500/50'
+              }`}
+              title={`Active Scan Engine: ${
+                scanEngine === 'hybrid'
+                  ? 'Hybrid Model (Fast Local OCR + Gemini 3.8 Flash Fallback)'
+                  : scanEngine === 'ocr_only'
+                  ? 'Local OCR Only (Free / Unlimited / On-Device)'
+                  : 'Gemini 3.8 Flash Only'
+              }. Tap to cycle mode.`}
+            >
+              {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />}
+              {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+              {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
+              <span className="font-extrabold text-[11.5px] tracking-wide">
+                {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'OCR Only' : 'Gemini'}
+              </span>
+            </button>
+
+            {/* Desktop API Key Config */}
+            <button
+              type="button"
+              onClick={() => setShowApiKeyModal(true)}
+              className={`hidden sm:flex p-2 rounded-lg text-xs font-medium transition-colors items-center gap-1 ${
+                getStoredGeminiApiKey()
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 animate-pulse'
+              }`}
+              title="Configure Gemini API Key"
+            >
+              <Key className="w-4 h-4" />
+              <span>{getStoredGeminiApiKey() ? 'API Key' : 'Set Key'}</span>
+            </button>
+
+            {/* Desktop Test Sound Button */}
+            <button
+              type="button"
+              onClick={() => {
+                unlockAudio();
+                playScanSuccessSound();
+              }}
+              className="hidden sm:flex p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              title="Test audio chime"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+
+            {/* Done / Close Button */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1 active:scale-95"
+              title="Finish scanning and return to binder"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Done</span>
+            </button>
+          </div>
         </div>
 
-        {/* Realtime Success & Failure Persistent Badge (Visible at all times!) */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700/80 shadow-inner text-xs font-semibold shrink-0">
-          <span
-            className="flex items-center gap-1 text-emerald-400 font-bold"
-            title="Successful card scans added to binder"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>{successCount}</span>
-            <span className="hidden sm:inline font-normal text-[11px] text-emerald-300/80">Added</span>
-          </span>
-          <span className="text-slate-600 font-normal">|</span>
-          <span
-            className="flex items-center gap-1 text-rose-400 font-bold"
-            title="Failed card lookups"
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>{failureCount}</span>
-            <span className="hidden sm:inline font-normal text-[11px] text-rose-300/80">Failed</span>
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Scan Engine Mode Selector Badge / Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const nextMode: Record<ScanEngineMode, ScanEngineMode> = {
-                hybrid: 'ocr_only',
-                ocr_only: 'gemini_only',
-                gemini_only: 'hybrid',
-              };
-              const next = nextMode[scanEngine];
-              setScanEngine(next);
-              setStoredScanEngine(next);
-            }}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border cursor-pointer ${
-              scanEngine === 'hybrid'
-                ? 'bg-violet-950/70 border-violet-500/50 text-violet-200 hover:bg-violet-900/80 shadow-xs'
-                : scanEngine === 'ocr_only'
-                ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200 hover:bg-emerald-900/80 shadow-xs'
-                : 'bg-indigo-950/70 border-indigo-500/50 text-indigo-200 hover:bg-indigo-900/80 shadow-xs'
-            }`}
-            title={`Scan Engine: ${
-              scanEngine === 'hybrid'
-                ? 'Hybrid (Fast Local OCR + Gemini 3.8 Flash Fallback)'
-                : scanEngine === 'ocr_only'
-                ? 'Local OCR Only (Free / On-Device)'
-                : 'Gemini 3.8 Flash Only'
-            }. Click to cycle mode.`}
-          >
-            {scanEngine === 'hybrid' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
-            {scanEngine === 'ocr_only' && <Cpu className="w-3.5 h-3.5 text-emerald-400" />}
-            {scanEngine === 'gemini_only' && <Bot className="w-3.5 h-3.5 text-indigo-400" />}
-            <span className="font-bold text-[11px] sm:text-xs">
-              {scanEngine === 'hybrid' ? 'Hybrid' : scanEngine === 'ocr_only' ? 'OCR' : 'Gemini'}
+        {/* Mobile Row 2: Live Counts + Secondary Actions (API Key, Sound, Flashlight) */}
+        <div className="flex sm:hidden items-center justify-between pt-1 border-t border-slate-800/60 gap-2">
+          {/* Live Added / Failed persistent counter */}
+          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-[11px] font-semibold shrink-0">
+            <span className="flex items-center gap-1 text-emerald-400 font-bold">
+              <CheckCircle2 className="w-3 h-3" />
+              <span>{successCount}</span>
+              <span className="font-normal text-[10px] text-emerald-300/80">Added</span>
             </span>
-          </button>
-
-          {/* API Key Config Button */}
-          <button
-            type="button"
-            onClick={() => setShowApiKeyModal(true)}
-            className={`p-2 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 ${
-              getStoredGeminiApiKey()
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 animate-pulse'
-            }`}
-            title="Configure Gemini API Key"
-          >
-            <Key className="w-4 h-4" />
-            <span className="hidden sm:inline">
-              {getStoredGeminiApiKey() ? 'API Key' : 'Set Key'}
+            <span className="text-slate-600 font-normal">|</span>
+            <span className="flex items-center gap-1 text-rose-400 font-bold">
+              <XCircle className="w-3 h-3" />
+              <span>{failureCount}</span>
+              <span className="font-normal text-[10px] text-rose-300/80">Failed</span>
             </span>
-          </button>
+          </div>
 
-          {/* Test Sound Button */}
-          <button
-            type="button"
-            onClick={() => {
-              unlockAudio();
-              playScanSuccessSound();
-            }}
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-            title="Test audio chime"
-          >
-            <Volume2 className="w-4 h-4" />
-          </button>
-
-          {/* Done / Close Button */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1"
-            title="Finish scanning and return to binder"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>Done</span>
-          </button>
+          {/* Quick Tools on Mobile */}
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+            {hasTorch && (
+              <button
+                type="button"
+                onClick={toggleTorch}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                  torchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-300 hover:text-white'
+                }`}
+                title="Toggle flashlight"
+              >
+                <span>{torchOn ? 'Torch On' : 'Torch'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowApiKeyModal(true)}
+              className={`p-1.5 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                getStoredGeminiApiKey()
+                  ? 'bg-slate-800 text-slate-300'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+              }`}
+              title="Configure Gemini API Key"
+            >
+              <Key className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                unlockAudio();
+                playScanSuccessSound();
+              }}
+              className="p-1.5 rounded-md bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              title="Test audio chime"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1124,7 +1183,7 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                           </>
                         )}
                       </button>
-                      {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded')) && (
+                      {(quickNotice.detail?.includes('quota') || quickNotice.detail?.includes('limit') || quickNotice.detail?.includes('exceeded') || quickNotice.detail?.includes('429') || quickNotice.detail?.includes('RESOURCE_EXHAUSTED') || quickNotice.detail?.includes('free-tier') || quickNotice.detail?.includes('free tier')) && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1481,8 +1540,8 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
           <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800">
-              <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800 gap-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <div className="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center shrink-0">
                   <Sparkles className="w-4 h-4" />
                 </div>
@@ -1495,17 +1554,44 @@ export const CardScannerModal: React.FC<CardScannerModalProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setEditingBatchItem(null)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteBatchCard(editingBatchItem)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold text-rose-300 hover:text-white bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                  title="Delete this card from binder if scan was incorrect"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="hidden sm:inline">Delete Card</span>
+                  <span className="sm:hidden">Delete</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingBatchItem(null)}
+                  className="text-slate-400 hover:text-white p-1 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
             <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              {/* Scan Error Discard Banner */}
+              <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 min-w-0 text-slate-300">
+                  <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="truncate">Was this card misidentified by the scanner?</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteBatchCard(editingBatchItem)}
+                  className="px-2.5 py-1 rounded-lg bg-rose-950/90 hover:bg-rose-900 text-rose-200 border border-rose-800/80 font-bold text-xs flex items-center gap-1 cursor-pointer shrink-0 transition-colors shadow-xs"
+                >
+                  <span>Delete from Binder</span>
+                </button>
+              </div>
+
               {/* Finish Switcher */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
