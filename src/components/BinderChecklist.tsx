@@ -17,14 +17,15 @@ import {
   AlertTriangle,
   FolderOpen,
   ArrowUpDown,
-  Printer
+  Printer,
+  ExternalLink
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
 import { buildCrossDeckUsageMap } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
-import { printChecklist, ChecklistPrintItem } from '../utils/checklistPrint';
+import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage } from '../utils/checklistPrint';
 
 export interface BinderChecklistProps {
   cards: CollectionCard[];
@@ -264,24 +265,44 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   };
 
   // Print physical checklist formatted for paper / PDF
-  const handlePrintChecklist = () => {
-    const activeBinderName = selectedBinderId === 'all' 
-      ? 'All Binders' 
-      : (binders.find((b) => b.id === selectedBinderId)?.name || 'Binder');
+  const [printColumns, setPrintColumns] = useState<1 | 2 | 3>(() => {
+    try {
+      const saved = localStorage.getItem('mtg_checklist_print_cols');
+      if (saved === '1' || saved === '2' || saved === '3') {
+        return Number(saved) as 1 | 2 | 3;
+      }
+    } catch (_) {}
+    return 2; // Default to 2 columns to save paper
+  });
+
+  const handlePrintChecklist = (colsOverride?: 1 | 2 | 3) => {
+    const effectiveCols = colsOverride || printColumns || 2;
+    const activeBinderName = selectedBinderId === 'all'
+      ? 'All Binders (Collection)'
+      : (binders.find((b) => b.id === selectedBinderId)?.name || 'Selected Binder');
 
     const filterLabels: Record<string, string> = {
-      'all': 'All Cards',
-      'unverified': 'Unverified Only',
-      'verified': 'Verified Only',
-      'in-decks': 'In Decks',
-      'this-deck': activeDeck ? `In Deck "${activeDeck.name}"` : 'This Deck',
-      'binder-only': 'In Binder Only',
+      all: 'All Cards',
+      unverified: 'Unverified Cards',
+      verified: 'Verified Cards',
+      indecks: 'Cards in Decks',
+      available: 'Available in Binder',
+      missing: 'Missing from Binder',
     };
 
     const items: ChecklistPrintItem[] = displayedCards.map((c) => {
       const isChecked = checkedIds.has(c.id);
-      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
+      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[(\[].*?[\)\]]/g, '').trim().toLowerCase();
       const cross = crossDeckUsageMap.get(cleanName);
+
+      const totalOwned = c.quantity || 1;
+      const totalInDecks = cross ? cross.totalUsed : 0;
+      const decksList: ChecklistPrintDeckUsage[] = cross && cross.decks ? cross.decks.map((d) => ({
+        deckId: d.deckId,
+        deckName: d.deckName,
+        quantity: d.quantity,
+        isCurrentDeck: activeDeck ? d.deckId === activeDeck.id : false,
+      })) : [];
 
       let deckUsageText = '';
       if (cross && cross.decks.length > 0) {
@@ -291,7 +312,10 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       return {
         id: c.id,
         name: c.name,
-        quantity: c.quantity || 1,
+        quantity: totalOwned,
+        totalOwned: totalOwned,
+        totalInDecks: totalInDecks,
+        decksList: decksList,
         set: c.set,
         collectorNumber: c.collectorNumber,
         typeLine: c.type_line || c.typeLine,
@@ -304,7 +328,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     });
 
     const title = activeDeck
-      ? `Binder Checklist: ${activeBinderName} � Deck: ${activeDeck.name}`
+      ? `Binder Checklist: ${activeBinderName} • Deck: ${activeDeck.name}`
       : `Binder Checklist: ${activeBinderName}`;
 
     printChecklist({
@@ -317,6 +341,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       totalCards: totalCardsInBinder,
       percentVerified,
       filterLabel: `${filterLabels[filterMode] || filterMode}${searchQuery ? ` (Search: "${searchQuery}")` : ''}`,
+      columns: effectiveCols,
       items,
     });
   };
@@ -369,6 +394,25 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                   </option>
                 ))}
               </select>
+
+              {/* Open Binder in New Tab */}
+              <a
+                href={
+                  selectedBinderId && selectedBinderId !== 'all'
+                    ? `?binder=${encodeURIComponent(selectedBinderId)}`
+                    : '?tab=collection'
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors inline-flex items-center justify-center cursor-pointer"
+                title={
+                  selectedBinderId && selectedBinderId !== 'all'
+                    ? `Open "${binders.find((b) => b.id === selectedBinderId)?.name || 'Binder'}" in a new tab`
+                    : 'Open Collection Binders in a new tab'
+                }
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             </div>
           )}
 
@@ -382,15 +426,36 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             <span>{copiedToast ? 'Copied!' : 'Copy List'}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handlePrintChecklist}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer shadow-xs"
-            title="Print physical checklist formatted for paper or PDF"
-          >
-            <Printer className="w-3.5 h-3.5 text-slate-300" />
-            <span>Print</span>
-          </button>
+          <div className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-800 p-0.5 shadow-xs">
+            <button
+              type="button"
+              onClick={() => handlePrintChecklist(printColumns)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-200 text-xs font-semibold hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              title={`Print physical checklist (${printColumns} column${printColumns > 1 ? 's to save paper' : ''})`}
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-300" />
+              <span>Print ({printColumns}C)</span>
+            </button>
+            <div className="h-3.5 w-px bg-slate-700 mx-0.5" />
+            {([1, 2, 3] as const).map((cols) => (
+              <button
+                key={cols}
+                type="button"
+                onClick={() => {
+                  setPrintColumns(cols);
+                  try { localStorage.setItem('mtg_checklist_print_cols', String(cols)); } catch (_) {}
+                }}
+                className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-colors ${
+                  printColumns === cols
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                }`}
+                title={`Print in ${cols} column${cols > 1 ? 's (saves paper)' : ''}`}
+              >
+                {`${cols}C`}
+              </button>
+            ))}
+          </div>
 
           {isModal && onClose && (
             <button

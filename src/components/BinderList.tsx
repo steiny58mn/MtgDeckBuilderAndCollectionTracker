@@ -89,14 +89,26 @@ export const BinderList: React.FC<BinderListProps> = ({
           {filteredBinders.map((binder) => (
             <div
               key={binder.id}
-              onClick={() => onSelectBinder(binder)}
+              onClick={(e) => {
+                if (e.ctrlKey || e.metaKey) {
+                  window.open(`?binder=${encodeURIComponent(binder.id)}`, '_blank');
+                  return;
+                }
+                onSelectBinder(binder);
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  window.open(`?binder=${encodeURIComponent(binder.id)}`, '_blank');
+                }
+              }}
               className="group p-5 bg-slate-900 border border-slate-800 hover:border-emerald-500/60 rounded-2xl shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer flex flex-col justify-between relative"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 shadow-inner">
                   <Bookmark className="w-6 h-6 text-emerald-500" />
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
                   <a
                     href={`?binder=${encodeURIComponent(binder.id)}`}
                     target="_blank"

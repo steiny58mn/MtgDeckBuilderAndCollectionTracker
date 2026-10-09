@@ -33,15 +33,37 @@ import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLe
 import { getTcgplayerMarketPrice } from './utils/priceUtils';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search' | 'login'>('decks');
+  const initialParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initialDeckId = initialParams?.get('deck');
+  const initialBinderId = initialParams?.get('binder');
+  const initialTabParam = initialParams?.get('tab') as 'decks' | 'collection' | 'search' | 'login' | null;
+
+  const [activeTab, setActiveTab] = useState<'decks' | 'collection' | 'search' | 'login'>(() => {
+    if (initialBinderId) return 'collection';
+    if (initialDeckId) return 'decks';
+    if (initialTabParam && ['decks', 'collection', 'search', 'login'].includes(initialTabParam)) {
+      return initialTabParam;
+    }
+    return 'decks';
+  });
   const [searchContext, setSearchContext] = useState<'deck' | 'binder'>('deck');
   const [searchTargetCategory, setSearchTargetCategory] = useState<DeckCategory>('main');
   const [searchPartnerMode, setSearchPartnerMode] = useState<boolean>(false);
-  const [decks, setDecks] = useState<Deck[]>([]);
-  const [collectionCards, setCollectionCards] = useState<CollectionCard[]>([]);
-  const [binders, setBinders] = useState<Binder[]>([]);
-  const [activeBinder, setActiveBinder] = useState<Binder | null>(null);
-  const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
+  const [decks, setDecks] = useState<Deck[]>(() => DeckService.getLocalDecks());
+  const [collectionCards, setCollectionCards] = useState<CollectionCard[]>(() => DeckService.getLocalCollection());
+  const [binders, setBinders] = useState<Binder[]>(() => DeckService.getLocalBinders());
+  const [activeBinder, setActiveBinder] = useState<Binder | null>(() => {
+    if (initialBinderId) {
+      return DeckService.getLocalBinders().find((b) => b.id === initialBinderId) || null;
+    }
+    return null;
+  });
+  const [activeDeck, setActiveDeck] = useState<Deck | null>(() => {
+    if (initialDeckId) {
+      return DeckService.getLocalDecks().find((d) => d.id === initialDeckId) || null;
+    }
+    return null;
+  });
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
 
   // Authentication State
@@ -263,13 +285,14 @@ export default function App() {
 
   // Handle browser back/forward navigation
   useEffect(() => {
-    const handlePopState = () => {
+    const handlePopState = (event: PopStateEvent) => {
       isPopStateNavigationRef.current = true;
       const params = new URLSearchParams(window.location.search);
-      const deckId = params.get('deck');
-      const binderId = params.get('binder');
-      const tab = params.get('tab') as 'decks' | 'collection' | 'search' | 'login' | null;
+      const deckId = params.get('deck') || event.state?.deckId || null;
+      const binderId = params.get('binder') || event.state?.binderId || null;
+      const tab = (params.get('tab') || event.state?.tab) as 'decks' | 'collection' | 'search' | 'login' | null;
 
+      const wasInBinder = Boolean(prevActiveBinderIdRef.current);
       prevActiveDeckIdRef.current = deckId;
       prevActiveBinderIdRef.current = binderId;
 
@@ -277,6 +300,7 @@ export default function App() {
         const foundDeck = DeckService.getLocalDecks().find(d => d.id === deckId);
         if (foundDeck) {
           setActiveDeck(foundDeck);
+          setActiveBinder(null);
           setActiveTab('decks');
           return;
         }
@@ -285,15 +309,19 @@ export default function App() {
         const foundBinder = DeckService.getLocalBinders().find(b => b.id === binderId);
         if (foundBinder) {
           setActiveBinder(foundBinder);
+          setActiveDeck(null);
           setActiveTab('collection');
           return;
         }
       }
-      // No deck or binder in URL -> return to grid!
+      // No deck or binder in URL -> return to main page!
       setActiveDeck(null);
       setActiveBinder(null);
       if (tab && ['decks', 'collection', 'search', 'login'].includes(tab)) {
         setActiveTab(tab);
+      } else if (wasInBinder) {
+        // Navigating back after clicking on a binder -> return to main binder page!
+        setActiveTab('collection');
       } else {
         setActiveTab('decks');
       }
@@ -1178,7 +1206,12 @@ export default function App() {
               activeBinder={activeBinder}
               onBackToBinders={() => {
                 scrollToTop();
-                setActiveBinder(null);
+                if (window.history.length > 1 && (window.history.state?.binderId || new URLSearchParams(window.location.search).has('binder'))) {
+                  window.history.back();
+                } else {
+                  setActiveBinder(null);
+                  setActiveTab('collection');
+                }
               }}
               onSelectBinder={(b) => {
                 scrollToTop();

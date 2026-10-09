@@ -35,7 +35,8 @@ import {
   BarChart3,
   ChevronDown,
   ChevronUp,
-  Camera
+  Camera,
+  ExternalLink
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
@@ -761,6 +762,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                 ? (binders.find((b) => b.id === selectedBinderFilter)?.name || 'Binder')
                 : 'Collection Binders'}
             </span>
+            {activeBinder && (
+              <a
+                href={`?binder=${encodeURIComponent(activeBinder.id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors inline-flex items-center justify-center cursor-pointer ml-1"
+                title={`Open "${activeBinder.name}" in a new tab`}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
             <span className="text-xs text-slate-500 shrink-0">
               {selectedBinderFilter !== 'all'
                 ? `(${collection.filter((c) => (c.binderId || 'binder-main') === selectedBinderFilter).length} cards)`

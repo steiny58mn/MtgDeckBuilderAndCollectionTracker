@@ -86,7 +86,7 @@ import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
 import { handleCardImageError, getCardImageUrl } from '../services/api';
-import { printChecklist, ChecklistPrintItem } from '../utils/checklistPrint';
+import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage } from '../utils/checklistPrint';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -563,16 +563,37 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return list;
   }, [activeDeck.cards, getCardOwnedQuantity, crossDeckUsageMap]);
 
-  const handlePrintDeckChecklist = useCallback(() => {
+  const [printColumns, setPrintColumns] = useState<1 | 2 | 3>(() => {
+    try {
+      const saved = localStorage.getItem('mtg_checklist_print_cols');
+      if (saved === '1' || saved === '2' || saved === '3') {
+        return Number(saved) as 1 | 2 | 3;
+      }
+    } catch (_) {}
+    return 2; // Default to 2 columns to save paper
+  });
+
+  const handlePrintDeckChecklist = useCallback((colsOverride?: 1 | 2 | 3) => {
     const activeBinderName = activeDeck.binderId && activeDeck.binderId !== 'all'
       ? binders.find((b) => b.id === activeDeck.binderId)?.name || 'Selected Binder'
       : 'All Binders (Collection)';
 
+    const effectiveCols = colsOverride || printColumns || 2;
+
     const printItems: ChecklistPrintItem[] = (activeDeck.cards || []).map((card) => {
-      const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[(\[].*?[\)\]]/g, '').trim().toLowerCase();
       const inCollection = getCardOwnedQuantity(card);
-      const isOwned = inCollection >= (card.quantity || 1);
+      const neededQty = card.quantity || 1;
+      const isOwned = inCollection >= neededQty;
       const cross = crossDeckUsageMap.get(cleanName);
+
+      const totalInDecks = cross ? cross.totalUsed : 0;
+      const decksList: ChecklistPrintDeckUsage[] = cross && cross.decks ? cross.decks.map((d) => ({
+        deckId: d.deckId,
+        deckName: d.deckName,
+        quantity: d.quantity,
+        isCurrentDeck: d.deckId === activeDeck.id,
+      })) : [];
 
       let usageText = '';
       if (cross && cross.decks.length > 0) {
@@ -580,18 +601,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         if (otherDecks.length > 0) {
           usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
             otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+        } else {
+          usageText = `Only in this deck (${neededQty}x)`;
         }
+      } else {
+        usageText = 'Not in any decks';
       }
 
       if (!isOwned) {
-        const missingQty = Math.max(1, (card.quantity || 1) - inCollection);
+        const missingQty = Math.max(1, neededQty - inCollection);
         usageText = usageText ? `${usageText} • MISSING (${missingQty}x needed)` : `MISSING (${missingQty}x needed)`;
       }
 
       return {
         id: card.id,
         name: card.name,
-        quantity: card.quantity || 1,
+        quantity: neededQty,
+        totalOwned: inCollection,
+        totalInDecks: totalInDecks,
+        decksList: decksList,
         set: card.set,
         collectorNumber: card.collector_number || (card as any).collectorNumber,
         typeLine: card.type_line,
@@ -623,9 +651,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       totalCards: ownershipStats.needed,
       percentVerified: deckCompletion.pct,
       filterLabel: `Full Decklist (${printItems.length} cards)`,
+      columns: effectiveCols,
       items: printItems,
     });
-  }, [activeDeck, binders, getCardOwnedQuantity, crossDeckUsageMap, ownershipStats, deckCompletion]);
+  }, [activeDeck, binders, getCardOwnedQuantity, crossDeckUsageMap, ownershipStats, deckCompletion, printColumns]);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -2347,6 +2376,25 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                       </option>
                     ))}
                   </select>
+
+                  {/* Open Binder in New Tab */}
+                  <a
+                    href={
+                      activeDeck.binderId && activeDeck.binderId !== 'all'
+                        ? `?binder=${encodeURIComponent(activeDeck.binderId)}`
+                        : '?tab=collection'
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors inline-flex items-center justify-center cursor-pointer"
+                    title={
+                      activeDeck.binderId && activeDeck.binderId !== 'all'
+                        ? `Open "${binders.find((b) => b.id === activeDeck.binderId)?.name || 'Binder'}" in a new tab`
+                        : 'Open Collection Binders in a new tab'
+                    }
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
                 </div>
 
                 {/* Binder Physical Checklist Trigger Button */}
@@ -2360,16 +2408,37 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   <span className="hidden md:inline">Checklist</span>
                 </button>
 
-                {/* Print Physical Checklist Quick Action */}
-                <button
-                  type="button"
-                  onClick={handlePrintDeckChecklist}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-xs font-semibold shadow-xs transition-all cursor-pointer"
-                  title="Print Physical Checklist for this deck & cross-reference with collection"
-                >
-                  <Printer className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="hidden md:inline">Print Checklist</span>
-                </button>
+                {/* Print Physical Checklist Quick Action with 1, 2, 3 Column selector */}
+                <div className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-900/80 p-0.5 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintDeckChecklist(printColumns)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-300 hover:text-emerald-300 text-xs font-semibold hover:bg-slate-800 rounded-md transition-all cursor-pointer"
+                    title={`Print Physical Checklist (${printColumns} column${printColumns > 1 ? 's to save paper' : ''})`}
+                  >
+                    <Printer className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="hidden md:inline">Print ({printColumns}C)</span>
+                  </button>
+                  <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
+                  {([1, 2, 3] as const).map((cols) => (
+                    <button
+                      key={cols}
+                      type="button"
+                      onClick={() => {
+                        setPrintColumns(cols);
+                        try { localStorage.setItem('mtg_checklist_print_cols', String(cols)); } catch (_) {}
+                      }}
+                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-colors ${
+                        printColumns === cols
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      }`}
+                      title={`Print in ${cols} column${cols > 1 ? 's (saves paper)' : ''}`}
+                    >
+                      {`${cols}C`}
+                    </button>
+                  ))}
+                </div>
 
                 {/* Owned Percentage Badge */}
                 <div
