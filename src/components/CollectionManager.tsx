@@ -15,7 +15,8 @@ import {
   TrendingDown, 
   Filter, 
   Layers, 
-  LayoutGrid, 
+  LayoutGrid,
+  CheckSquare, 
   List,
   Check,
   FolderPlus,
@@ -44,6 +45,7 @@ import { scrollToTop } from '../utils/scrollUtils';
 import { getCardColorCategoryRank, getCardEffectiveColors } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
+import { BinderChecklist } from './BinderChecklist';
 import { ScrollToTopButton } from './ScrollToTopButton';
 
 export function getCardMarketPrice(card: CollectionCard): { price: number; isMedian: boolean } {
@@ -156,7 +158,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedColor, setSelectedColor] = useState<string>('all');
   const [onlyFoil, setOnlyFoil] = useState(false);
   const [sortBy, setSortBy] = useState<'price-desc' | 'price-asc' | 'value' | 'name' | 'name-desc' | 'recent' | 'profit' | 'cmc' | 'color'>('name');
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table' | 'category-grid'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table' | 'category-grid' | 'checklist'>('grid');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
   const [categoryLimits, setCategoryLimits] = useState<Record<string, number>>({});
@@ -623,7 +625,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   // Infinite scroll intersection observer to seamlessly load subsequent chunks
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || viewMode === 'category-grid') return;
+    if (!el || viewMode === 'category-grid' || viewMode === 'checklist') return;
     if (visibleCards.length >= displayedCards.length) return;
 
     const observer = new IntersectionObserver(
@@ -1268,13 +1270,40 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                 <List className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline text-[11px]">List</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('checklist')}
+                className={`p-1.5 rounded inline-flex items-center gap-1 cursor-pointer text-xs ${
+                  viewMode === 'checklist' ? 'bg-slate-800 text-emerald-400 font-bold' : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Binder Checklist / Audit Mode — Verify physical cards and cross-reference deck usage"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-[11px]">Checklist</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       {/* Cards Display */}
-      {filteredCards.length > 0 ? (
+      {viewMode === 'checklist' ? (
+        <BinderChecklist
+          cards={collection}
+          binders={binders}
+          selectedBinderId={selectedBinderFilter}
+          onSelectBinderId={(bId) => {
+            setSelectedBinderFilter(bId);
+            if (onSelectBinder && bId !== 'all') {
+              const bObj = binders.find((b) => b.id === bId);
+              if (bObj) onSelectBinder(bObj);
+            }
+          }}
+          onUpdateCollectionCard={onUpdateCollectionCard}
+          onAddCardToDeck={onAddCardToDeck}
+          activeDeck={activeDeck}
+        />
+      ) : filteredCards.length > 0 ? (
         viewMode === 'category-grid' ? (
           /* Category Grid View - Show each category available in a grid layout */
           <div className="space-y-4">

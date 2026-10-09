@@ -212,6 +212,61 @@ export function canHaveAnyNumberOfCopies(card: any): boolean {
   return false;
 }
 
+export interface DeckUsageEntry {
+  deckId: string;
+  deckName: string;
+  quantity: number;
+}
+
+export interface CrossDeckUsage {
+  cardName: string;
+  totalUsed: number;
+  decks: DeckUsageEntry[];
+}
+
+/**
+ * Calculates cross-deck card usage across all decks to identify which cards
+ * are slotted into which decks and in what quantities.
+ */
+export function buildCrossDeckUsageMap(decks: Deck[]): Map<string, CrossDeckUsage> {
+  const map = new Map<string, CrossDeckUsage>();
+  (decks || []).forEach((d) => {
+    (d.cards || []).forEach((c) => {
+      const cat = (c.category || 'main').toLowerCase();
+      // Maybeboard is not part of the active deck and does not claim collection copies
+      if (cat === 'maybeboard') return;
+      // Basic lands have unlimited availability and should not trigger in-use warnings
+      if (canHaveAnyNumberOfCopies(c)) return;
+
+      const cleanName = (typeof c?.name === 'string' ? c.name : '')
+        .split(' // ')[0]
+        .replace(/\s*[\(\[].*?[\)\]]/g, '')
+        .trim()
+        .toLowerCase();
+      if (!cleanName) return;
+
+      const qty = c.quantity || 1;
+      const existing = map.get(cleanName);
+      if (existing) {
+        existing.totalUsed += qty;
+        const deckEntry = existing.decks.find((de) => de.deckId === d.id);
+        if (deckEntry) {
+          deckEntry.quantity += qty;
+        } else {
+          existing.decks.push({ deckId: d.id, deckName: d.name || 'Untitled Deck', quantity: qty });
+        }
+      } else {
+        map.set(cleanName, {
+          cardName: c.name,
+          totalUsed: qty,
+          decks: [{ deckId: d.id, deckName: d.name || 'Untitled Deck', quantity: qty }],
+        });
+      }
+    });
+  });
+  return map;
+}
+
 export interface CollectionLookup {
   idMap: Map<string, number>;
   nameMap: Map<string, number>;
@@ -338,9 +393,11 @@ export function calculateDeckCompletion(
   const cards = deck.cards || [];
   const commanderName = (deck.commanderName || '').trim().toLowerCase();
   const commanderId = deck.commanderId || '';
+  const commanderParts = commanderName ? commanderName.split(/\s*\/\/\s*/).map((p) => p.trim()) : [];
 
   // Track if any commander cards are present in the cards array
   let foundCommanderCard = false;
+  let mainAndCmdrTotal = 0;
 
   cards.forEach((c) => {
     const cat = (c.category || 'main').toLowerCase();
@@ -348,11 +405,18 @@ export function calculateDeckCompletion(
     const cleanCName = cName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
     const cleanCmdrName = commanderName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
 
+    // Check if this card matches any part of partner commanders
+    const matchesPartnerPart = commanderParts.some((p) => {
+      const cleanP = p.replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
+      return cName === p || cleanCName === cleanP;
+    });
+
     // Check if this card is explicitly the commander or designated commander
     const isCmdr =
       cat === 'commander' ||
       Boolean(commanderId && c.scryfallId === commanderId) ||
-      Boolean(commanderName && (cName === commanderName || (cleanCmdrName && cleanCName === cleanCmdrName)));
+      Boolean(commanderName && (cName === commanderName || (cleanCmdrName && cleanCName === cleanCmdrName))) ||
+      matchesPartnerPart;
 
     if (isCmdr) {
       foundCommanderCard = true;
@@ -365,6 +429,7 @@ export function calculateDeckCompletion(
 
     const qty = c.quantity || 1;
     total += qty;
+    mainAndCmdrTotal += qty;
     const inCol = getOwnedQty(c);
     const ownedCopies = Math.min(qty, inCol);
     owned += ownedCopies;
@@ -378,8 +443,9 @@ export function calculateDeckCompletion(
   });
 
   // If this is a commander deck (or has a commander specified) but no commander card was designated in cards
+  // IMPORTANT: Only add a synthetic commander if the deck does NOT already have 100 or more cards!
   if (!foundCommanderCard && (deck.format === 'commander' || commanderName || commanderId)) {
-    if (commanderName || commanderId) {
+    if ((commanderName || commanderId) && mainAndCmdrTotal < 100) {
       total += 1;
       const cmdrInCol = getOwnedQty({ name: deck.commanderName, scryfallId: deck.commanderId });
       const cmdrOwned = Math.min(1, cmdrInCol);

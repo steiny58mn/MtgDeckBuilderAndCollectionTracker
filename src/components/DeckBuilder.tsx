@@ -41,6 +41,7 @@ import {
   BarChart2,
   ArrowLeftRight,
   CheckCircle2,
+  CheckSquare,
   AlertCircle,
   Check,
   Boxes,
@@ -77,6 +78,7 @@ import { ManaCostBadge } from './ManaCostBadge';
 import { ManaCurveChart } from './ManaCurveChart';
 import { DeckStatsModal } from './DeckStatsModal';
 import { CommanderRecommendationsModal } from './CommanderRecommendationsModal';
+import { BinderChecklistModal } from './BinderChecklistModal';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
@@ -190,6 +192,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
+  const [showBinderChecklistModal, setShowBinderChecklistModal] = useState(false);
   const [selectedCmcFilter, setSelectedCmcFilter] = useState<string | number | null>(null);
   const [cardFilterQuery, setCardFilterQuery] = useState<string>('');
   const [statsScope, setStatsScope] = useState<'main' | 'all'>('main');
@@ -2280,6 +2283,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </select>
                 </div>
 
+                {/* Binder Physical Checklist Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowBinderChecklistModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  title="Open Binder Physical Checklist & Cross-Reference to verify cards against physical collection and see which cards are in decks"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden md:inline">Checklist</span>
+                </button>
+
                 {/* Owned Percentage Badge */}
                 <div
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all shadow-xs ${
@@ -3623,6 +3637,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           onAddCard={handleAddRecommendation}
         />
       )}
+
+      {/* Binder Physical Checklist Modal */}
+      <BinderChecklistModal
+        isOpen={showBinderChecklistModal}
+        onClose={() => setShowBinderChecklistModal(false)}
+        cards={collectionCards}
+        binders={binders}
+        selectedBinderId={activeDeck.binderId || 'all'}
+        onSelectBinderId={async (newBinderId) => {
+          const updatedDeck = { ...activeDeck, binderId: newBinderId, updatedAt: Date.now() };
+          await onUpdateDeck(updatedDeck);
+        }}
+        onUpdateCollectionCard={async (updatedCard) => {
+          await DeckService.saveCollectionCard(updatedCard);
+        }}
+        activeDeck={activeDeck}
+      />
 
       {/* 1-Second Delayed Image Hover Popup */}
       <ImageHoverPopup preview={hoverPreview} />
