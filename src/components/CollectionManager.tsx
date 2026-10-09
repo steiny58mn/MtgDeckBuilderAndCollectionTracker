@@ -157,7 +157,21 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedSet, setSelectedSet] = useState<string>('all');
   const [selectedColor, setSelectedColor] = useState<string>('all');
   const [onlyFoil, setOnlyFoil] = useState(false);
-  const [sortBy, setSortBy] = useState<'price-desc' | 'price-asc' | 'value' | 'name' | 'name-desc' | 'recent' | 'profit' | 'cmc' | 'color'>('name');
+  const [sortBy, setSortBy] = useState<'price-desc' | 'price-asc' | 'value' | 'name' | 'name-desc' | 'recent' | 'profit' | 'cmc' | 'color'>(() => {
+    try {
+      const saved = localStorage.getItem('collection_sort_by');
+      if (saved && ['price-desc', 'price-asc', 'value', 'name', 'name-desc', 'recent', 'profit', 'cmc', 'color'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'name'; // Default sort in binder: Alphabetical (A-Z)
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('collection_sort_by', sortBy);
+    } catch {}
+  }, [sortBy]);
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table' | 'category-grid' | 'checklist'>('grid');
   const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({isOpen: false, title: '', message: '', onConfirm: () => {}});
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
@@ -1201,18 +1215,18 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 max-w-full">
               <button
                 type="button"
-                onClick={() => updateSortBy(sortBy === 'price-desc' ? 'price-asc' : 'price-desc')}
+                onClick={() => updateSortBy(sortBy === 'name' ? 'name-desc' : 'name')}
                 className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                  sortBy === 'price-desc' || sortBy === 'price-asc'
+                  sortBy === 'name' || sortBy === 'name-desc'
                     ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
-                title="Sort cards by Market Price (toggles High to Low / Low to High). Uses median price for unpriced vintage cards like Timetwister."
+                title="Sort cards alphabetically (toggles A-Z / Z-A)"
               >
-                <span className="text-[11px] whitespace-nowrap">Sort: Price</span>
-                {sortBy === 'price-desc' ? (
+                <span className="text-[11px] whitespace-nowrap">Sort: A-Z</span>
+                {sortBy === 'name' ? (
                   <ArrowDown className="w-3.5 h-3.5 text-emerald-400" />
-                ) : sortBy === 'price-asc' ? (
+                ) : sortBy === 'name-desc' ? (
                   <ArrowUp className="w-3.5 h-3.5 text-emerald-400" />
                 ) : (
                   <ArrowDown className="w-3.5 h-3.5 text-slate-500" />
@@ -1223,11 +1237,11 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                 onChange={(e) => updateSortBy(e.target.value as any)}
                 className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-emerald-400 font-semibold focus:outline-none max-w-[135px] xs:max-w-[165px] sm:max-w-[200px] md:max-w-none truncate min-w-0"
               >
+                <option value="name">Name (A-Z)</option>
+                <option value="name-desc">Name (Z-A)</option>
                 <option value="price-desc">Market Price (High to Low)</option>
                 <option value="price-asc">Market Price (Low to High)</option>
                 <option value="value">Total Value (Qty × Price)</option>
-                <option value="name">Name (A-Z)</option>
-                <option value="name-desc">Name (Z-A)</option>
                 <option value="cmc">Mana Value</option>
                 <option value="color">Color</option>
                 <option value="profit">Highest Profit / Gain</option>

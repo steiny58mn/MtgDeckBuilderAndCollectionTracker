@@ -15,7 +15,8 @@ import {
   X,
   FileSpreadsheet,
   AlertTriangle,
-  FolderOpen
+  FolderOpen,
+  ArrowUpDown
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
 import { buildCrossDeckUsageMap } from '../utils/deckUtils';
@@ -49,6 +50,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'binder-only'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'name-desc' | 'price-desc' | 'set'>('name');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
 
   // Subscribe to all decks for live cross-deck usage calculation
@@ -128,10 +130,10 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     return cards.filter((c) => (c.binderId || 'binder-main') === selectedBinderId);
   }, [cards, selectedBinderId]);
 
-  // Card list filtered by search and checklist verification tab
+  // Card list filtered by search and checklist verification tab, sorted alphabetically by default
   const displayedCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return binderCards.filter((c) => {
+    const filtered = binderCards.filter((c) => {
       // 1. Search Query
       if (q) {
         const nameMatch = (c.name || '').toLowerCase().includes(q);
@@ -153,7 +155,34 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
 
       return true;
     });
-  }, [binderCards, searchQuery, filterMode, checkedIds, crossDeckUsageMap]);
+
+    // Default sort in binder: Alphabetical (A-Z)
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'name') {
+        const diff = (a.name || '').localeCompare(b.name || '');
+        if (diff !== 0) return diff;
+        return (a.collectorNumber || '').localeCompare(b.collectorNumber || '', undefined, { numeric: true });
+      }
+      if (sortBy === 'name-desc') {
+        const diff = (b.name || '').localeCompare(a.name || '');
+        if (diff !== 0) return diff;
+        return (a.collectorNumber || '').localeCompare(b.collectorNumber || '', undefined, { numeric: true });
+      }
+      if (sortBy === 'price-desc') {
+        const priceA = Number(a.currentPriceUsd || a.medianPriceUsd || 0);
+        const priceB = Number(b.currentPriceUsd || b.medianPriceUsd || 0);
+        if (priceB !== priceA) return priceB - priceA;
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      if (sortBy === 'set') {
+        const setA = (a.set || '').toLowerCase();
+        const setB = (b.set || '').toLowerCase();
+        if (setA !== setB) return setA.localeCompare(setB);
+        return (a.collectorNumber || '').localeCompare(b.collectorNumber || '', undefined, { numeric: true });
+      }
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [binderCards, searchQuery, filterMode, sortBy, checkedIds, crossDeckUsageMap]);
 
   // Audit Metrics
   const totalCardsInBinder = binderCards.length;
@@ -336,7 +365,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         </div>
       </div>
 
-      {/* Filter and Search Controls */}
+      {/* Filter, Sort, and Search Controls */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pb-3">
         {/* Search Input */}
         <div className="relative flex-1 max-w-md">
@@ -352,15 +381,31 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white cursor-pointer"
             >
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
 
-        {/* Tab Filters */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 text-xs">
+        {/* Tab Filters & Sort dropdown */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 text-xs">
+          {/* Sort Selector */}
+          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 shrink-0">
+            <ArrowUpDown className="w-3 h-3 text-slate-400" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="bg-transparent text-emerald-400 font-semibold text-xs focus:outline-none cursor-pointer"
+              title="Sort cards in checklist"
+            >
+              <option value="name" className="bg-slate-900 text-white">Sort: A-Z (Alphabetical)</option>
+              <option value="name-desc" className="bg-slate-900 text-white">Sort: Z-A</option>
+              <option value="price-desc" className="bg-slate-900 text-white">Sort: Highest Price</option>
+              <option value="set" className="bg-slate-900 text-white">Sort: Set & Collector #</option>
+            </select>
+          </div>
+
           <button
             type="button"
             onClick={() => setFilterMode('all')}
@@ -431,7 +476,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="text-xs text-emerald-400 hover:underline"
+                className="text-xs text-emerald-400 hover:underline cursor-pointer"
               >
                 Clear search query
               </button>
@@ -444,6 +489,9 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             const cross = crossDeckUsageMap.get(cleanName);
             const isInDeck = Boolean(cross && cross.totalUsed > 0);
             const isOvercommitted = Boolean(cross && cross.totalUsed > card.quantity);
+
+            // Safe price conversion
+            const priceNum = Number(card.currentPriceUsd || card.medianPriceUsd || 0);
 
             return (
               <div
@@ -527,9 +575,9 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                     {/* Price and Type Line */}
                     <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
                       <span>{card.type_line || card.typeLine}</span>
-                      {card.currentPriceUsd && card.currentPriceUsd > 0 && (
+                      {!isNaN(priceNum) && priceNum > 0 && (
                         <span className="font-mono text-emerald-400 font-semibold">
-                          ${card.currentPriceUsd.toFixed(2)}
+                          ${priceNum.toFixed(2)}
                         </span>
                       )}
                     </div>
