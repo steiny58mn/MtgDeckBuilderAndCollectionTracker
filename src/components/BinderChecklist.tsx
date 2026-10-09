@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   CheckSquare, 
   Square, 
@@ -16,13 +16,15 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   FolderOpen,
-  ArrowUpDown
+  ArrowUpDown,
+  Printer
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
 import { buildCrossDeckUsageMap } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
+import { printChecklist, ChecklistPrintItem } from '../utils/checklistPrint';
 
 export interface BinderChecklistProps {
   cards: CollectionCard[];
@@ -49,7 +51,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
 }) => {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'binder-only'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'this-deck' | 'binder-only'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'name-desc' | 'price-desc' | 'set'>('name');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
 
@@ -122,6 +124,17 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     } catch {}
   }, [storageKey]);
 
+  // Set of card names in active deck for "this-deck" filtering
+  const activeDeckCardNames = useMemo(() => {
+    if (!activeDeck?.cards) return new Set<string>();
+    const names = new Set<string>();
+    activeDeck.cards.forEach((c) => {
+      const clean = (c.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
+      if (clean) names.add(clean);
+    });
+    return names;
+  }, [activeDeck]);
+
   // Filter cards by current binder selection
   const binderCards = useMemo(() => {
     if (!selectedBinderId || selectedBinderId === 'all') {
@@ -151,6 +164,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       if (filterMode === 'unverified') return !isChecked;
       if (filterMode === 'verified') return isChecked;
       if (filterMode === 'in-decks') return isInDeck;
+      if (filterMode === 'this-deck') return activeDeckCardNames.has(cleanName);
       if (filterMode === 'binder-only') return !isInDeck;
 
       return true;
@@ -182,7 +196,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       }
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [binderCards, searchQuery, filterMode, sortBy, checkedIds, crossDeckUsageMap]);
+  }, [binderCards, searchQuery, filterMode, sortBy, checkedIds, crossDeckUsageMap, activeDeckCardNames]);
 
   // Audit Metrics
   const totalCardsInBinder = binderCards.length;
@@ -201,6 +215,14 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       return Boolean(cross && cross.totalUsed > 0);
     }).length;
   }, [binderCards, crossDeckUsageMap]);
+
+  const thisDeckCardsCount = useMemo(() => {
+    if (!activeDeckCardNames.size) return 0;
+    return binderCards.filter((c) => {
+      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
+      return activeDeckCardNames.has(cleanName);
+    }).length;
+  }, [binderCards, activeDeckCardNames]);
 
   // Hover image preview
   const {
@@ -239,6 +261,64 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     navigator.clipboard.writeText(header + lines.join('\n'));
     setCopiedToast(`Copied ${displayedCards.length} checklist items to clipboard!`);
     setTimeout(() => setCopiedToast(null), 3000);
+  };
+
+  // Print physical checklist formatted for paper / PDF
+  const handlePrintChecklist = () => {
+    const activeBinderName = selectedBinderId === 'all' 
+      ? 'All Binders' 
+      : (binders.find((b) => b.id === selectedBinderId)?.name || 'Binder');
+
+    const filterLabels: Record<string, string> = {
+      'all': 'All Cards',
+      'unverified': 'Unverified Only',
+      'verified': 'Verified Only',
+      'in-decks': 'In Decks',
+      'this-deck': activeDeck ? `In Deck "${activeDeck.name}"` : 'This Deck',
+      'binder-only': 'In Binder Only',
+    };
+
+    const items: ChecklistPrintItem[] = displayedCards.map((c) => {
+      const isChecked = checkedIds.has(c.id);
+      const cleanName = (c.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
+      const cross = crossDeckUsageMap.get(cleanName);
+
+      let deckUsageText = '';
+      if (cross && cross.decks.length > 0) {
+        deckUsageText = cross.decks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+      }
+
+      return {
+        id: c.id,
+        name: c.name,
+        quantity: c.quantity || 1,
+        set: c.set,
+        collectorNumber: c.collectorNumber,
+        typeLine: c.type_line || c.typeLine,
+        isFoil: Boolean(c.isFoil),
+        condition: c.condition,
+        price: c.currentPriceUsd || c.medianPriceUsd || 0,
+        isChecked,
+        deckUsageText,
+      };
+    });
+
+    const title = activeDeck
+      ? `Binder Checklist: ${activeBinderName} � Deck: ${activeDeck.name}`
+      : `Binder Checklist: ${activeBinderName}`;
+
+    printChecklist({
+      title,
+      subtitle: 'MTG Physical Card Gathering & Verification Checklist',
+      binderName: activeBinderName,
+      deckName: activeDeck?.name,
+      deckFormat: activeDeck?.format,
+      verifiedCount: totalVerifiedCount,
+      totalCards: totalCardsInBinder,
+      percentVerified,
+      filterLabel: `${filterLabels[filterMode] || filterMode}${searchQuery ? ` (Search: "${searchQuery}")` : ''}`,
+      items,
+    });
   };
 
   const currentBinderName = selectedBinderId === 'all'
@@ -300,6 +380,16 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
           >
             {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-300" />}
             <span>{copiedToast ? 'Copied!' : 'Copy List'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePrintChecklist}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer shadow-xs"
+            title="Print physical checklist formatted for paper or PDF"
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-300" />
+            <span>Print</span>
           </button>
 
           {isModal && onClose && (
@@ -452,6 +542,21 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             <Boxes className="w-3 h-3" />
             <span>In Decks ({cardsInDecksCount})</span>
           </button>
+          {activeDeck && (
+            <button
+              type="button"
+              onClick={() => setFilterMode('this-deck')}
+              className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                filterMode === 'this-deck'
+                  ? 'bg-indigo-600 text-white font-bold'
+                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+              }`}
+              title={`Only show cards from this binder in deck "${activeDeck.name}"`}
+            >
+              <Layers className="w-3 h-3" />
+              <span>This Deck ({thisDeckCardsCount})</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setFilterMode('binder-only')}

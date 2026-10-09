@@ -47,7 +47,8 @@ import {
   Boxes,
   Upload,
   ExternalLink,
-  Camera
+  Camera,
+  Printer
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { getCardNames, getAllCardMatchNames } from '../utils/cardNameUtils';
@@ -85,6 +86,7 @@ import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
 import { handleCardImageError, getCardImageUrl } from '../services/api';
+import { printChecklist, ChecklistPrintItem } from '../utils/checklistPrint';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -560,6 +562,70 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     return list;
   }, [activeDeck.cards, getCardOwnedQuantity, crossDeckUsageMap]);
+
+  const handlePrintDeckChecklist = useCallback(() => {
+    const activeBinderName = activeDeck.binderId && activeDeck.binderId !== 'all'
+      ? binders.find((b) => b.id === activeDeck.binderId)?.name || 'Selected Binder'
+      : 'All Binders (Collection)';
+
+    const printItems: ChecklistPrintItem[] = (activeDeck.cards || []).map((card) => {
+      const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const inCollection = getCardOwnedQuantity(card);
+      const isOwned = inCollection >= (card.quantity || 1);
+      const cross = crossDeckUsageMap.get(cleanName);
+
+      let usageText = '';
+      if (cross && cross.decks.length > 0) {
+        const otherDecks = cross.decks.filter((d) => d.deckId !== activeDeck.id);
+        if (otherDecks.length > 0) {
+          usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
+            otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+        }
+      }
+
+      if (!isOwned) {
+        const missingQty = Math.max(1, (card.quantity || 1) - inCollection);
+        usageText = usageText ? `${usageText} • MISSING (${missingQty}x needed)` : `MISSING (${missingQty}x needed)`;
+      }
+
+      return {
+        id: card.id,
+        name: card.name,
+        quantity: card.quantity || 1,
+        set: card.set,
+        collectorNumber: card.collector_number || (card as any).collectorNumber,
+        typeLine: card.type_line,
+        isFoil: Boolean(card.isFoil),
+        condition: (card as any).condition,
+        price: getCardUnitPrice(card),
+        isChecked: isOwned,
+        deckUsageText: usageText,
+        category: card.category,
+        isMissing: !isOwned,
+      };
+    });
+
+    // Sort items: Commander first, then category sort order, then name
+    printItems.sort((a, b) => {
+      const catRankA = a.category === 'commander' ? 0 : a.category === 'main' ? 1 : a.category === 'sideboard' ? 2 : 3;
+      const catRankB = b.category === 'commander' ? 0 : b.category === 'main' ? 1 : b.category === 'sideboard' ? 2 : 3;
+      if (catRankA !== catRankB) return catRankA - catRankB;
+      return a.name.localeCompare(b.name);
+    });
+
+    printChecklist({
+      title: `Deck Checklist: ${activeDeck.name}`,
+      subtitle: `${activeDeck.format ? activeDeck.format.toUpperCase() : 'COMMANDER'} DECK • PHYSICAL AUDIT & GATHERING CHECKLIST`,
+      binderName: activeBinderName,
+      deckName: activeDeck.name,
+      deckFormat: activeDeck.format,
+      verifiedCount: ownershipStats.owned,
+      totalCards: ownershipStats.needed,
+      percentVerified: deckCompletion.pct,
+      filterLabel: `Full Decklist (${printItems.length} cards)`,
+      items: printItems,
+    });
+  }, [activeDeck, binders, getCardOwnedQuantity, crossDeckUsageMap, ownershipStats, deckCompletion]);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -2292,6 +2358,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 >
                   <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span className="hidden md:inline">Checklist</span>
+                </button>
+
+                {/* Print Physical Checklist Quick Action */}
+                <button
+                  type="button"
+                  onClick={handlePrintDeckChecklist}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  title="Print Physical Checklist for this deck & cross-reference with collection"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden md:inline">Print Checklist</span>
                 </button>
 
                 {/* Owned Percentage Badge */}
