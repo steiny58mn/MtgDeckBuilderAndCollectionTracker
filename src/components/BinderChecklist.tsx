@@ -301,7 +301,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         deckId: d.deckId,
         deckName: d.deckName,
         quantity: d.quantity,
-        isCurrentDeck: activeDeck ? d.deckId === activeDeck.id : false,
+        
       })) : [];
 
       let deckUsageText = '';
@@ -327,16 +327,14 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       };
     });
 
-    const title = activeDeck
-      ? `Binder Checklist: ${activeBinderName} • Deck: ${activeDeck.name}`
-      : `Binder Checklist: ${activeBinderName}`;
+    const title = `Binder Checklist: ${activeBinderName}`;
 
     printChecklist({
       title,
       subtitle: 'MTG Physical Card Gathering & Verification Checklist',
       binderName: activeBinderName,
-      deckName: activeDeck?.name,
-      deckFormat: activeDeck?.format,
+      // Omit deckName for pure binder checklist
+      // Omit deckFormat for pure binder checklist
       verifiedCount: totalVerifiedCount,
       totalCards: totalCardsInBinder,
       percentVerified,
@@ -619,7 +617,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
               title={`Only show cards from this binder in deck "${activeDeck.name}"`}
             >
               <Layers className="w-3 h-3" />
-              <span>This Deck ({thisDeckCardsCount})</span>
+              <span>In "{activeDeck.name}" ({thisDeckCardsCount})</span>
             </button>
           )}
           <button

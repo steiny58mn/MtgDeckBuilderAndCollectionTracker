@@ -587,25 +587,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const isOwned = inCollection >= neededQty;
       const cross = crossDeckUsageMap.get(cleanName);
 
-      const totalInDecks = cross ? cross.totalUsed : 0;
-      const decksList: ChecklistPrintDeckUsage[] = cross && cross.decks ? cross.decks.map((d) => ({
+      // Separate copies needed in this deck from copies in other decks
+      const otherDecks = cross && cross.decks ? cross.decks.filter((d) => d.deckId !== activeDeck.id) : [];
+      const totalInOtherDecks = otherDecks.reduce((sum, d) => sum + (d.quantity || 1), 0);
+      const decksList: ChecklistPrintDeckUsage[] = otherDecks.map((d) => ({
         deckId: d.deckId,
         deckName: d.deckName,
         quantity: d.quantity,
-        isCurrentDeck: d.deckId === activeDeck.id,
-      })) : [];
+      }));
 
       let usageText = '';
-      if (cross && cross.decks.length > 0) {
-        const otherDecks = cross.decks.filter((d) => d.deckId !== activeDeck.id);
-        if (otherDecks.length > 0) {
-          usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
-            otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
-        } else {
-          usageText = `Only in this deck (${neededQty}x)`;
-        }
+      if (otherDecks.length > 0) {
+        usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
+          otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
       } else {
-        usageText = 'Not in any decks';
+        usageText = 'None in other decks';
       }
 
       if (!isOwned) {
@@ -618,7 +614,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         name: card.name,
         quantity: neededQty,
         totalOwned: inCollection,
-        totalInDecks: totalInDecks,
+        totalInDecks: totalInOtherDecks,
         decksList: decksList,
         set: card.set,
         collectorNumber: card.collector_number || (card as any).collectorNumber,

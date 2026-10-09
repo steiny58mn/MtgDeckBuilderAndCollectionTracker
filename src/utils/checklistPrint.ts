@@ -70,6 +70,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     items = [],
   } = options;
 
+  const isDeckChecklist = Boolean(deckName);
   const totalQuantity = items.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
   const now = new Date();
   const dateFormatted = now.toLocaleDateString(undefined, {
@@ -98,13 +99,14 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     let decksSummaryHtml = '';
     if (item.decksList && item.decksList.length > 0) {
       decksSummaryHtml = item.decksList.map((d) => {
-        const currentTag = d.isCurrentDeck ? ' <span class="tag-current">(This Deck)</span>' : '';
-        return `<span class="deck-chip"><b>${d.quantity}x</b> in &ldquo;${escapeHtml(d.deckName)}&rdquo;${currentTag}</span>`;
+        return `<span class="deck-chip"><b>${d.quantity}x</b> in &ldquo;${escapeHtml(d.deckName)}&rdquo;</span>`;
       }).join(', ');
     } else if (item.deckUsageText) {
       decksSummaryHtml = `<span class="deck-text">${escapeHtml(item.deckUsageText)}</span>`;
     } else {
-      decksSummaryHtml = '<span class="deck-idle">In Binder Only (0 in decks)</span>';
+      decksSummaryHtml = isDeckChecklist
+        ? '<span class="deck-idle">0 in other decks (Not used elsewhere)</span>'
+        : '<span class="deck-idle">In Binder Only (0 in decks)</span>';
     }
 
     if (item.isMissing) {
@@ -153,13 +155,14 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     let decksSummaryHtml = '';
     if (item.decksList && item.decksList.length > 0) {
       decksSummaryHtml = item.decksList.map((d) => {
-        const currentTag = d.isCurrentDeck ? ' <span class="tag-current">(This Deck)</span>' : '';
-        return `<span class="deck-chip"><b>${d.quantity}x</b> in &ldquo;${escapeHtml(d.deckName)}&rdquo;${currentTag}</span>`;
+        return `<span class="deck-chip"><b>${d.quantity}x</b> in &ldquo;${escapeHtml(d.deckName)}&rdquo;</span>`;
       }).join(', ');
     } else if (item.deckUsageText) {
       decksSummaryHtml = `<span class="deck-text">${escapeHtml(item.deckUsageText)}</span>`;
     } else {
-      decksSummaryHtml = '<span class="deck-idle">In Binder Only (0 in decks)</span>';
+      decksSummaryHtml = isDeckChecklist
+        ? '<span class="deck-idle">0 in other decks (Not used elsewhere)</span>'
+        : '<span class="deck-idle">In Binder Only (0 in decks)</span>';
     }
 
     return `
@@ -186,8 +189,8 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
         <div class="entry-usage">
           <div class="usage-stats">
-            <span class="stat-pill stat-total">Total: <b>${totalOwned}</b></span>
-            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">In Decks: <b>${totalInDecks}</b></span>
+            <span class="stat-pill stat-total">${isDeckChecklist ? 'Total Owned' : 'Total'}: <b>${totalOwned}</b></span>
+            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}: <b>${totalInDecks}</b></span>
             ${item.isMissing ? `<span class="stat-pill stat-missing">&#9888; Missing</span>` : ''}
           </div>
           <div class="usage-decks-list">
@@ -442,13 +445,13 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
     .col-check { width: 28px; }
     .col-num { width: 28px; color: #64748b; font-family: monospace; font-size: 9px; }
-    .col-qty { width: 34px; font-family: monospace; }
+    .col-qty { width: 38px; font-family: monospace; }
     .col-name { min-width: 160px; }
     .col-set { width: 80px; font-family: monospace; font-size: 9px; color: #475569; }
     .col-type { width: 130px; color: #64748b; font-size: 9.5px; }
     .col-price { width: 55px; font-family: monospace; font-size: 9.5px; color: #047857; font-weight: 600; }
-    .col-total { width: 44px; font-family: monospace; font-size: 9.5px; }
-    .col-indecks { width: 54px; font-family: monospace; font-size: 9.5px; }
+    .col-total { width: 50px; font-family: monospace; font-size: 9.5px; }
+    .col-indecks { width: 58px; font-family: monospace; font-size: 9.5px; }
     .col-decks { min-width: 160px; font-size: 9.5px; }
 
     .text-center { text-align: center; }
@@ -532,12 +535,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     }
     .deck-chip b {
       color: #1e1b4b;
-    }
-    .tag-current {
-      color: #047857;
-      font-size: 8px;
-      font-weight: 700;
-      margin-left: 2px;
     }
     .deck-text {
       color: #4338ca;
@@ -894,14 +891,14 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
           <tr>
             <th class="col-check text-center">&#9744;</th>
             <th class="col-num text-center">#</th>
-            <th class="col-qty text-center">Qty</th>
+            <th class="col-qty text-center">${isDeckChecklist ? 'Deck Qty' : 'Qty'}</th>
             <th class="col-name">Card Name</th>
             <th class="col-set">Set / #</th>
             <th class="col-type">Type</th>
             <th class="col-price text-right">Price</th>
-            <th class="col-total text-center" title="Total copies owned in collection or binder">Total</th>
-            <th class="col-indecks text-center" title="Total copies currently in decks">In Decks</th>
-            <th class="col-decks">Decks with Copies / Status</th>
+            <th class="col-total text-center" title="${isDeckChecklist ? 'Total copies owned in collection' : 'Total copies owned in binder'}">${isDeckChecklist ? 'Total Owned' : 'Total'}</th>
+            <th class="col-indecks text-center" title="${isDeckChecklist ? 'Copies currently in other decks' : 'Copies currently in decks'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}</th>
+            <th class="col-decks">${isDeckChecklist ? 'Other Decks with Copies / Status' : 'Decks with Copies / Status'}</th>
           </tr>
         </thead>
         <tbody>
