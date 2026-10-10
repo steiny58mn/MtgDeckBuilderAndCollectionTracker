@@ -4434,15 +4434,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         )}
 
         {/* Resting Expansion & Card Number Badge at Bottom (visible when NOT hovered) */}
-        <div
-          className={`absolute bottom-1 right-1.5 z-10 pointer-events-none transition-opacity duration-150 ${
-            isActive ? 'opacity-0' : 'opacity-100'
-          }`}
-        >
-          <span className="px-1 py-0.5 rounded bg-slate-950/80 text-slate-400 font-mono italic text-[8px] border border-slate-800/60 shadow-xs backdrop-blur-xs">
-            {card.set?.toUpperCase()}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
-          </span>
-        </div>
+        {(() => {
+          const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+          const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
+          const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+          if (!versionText) return null;
+          return (
+            <div
+              className={`absolute bottom-1 right-1.5 z-10 pointer-events-none transition-opacity duration-150 ${
+                isActive ? 'opacity-0' : 'opacity-100'
+              }`}
+            >
+              <span className="px-1 py-0.5 rounded bg-slate-950/80 text-slate-400 font-mono italic text-[8px] border border-slate-800/60 shadow-xs backdrop-blur-xs">
+                {versionText}
+              </span>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -4581,9 +4589,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </div>
             
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
-              <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner italic">
-                {card.set}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
-              </span>
+              {(() => {
+                const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+                const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
+                const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+                return versionText ? (
+                  <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner italic">
+                    {versionText}
+                  </span>
+                ) : null;
+              })()}
               <span className="truncate max-w-[140px] sm:max-w-none">{card.type_line}</span>
               {isCardGamechanger(card) && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 font-bold text-[10px]" title="Commander Gamechanger">
@@ -4835,8 +4850,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </div>
           )}
           {card.isFoil && (
-            <div className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-700/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md z-10">
-              <Sparkles className="w-2.5 h-2.5" /> Foil
+            <div
+              className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-500/70 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-amber-300 flex items-center justify-center shadow-md z-10"
+              title="Foil"
+            >
+              ★
             </div>
           )}
           <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400 z-10">
@@ -5032,16 +5050,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           )}
 
           {/* Card Version & Collector Number (out of the way at the bottom of the pane) */}
-          <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono italic pt-1 border-t border-slate-800/40 mt-1 select-none">
-            <span title={`${card.set_name || card.setName || card.set} #${card.collector_number || card.collectorNumber || ''}`}>
-              {card.set ? card.set.toUpperCase() : ''}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
-            </span>
-            {card.rarity && (
-              <span className="capitalize text-[9px] text-slate-500/70 not-italic font-sans">
-                {card.rarity}
-              </span>
-            )}
-          </div>
+          {(() => {
+            const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+            const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
+            const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+            if (!versionText && !card.rarity) return null;
+            return (
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono italic pt-1 border-t border-slate-800/40 mt-1 select-none">
+                <span title={`${card.set_name || card.setName || setCode} ${collNum ? `#${collNum}` : ''}`.trim()}>
+                  {versionText}
+                </span>
+                {card.rarity && (
+                  <span className="capitalize text-[9px] text-slate-500/70 not-italic font-sans">
+                    {card.rarity}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );

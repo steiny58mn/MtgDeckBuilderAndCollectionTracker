@@ -1490,8 +1490,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                    <span className="uppercase font-mono">{card.set} · #{card.collectorNumber}</span>
-                                    <span>·</span>
+                                    {(() => {
+                                      const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+                                      const collNum = card.collectorNumber || card.collector_number || (card as any).CollectorNumber || '';
+                                      const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+                                      return versionText ? (
+                                        <>
+                                          <span className="uppercase font-mono italic text-[10px] text-slate-400">{versionText}</span>
+                                          <span>·</span>
+                                        </>
+                                      ) : null;
+                                    })()}
                                     <span className="text-emerald-400 font-mono font-medium">${(Number(lineTotal) || 0).toFixed(2)}</span>
                                     {priceInfo.isMedian && (
                                       <span className="text-[9px] text-amber-300 font-mono">(med)</span>
@@ -1684,14 +1693,13 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                               </div>
                             );
                           })()}
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
-                            <span className="uppercase font-mono">{card.set} · #{card.collectorNumber}</span>
-                            {gain !== 0 && (
+                          {gain !== 0 && (
+                            <div className="flex items-center justify-end text-[10px] text-slate-400 mt-0.5">
                               <span className={`font-semibold ${gain > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                 {gain > 0 ? '+' : ''}${(Number(gain) || 0).toFixed(2)}
                               </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Stepper & Actions */}
@@ -1765,6 +1773,26 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                             </button>
                           </div>
                         </div>
+
+                        {/* Card Version & Collector Number at bottom of pane */}
+                        {(() => {
+                          const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+                          const collNum = card.collectorNumber || card.collector_number || (card as any).CollectorNumber || '';
+                          const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+                          if (!versionText && !card.rarity) return null;
+                          return (
+                            <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono italic pt-1 border-t border-slate-800/40 mt-1 select-none">
+                              <span title={`${card.setName || card.set_name || setCode} ${collNum ? `#${collNum}` : ''}`.trim()}>
+                                {versionText}
+                              </span>
+                              {card.rarity && (
+                                <span className="capitalize text-[9px] text-slate-500/70 not-italic font-sans">
+                                  {card.rarity}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   );

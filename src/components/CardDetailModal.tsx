@@ -314,7 +314,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               </p>
               <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
                 <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 uppercase font-mono font-bold">
-                  {(displayCard.set || '').toUpperCase()} · #{displayCard.collector_number || ''}
+                  {(() => { const setCode = (displayCard.set || '').toUpperCase(); const collNum = displayCard.collector_number || (displayCard as any).collectorNumber || ''; return setCode ? (collNum ? `${setCode} · #${collNum}` : setCode) : (collNum ? `#${collNum}` : ''); })()}
                 </span>
                 <span className="capitalize font-semibold text-fuchsia-400/90">
                   {displayCard.rarity}

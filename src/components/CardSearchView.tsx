@@ -2447,7 +2447,7 @@ const displayedCards = useMemo(() => {
                     <ManaCostBadge manaCost={card.mana_cost} size="sm" />
                   </div>
                   {isBinderContext && (
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5" title={`${card.set_name || ''} · #${card.collector_number || (card as any).collectorNumber || ''}`}>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5" title={`${card.set_name || card.set || ''}${(card.collector_number || (card as any).collectorNumber) ? ` #${card.collector_number || (card as any).collectorNumber}` : ''}`}>
                       <div className="flex items-center truncate min-w-0 mr-1.5">
                         <span className="uppercase font-bold mr-1 text-slate-300">{card.set}</span>
                         <span className="truncate text-slate-500">{card.set_name}</span>

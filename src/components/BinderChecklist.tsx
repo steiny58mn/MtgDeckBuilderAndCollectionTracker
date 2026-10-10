@@ -100,6 +100,10 @@ const ChecklistCardRow: React.FC<ChecklistCardRowProps> = React.memo(({
     }
   }, [onAddCardToDeck, card]);
 
+  const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+  const collNum = card.collectorNumber || card.collector_number || (card as any).CollectorNumber || '';
+  const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+
   return (
     <div
       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 transition-colors ${
@@ -149,22 +153,24 @@ const ChecklistCardRow: React.FC<ChecklistCardRowProps> = React.memo(({
               {card.quantity}x
             </span>
 
-            {/* Foil Badge */}
+            {/* Foil Badge: Star only, slightly larger */}
             {card.isFoil && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-500/50 text-fuchsia-300 text-[10px] font-semibold">
-                <Sparkles className="w-2.5 h-2.5" />
-                <span>Foil</span>
+              <span
+                className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-fuchsia-950/80 border border-amber-600/60 text-amber-300 text-[11px] font-bold shadow-xs"
+                title="Foil"
+              >
+                ★
               </span>
             )}
-
-            {/* Set and Collector Number */}
-            <span className="text-[10px] font-mono text-slate-400 uppercase">
-              {card.set} #{card.collectorNumber}
-            </span>
           </div>
 
-          {/* Price and Type Line */}
+          {/* Price, Type Line & Version in italics */}
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+            {versionText && (
+              <span className="text-[10px] font-mono text-slate-400 italic uppercase">
+                {versionText}
+              </span>
+            )}
             <span>{card.type_line || card.typeLine}</span>
             {!isNaN(priceNum) && priceNum > 0 && (
               <span className="font-mono text-emerald-400 font-semibold">
@@ -547,8 +553,8 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         totalOwned: totalOwned,
         totalInDecks: totalInDecks,
         decksList: decksList,
-        set: c.set,
-        collectorNumber: c.collectorNumber,
+        set: c.set || (c as any).set_code || (c as any).setCode || '',
+        collectorNumber: c.collectorNumber || c.collector_number || (c as any).CollectorNumber || '',
         typeLine: c.type_line || c.typeLine,
         isFoil: Boolean(c.isFoil),
         price: c.currentPriceUsd || c.medianPriceUsd || 0,

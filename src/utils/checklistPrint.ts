@@ -534,7 +534,8 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
     const foilBadge = item.isFoil ? '<span class="foil-badge" title="Foil">&#9733;</span>' : '';
-    const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
+    const collNum = item.collectorNumber || (item as any).collector_number || '';
+    const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${collNum ? ` #${escapeHtml(collNum)}` : ''}` : (collNum ? `#${escapeHtml(collNum)}` : '');
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
     const totalOwned = item.totalOwned !== undefined ? item.totalOwned : item.quantity;
@@ -561,6 +562,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
         <td class="col-qty text-center font-bold">${item.quantity}x</td>
         <td class="col-name">
           <span class="card-name ${isChecked ? 'name-checked' : ''}">${escapeHtml(item.name)}</span>
+          ${setInfo ? `<span class="entry-set-info" style="font-style:italic; font-size:8.5px; color:#64748b; margin-left:6px;">${setInfo}</span>` : ''}
           ${categoryBadge}
         </td>
         <td class="col-finish text-center">${foilBadge || '<span style="color:#94a3b8;">Normal</span>'}</td>
@@ -577,7 +579,8 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
     const foilBadge = item.isFoil ? '<span class="foil-badge" title="Foil">&#9733;</span>' : '';
-    const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
+    const collNum = item.collectorNumber || (item as any).collector_number || '';
+    const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${collNum ? ` #${escapeHtml(collNum)}` : ''}` : (collNum ? `#${escapeHtml(collNum)}` : '');
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
     const totalOwned = item.totalOwned !== undefined ? item.totalOwned : item.quantity;
