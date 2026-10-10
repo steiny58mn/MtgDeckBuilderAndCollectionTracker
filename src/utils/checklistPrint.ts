@@ -66,6 +66,62 @@ const escapeHtml = (str?: string | number | null): string => {
  * Generate a high-speed, native vector PDF document using jsPDF.
  * Renders in ~50ms and eliminates browser print preview spinning/lag.
  */
+/**
+ * Abbreviate a deck name to save space while keeping it recognizable.
+ * Strips prefixes (EDH:, Commander:), parentheticals, epithets after commas,
+ * and condenses long names so multiple decks can fit in tight checklist columns.
+ */
+export const abbreviateDeckName = (name: string): string => {
+  if (!name) return '';
+  let clean = name.trim();
+
+  // Strip prefixes like "EDH - ", "EDH: ", "Commander: ", "Deck - ", "MTG: "
+  clean = clean.replace(/^(edh|commander|deck|mtg)\s*[:\-–—]\s*/i, '');
+
+  // Strip parentheticals and bracketed notes: e.g. "Atraxa (Superfriends)" -> "Atraxa"
+  clean = clean.replace(/\s*[\(\[].*?[\)\]]/g, '');
+
+  // Strip surrounding quotes
+  clean = clean.replace(/["'“”]/g, '').trim();
+
+  // If there's a comma (typical for commanders like "Atraxa, Praetors' Voice" or "Urza, Lord High Artificer"),
+  // keep the prominent first part before the comma
+  if (clean.includes(',')) {
+    const beforeComma = clean.split(',')[0].trim();
+    if (beforeComma.length >= 3) {
+      clean = beforeComma;
+    }
+  }
+
+  // If it has a colon or dash separator, e.g. "Sliver - Hive" -> take the main part
+  if (clean.includes(' - ')) {
+    clean = clean.split(' - ')[0].trim();
+  } else if (clean.includes(': ')) {
+    clean = clean.split(': ')[0].trim();
+  }
+
+  // If still very long (> 13 chars), condense smartly
+  if (clean.length > 13) {
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      if (words[1].toLowerCase() === 'the' || words[1].toLowerCase() === 'of') {
+        clean = words[0];
+      } else {
+        const twoWords = `${words[0]} ${words[1]}`;
+        if (twoWords.length <= 13) {
+          clean = twoWords;
+        } else {
+          clean = words[0].length >= 4 ? words[0] : twoWords.slice(0, 12) + '…';
+        }
+      }
+    } else {
+      clean = clean.slice(0, 12) + '…';
+    }
+  }
+
+  return clean;
+};
+
 export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
   const {
     title,
@@ -169,8 +225,8 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
   const cols = columns;
   const colGap = cols === 1 ? 0 : cols === 2 ? 10 : cols === 3 ? 8 : 6;
   const colWidth = (contentWidth - colGap * (cols - 1)) / cols;
-  const rowHeight = cols === 1 ? 24 : cols === 2 ? 34 : cols === 3 ? 37 : 39;
-  const rowGap = 3.5;
+  const rowHeight = cols === 1 ? 18 : cols === 2 ? 20 : cols === 3 ? 21 : 22;
+  const rowGap = 2.0;
 
   const totalRows = Math.ceil(items.length / cols);
 
@@ -208,97 +264,152 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
       doc.setLineWidth(0.6);
       doc.roundedRect(itemX, itemY, colWidth, rowHeight, 2, 2, 'FD');
 
-      // Checkbox
-      const boxSize = cols === 4 ? 6 : 7;
-      const boxX = itemX + 3.5;
-      const boxY = itemY + 3.5;
-      doc.setDrawColor(15, 23, 42);
-      doc.setLineWidth(0.8);
+      // Needed Quantity Badge (at far left edge, replacing checkbox & card #)
+      const qtyStr = `${item.quantity}x`;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(cols === 4 ? 5.6 : cols === 3 ? 6.2 : 6.8);
+      const qtyBadgeW = doc.getTextWidth(qtyStr) + 3.6;
+      const qtyBadgeH = cols === 4 ? 6.5 : 7.2;
+      const qtyBadgeX = itemX + 3;
+      const qtyBadgeY = itemY + 2.2;
 
-      if (isChecked) {
-        doc.setFillColor(15, 23, 42);
-        doc.rect(boxX, boxY, boxSize, boxSize, 'FD');
-        doc.setTextColor(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.text('✓', boxX + (cols === 4 ? 1 : 1.5), boxY + (cols === 4 ? 4.5 : 5.5));
+      // Dark slate badge with crisp white text
+      doc.setFillColor(15, 23, 42);
+      doc.roundedRect(qtyBadgeX, qtyBadgeY, qtyBadgeW, qtyBadgeH, 1.2, 1.2, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.text(qtyStr, qtyBadgeX + qtyBadgeW / 2, qtyBadgeY + qtyBadgeH - 1.8, { align: 'center' });
+
+      // Badges in top right: Total Owned & In Decks / Other Decks (plus Missing)
+      const badgeY = itemY + 2.2;
+      const deckBadgeH = cols === 4 ? 6.5 : 7.2;
+
+      // Decks Badge
+      const deckBadgeStr = cols === 4
+        ? `${isDeckChecklist ? 'O' : 'D'}:${totalInDecks}`
+        : `${isDeckChecklist ? 'Oth' : 'In'}:${totalInDecks}`;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(cols === 4 ? 5.0 : cols === 3 ? 5.4 : 5.8);
+      const deckBadgeW = doc.getTextWidth(deckBadgeStr) + 4;
+      const deckBadgeX = itemX + colWidth - deckBadgeW - 3;
+
+      if (totalInDecks > 0) {
+        doc.setFillColor(237, 233, 254); // purple-100
+        doc.setDrawColor(196, 181, 253); // purple-300
+        doc.setLineWidth(0.4);
+        doc.roundedRect(deckBadgeX, badgeY, deckBadgeW, deckBadgeH, 1.2, 1.2, 'FD');
+        doc.setTextColor(91, 33, 182); // purple-800
       } else {
-        doc.rect(boxX, boxY, boxSize, boxSize, 'S');
+        doc.setFillColor(241, 245, 249); // slate-100
+        doc.setDrawColor(226, 232, 240); // slate-200
+        doc.setLineWidth(0.4);
+        doc.roundedRect(deckBadgeX, badgeY, deckBadgeW, deckBadgeH, 1.2, 1.2, 'FD');
+        doc.setTextColor(100, 116, 139); // slate-500
       }
+      doc.text(deckBadgeStr, deckBadgeX + deckBadgeW / 2, badgeY + deckBadgeH - 1.8, { align: 'center' });
 
-      // Card Index #
-      const textX = boxX + boxSize + 3;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(cols === 4 ? 5.5 : cols === 3 ? 6.5 : 7);
-      doc.setTextColor(100, 116, 139);
-      doc.text(`#${idx + 1}`, textX, itemY + 9);
+      // Total Owned Badge
+      const totBadgeStr = cols === 4 ? `T:${totalOwned}` : `Tot:${totalOwned}`;
+      const totBadgeW = doc.getTextWidth(totBadgeStr) + 4;
+      const totBadgeX = deckBadgeX - totBadgeW - 2;
 
-      // Card Qty Needed (bold)
-      const qtyOffset = cols === 4 ? 10 : cols === 3 ? 12 : 14;
-      const qtyX = textX + qtyOffset;
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(15, 23, 42);
-      doc.text(`${item.quantity}x`, qtyX, itemY + 9);
+      doc.setFillColor(220, 252, 231); // emerald-100
+      doc.setDrawColor(134, 239, 172); // emerald-300
+      doc.setLineWidth(0.4);
+      doc.roundedRect(totBadgeX, badgeY, totBadgeW, deckBadgeH, 1.2, 1.2, 'FD');
+      doc.setTextColor(21, 128, 61); // emerald-700
+      doc.text(totBadgeStr, totBadgeX + totBadgeW / 2, badgeY + deckBadgeH - 1.8, { align: 'center' });
 
-      // Badges text in top right: Total & Other Decks
-      const rightX = itemX + colWidth - 3.5;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(cols === 4 ? 5.5 : cols === 3 ? 6 : 6.5);
-
-      const totLabel = cols === 4 ? 'T' : 'Tot';
-      const deckLabel = cols === 4 ? (isDeckChecklist ? 'O' : 'D') : (isDeckChecklist ? 'Oth' : 'In');
-      const badgeStr = `${totLabel}:${totalOwned} ${deckLabel}:${totalInDecks}`;
-
+      // Missing Badge
+      let rightBadgesLeftEdge = totBadgeX;
       if (isMissing) {
-        doc.setTextColor(180, 83, 9); // amber/red
-        doc.text(`MISSING ${badgeStr}`, rightX, itemY + 9, { align: 'right' });
-      } else {
-        doc.setTextColor(71, 85, 105);
-        doc.text(badgeStr, rightX, itemY + 9, { align: 'right' });
+        const missStr = cols === 4 ? '!M' : '!MISS';
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(cols === 4 ? 4.5 : 5.0);
+        const missBadgeW = doc.getTextWidth(missStr) + 3.5;
+        const missBadgeX = totBadgeX - missBadgeW - 2;
+        rightBadgesLeftEdge = missBadgeX;
+
+        doc.setFillColor(254, 243, 199); // amber-100
+        doc.setDrawColor(252, 211, 77); // amber-300
+        doc.setLineWidth(0.4);
+        doc.roundedRect(missBadgeX, badgeY, missBadgeW, deckBadgeH, 1.2, 1.2, 'FD');
+        doc.setTextColor(180, 83, 9); // amber-700
+        doc.text(missStr, missBadgeX + missBadgeW / 2, badgeY + deckBadgeH - 1.8, { align: 'center' });
       }
 
-      // Card Name (bold) - card condition removed
-      const nameX = qtyX + (cols === 4 ? 9 : 12);
+      // Foil Badge calculation
+      let foilBadgeW = 0;
+      if (item.isFoil) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2);
+        foilBadgeW = doc.getTextWidth('✦FOIL') + 3.5;
+      }
+
+      // Card Name (bold)
+      const nameStartX = qtyBadgeX + qtyBadgeW + 2.5;
+      const maxNameWidth = Math.max(20, rightBadgesLeftEdge - nameStartX - (item.isFoil ? foilBadgeW + 3 : 0));
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(cols === 4 ? 6 : cols === 3 ? 6.8 : 7.5);
+      doc.setFontSize(cols === 4 ? 5.8 : cols === 3 ? 6.5 : 7.2);
       doc.setTextColor(isChecked ? 100 : 15, isChecked ? 116 : 23, isChecked ? 139 : 42);
 
       let cardDisplayName = item.name || '';
       if (item.category === 'commander') cardDisplayName += ' (Cmdr)';
-      if (item.isFoil) cardDisplayName += ' *Foil';
-
-      const rightBadgeWidth = cols === 4 ? 32 : cols === 3 ? 48 : 60;
-      const maxNameWidth = Math.max(30, colWidth - (nameX - itemX) - rightBadgeWidth);
       const truncName = doc.splitTextToSize(cardDisplayName, maxNameWidth)[0] || cardDisplayName;
-      doc.text(truncName, nameX, itemY + 9);
+      doc.text(truncName, nameStartX, itemY + (cols === 4 ? 7.6 : 8.2));
 
-      // Line 2: Set Code & Type Line
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(cols === 4 ? 5.5 : cols === 3 ? 6 : 6.5);
-      doc.setTextColor(100, 116, 139);
+      // Draw Foil Badge (fuchsia pill)
+      if (item.isFoil) {
+        const nameTextW = doc.getTextWidth(truncName);
+        const foilX = nameStartX + nameTextW + 2;
+        const foilY = itemY + 2.2;
+        const foilH = cols === 4 ? 6.5 : 7.2;
 
-      const setInfo = `${item.set ? item.set.toUpperCase() : ''}${item.collectorNumber ? ` #${item.collectorNumber}` : ''}`;
-      const line2Str = [setInfo, item.typeLine || ''].filter(Boolean).join(' • ');
-      const maxLine2Width = colWidth - 8;
-      const truncLine2 = doc.splitTextToSize(line2Str, maxLine2Width)[0] || line2Str;
-      doc.text(truncLine2, itemX + 4, itemY + (cols === 1 ? 19 : cols === 2 ? 19.5 : 19.5));
+        doc.setFillColor(250, 232, 255); // fuchsia-100
+        doc.setDrawColor(240, 171, 252); // fuchsia-300
+        doc.setLineWidth(0.4);
+        doc.roundedRect(foilX, foilY, foilBadgeW, foilH, 1.2, 1.2, 'FD');
+        doc.setTextColor(162, 28, 175); // fuchsia-700
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2);
+        doc.text('✦FOIL', foilX + foilBadgeW / 2, foilY + foilH - 1.8, { align: 'center' });
+      }
 
-      // Line 3: Decks info ONLY if copies are in decks (no "In Binder Only" line)
+      // Decks info ONLY if copies are in other decks (NO quantities, abbreviated names, all decks listed)
       if (cols > 1) {
-        let decksStr = '';
+        let rawDeckNames: string[] = [];
         if (item.decksList && item.decksList.length > 0) {
-          decksStr = item.decksList.map((d) => `${d.quantity}x "${d.deckName}"`).join(', ');
+          rawDeckNames = item.decksList.map((d) => d.deckName);
         } else if (item.deckUsageText && !item.deckUsageText.includes('None') && !item.deckUsageText.includes('Binder Only') && !item.deckUsageText.includes('Not in any decks')) {
-          decksStr = item.deckUsageText;
+          rawDeckNames = item.deckUsageText.split(',').map((s) => s.replace(/^\s*(in\s+\d+\s+other\s+decks?:\s*|\d+x\s+(in\s+)?)/i, '').replace(/["'“”]/g, '').trim()).filter(Boolean);
         }
 
-        if (decksStr) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(cols === 4 ? 5 : cols === 3 ? 5.5 : 6);
-          doc.setTextColor(67, 56, 202); // indigo
-          const maxDecksWidth = colWidth - 8;
-          const truncDecks = doc.splitTextToSize(decksStr, maxDecksWidth)[0] || decksStr;
-          doc.text(truncDecks, itemX + 4, itemY + (cols === 2 ? 29 : cols === 3 ? 30 : 31));
+        if (rawDeckNames.length > 0) {
+          const abbrevNames = Array.from(new Set(rawDeckNames.map(abbreviateDeckName).filter(Boolean)));
+          if (abbrevNames.length > 0) {
+            const decksPrefix = cols === 4 ? 'D: ' : 'Decks: ';
+            let decksStr = `${decksPrefix}${abbrevNames.join(', ')}`;
+
+            const maxDecksWidth = colWidth - 7;
+            let decksFontSize = cols === 4 ? 4.6 : cols === 3 ? 5.0 : 5.5;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(decksFontSize);
+
+            while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 3.4) {
+              decksFontSize -= 0.2;
+              doc.setFontSize(decksFontSize);
+            }
+
+            if (doc.getTextWidth(decksStr) > maxDecksWidth) {
+              decksStr = `${decksPrefix}${abbrevNames.join('/')}`;
+              while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 3.0) {
+                decksFontSize -= 0.2;
+                doc.setFontSize(decksFontSize);
+              }
+            }
+
+            doc.setTextColor(79, 70, 229); // indigo-600
+            doc.text(decksStr, itemX + 3.5, itemY + (cols === 4 ? 14 : cols === 3 ? 14.5 : 15.5));
+          }
         }
       }
     }
@@ -383,7 +494,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; Foil</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; FOIL</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -408,18 +519,12 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
     return `
       <tr class="${isChecked ? 'row-verified' : ''} ${item.isMissing ? 'row-missing' : ''}">
-        <td class="col-check text-center">
-          <span class="${boxClass}">${boxContent}</span>
-        </td>
-        <td class="col-num text-center">${index + 1}</td>
         <td class="col-qty text-center font-bold">${item.quantity}x</td>
         <td class="col-name">
           <span class="card-name ${isChecked ? 'name-checked' : ''}">${escapeHtml(item.name)}</span>
-          ${foilBadge}
           ${categoryBadge}
         </td>
-        <td class="col-set">${setInfo}</td>
-        <td class="col-type">${escapeHtml(item.typeLine || '-')}</td>
+        <td class="col-finish text-center">${foilBadge || '<span style="color:#94a3b8;">Normal</span>'}</td>
         <td class="col-total text-center font-bold">${totalOwned}</td>
         <td class="col-indecks text-center font-bold ${totalInDecks > 0 ? 'text-indecks' : 'text-idle'}">${totalInDecks}</td>
         <td class="col-decks">${decksSummaryHtml}</td>
@@ -432,7 +537,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; Foil</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; FOIL</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -452,30 +557,22 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       <div class="card-entry ${isChecked ? 'entry-verified' : ''} ${item.isMissing ? 'entry-missing' : ''}">
         <div class="entry-header">
           <div class="entry-left">
-            <span class="${boxClass}">${boxContent}</span>
-            <span class="entry-num">#${index + 1}</span>
-            <span class="entry-qty">${item.quantity}x</span>
+            <span class="entry-qty-badge">${item.quantity}x</span>
             <span class="entry-name ${isChecked ? 'name-checked' : ''}">${escapeHtml(item.name)}</span>
             ${foilBadge}
             ${categoryBadge}
           </div>
           <div class="entry-right">
-            <span class="stat-pill stat-total">${isDeckChecklist ? 'Total' : 'Total'}: <b>${totalOwned}</b></span>
-            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}: <b>${totalInDecks}</b></span>
-            ${item.isMissing ? `<span class="stat-pill stat-missing">&#9888; Missing</span>` : ''}
+            <span class="stat-pill stat-total">Tot: <b>${totalOwned}</b></span>
+            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">${isDeckChecklist ? 'Oth' : 'In'}: <b>${totalInDecks}</b></span>
+            ${item.isMissing ? `<span class="stat-pill stat-missing">MISSING</span>` : ''}
           </div>
-        </div>
-
-        <div class="entry-sub">
-          ${setInfo ? `<span class="entry-set">${setInfo}</span>` : ''}
-          ${item.typeLine ? `<span class="entry-type">${escapeHtml(item.typeLine)}</span>` : ''}
         </div>
 
         ${decksSummaryHtml ? `
         <div class="entry-usage">
-          <div class="usage-decks-list">
-            ${decksSummaryHtml}
-          </div>
+          <span class="usage-label">Decks:</span>
+          ${decksSummaryHtml}
         </div>
         ` : ''}
       </div>
@@ -861,6 +958,19 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       font-family: monospace;
       font-size: 8.5px;
     }
+    .entry-qty-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f172a;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 8.5px;
+      padding: 0.5px 3.5px;
+      border-radius: 3px;
+      margin-right: 2px;
+      letter-spacing: -0.2px;
+    }
     .entry-qty {
       font-family: monospace;
       font-weight: 700;
@@ -1176,12 +1286,9 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       <table>
         <thead>
           <tr>
-            <th class="col-check text-center">&#9744;</th>
-            <th class="col-num text-center">#</th>
             <th class="col-qty text-center">${isDeckChecklist ? 'Deck Qty' : 'Qty'}</th>
             <th class="col-name">Card Name</th>
-            <th class="col-set">Set / #</th>
-            <th class="col-type">Type</th>
+            <th class="col-finish text-center">Finish</th>
             <th class="col-total text-center" title="${isDeckChecklist ? 'Total copies owned in collection' : 'Total copies owned in binder'}">${isDeckChecklist ? 'Total Owned' : 'Total'}</th>
             <th class="col-indecks text-center" title="${isDeckChecklist ? 'Copies currently in other decks' : 'Copies currently in decks'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}</th>
             <th class="col-decks">${isDeckChecklist ? 'Other Decks with Copies / Status' : 'Decks with Copies / Status'}</th>

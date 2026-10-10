@@ -25,7 +25,7 @@ import { buildCrossDeckUsageMap } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
-import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage } from '../utils/checklistPrint';
+import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
 
 export interface BinderChecklistProps {
   cards: CollectionCard[];
@@ -244,7 +244,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       
       let deckInfo = '';
       if (cross && cross.decks.length > 0) {
-        const deckNames = cross.decks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+        const deckNames = cross.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ');
         deckInfo = ` -> IN DECKS: ${deckNames}`;
       }
 
@@ -297,14 +297,13 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       const totalInDecks = cross ? cross.totalUsed : 0;
       const decksList: ChecklistPrintDeckUsage[] = cross && cross.decks ? cross.decks.map((d) => ({
         deckId: d.deckId,
-        deckName: d.deckName,
+        deckName: abbreviateDeckName(d.deckName),
         quantity: d.quantity,
-        
       })) : [];
 
       let deckUsageText = '';
       if (cross && cross.decks.length > 0) {
-        deckUsageText = cross.decks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+        deckUsageText = cross.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ');
       }
 
       return {
@@ -691,8 +690,6 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-[10px] text-slate-500">#{index + 1}</span>
-                      
                       {/* Card Name with Hover Preview */}
                       <span
                         className={`font-semibold text-xs transition-colors cursor-pointer ${
@@ -770,8 +767,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                             className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:text-white"
                             title={`Card is physically in deck "${deckEntry.deckName}" (${deckEntry.quantity} copy)`}
                           >
-                            <span className="font-mono font-bold text-violet-400 mr-1">{deckEntry.quantity}x</span>
-                            <span>{deckEntry.deckName}</span>
+                            <span>{abbreviateDeckName(deckEntry.deckName)}</span>
                           </span>
                         ))}
                       </div>

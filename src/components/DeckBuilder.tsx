@@ -86,7 +86,7 @@ import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
 import { handleCardImageError, getCardImageUrl } from '../services/api';
-import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage } from '../utils/checklistPrint';
+import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -592,14 +592,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const totalInOtherDecks = otherDecks.reduce((sum, d) => sum + (d.quantity || 1), 0);
       const decksList: ChecklistPrintDeckUsage[] = otherDecks.map((d) => ({
         deckId: d.deckId,
-        deckName: d.deckName,
+        deckName: abbreviateDeckName(d.deckName),
         quantity: d.quantity,
       }));
 
       let usageText = '';
       if (otherDecks.length > 0) {
-        usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
-          otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
+        usageText = otherDecks.map((d) => abbreviateDeckName(d.deckName)).join(', ');
       }
 
       if (!isOwned) {
@@ -2552,8 +2551,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                                 <span>Owned in binder: <strong className="text-emerald-400">{item.ownedInCollection}</strong></span>
                                 <span>Used across decks: <strong className="text-amber-300">{item.totalUsedAcrossDecks}</strong></span>
                               </div>
-                              <div className="mt-1 text-[10px] text-slate-500 truncate" title={item.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ')}>
-                                Used in: {item.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ')}
+                              <div className="mt-1 text-[10px] text-slate-500 truncate" title={item.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ')}>
+                                Used in: {item.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ')}
                               </div>
                             </div>
                           ))}
@@ -4615,7 +4614,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
                 if (isOvercommitted) {
-                  const deckListSummary = cross.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ');
+                  const deckListSummary = cross.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ');
                   return (
                     <span
                       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 text-[10px] font-mono font-semibold"
@@ -4868,7 +4867,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
               if (isOvercommitted) {
-                const deckListSummary = cross.decks.map((d) => `${d.deckName} (${d.quantity}x)`).join(', ');
+                const deckListSummary = cross.decks.map((d) => abbreviateDeckName(d.deckName)).join(', ');
                 return (
                   <span
                     className="bg-amber-950/95 border border-amber-500/80 rounded px-1.5 py-0.5 text-[9px] font-bold text-amber-300 flex items-center gap-0.5 shadow-xs backdrop-blur-xs"
