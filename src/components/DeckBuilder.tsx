@@ -600,8 +600,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       if (otherDecks.length > 0) {
         usageText = `In ${otherDecks.length} other deck${otherDecks.length === 1 ? '' : 's'}: ` +
           otherDecks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
-      } else {
-        usageText = 'None in other decks';
       }
 
       if (!isOwned) {
@@ -620,7 +618,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         collectorNumber: card.collector_number || (card as any).collectorNumber,
         typeLine: card.type_line,
         isFoil: Boolean(card.isFoil),
-        condition: (card as any).condition,
         price: getCardUnitPrice(card),
         isChecked: isOwned,
         deckUsageText: usageText,

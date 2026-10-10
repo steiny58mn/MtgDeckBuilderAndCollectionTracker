@@ -246,8 +246,6 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       if (cross && cross.decks.length > 0) {
         const deckNames = cross.decks.map((d) => `${d.quantity}x in "${d.deckName}"`).join(', ');
         deckInfo = ` -> IN DECKS: ${deckNames}`;
-      } else {
-        deckInfo = ' -> In Binder Only';
       }
 
       const foilStr = c.isFoil ? ' *Foil*' : '';
@@ -320,7 +318,6 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         collectorNumber: c.collectorNumber,
         typeLine: c.type_line || c.typeLine,
         isFoil: Boolean(c.isFoil),
-        condition: c.condition,
         price: c.currentPriceUsd || c.medianPriceUsd || 0,
         isChecked,
         deckUsageText,
@@ -733,13 +730,6 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                       <span className="text-[10px] font-mono text-slate-400 uppercase">
                         {card.set} #{card.collectorNumber}
                       </span>
-
-                      {/* Condition */}
-                      {card.condition && (
-                        <span className="text-[10px] text-slate-400 bg-slate-950 px-1 py-0.2 rounded border border-slate-800">
-                          {card.condition}
-                        </span>
-                      )}
                     </div>
 
                     {/* Price and Type Line */}
@@ -786,11 +776,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                         ))}
                       </div>
                     </div>
-                  ) : (
-                    <span className="text-[11px] text-slate-500 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
-                      📁 In Binder only (0 decks)
-                    </span>
-                  )}
+                  ) : null}
 
                   {/* Quantity quick controls */}
                   {onUpdateCollectionCard && (
