@@ -118,7 +118,9 @@ export function convertParsedCardsToCollectionCards(
 
   parsed.forEach((item, index) => {
     const knownMedian = getKnownMedianPrice(item.name);
-    const cached = (item.scryfallId ? cardByIdCache.get(item.scryfallId) : null) || getCardFromLocalCache(item.name);
+    const cachedById = (item.scryfallId && uuidRegex.test(item.scryfallId)) ? cardByIdCache.get(item.scryfallId) : null;
+    const cachedByName = getCardFromLocalCache(item.name);
+    const cached = cachedById || cachedByName;
     const typeLine = cached?.type_line || (isBasicLandName(item.name) ? 'Basic Land' : '');
     const manaCost = cached?.mana_cost || '';
     const colors = cached ? getCardEffectiveColors(cached) : [];
@@ -126,12 +128,16 @@ export function convertParsedCardsToCollectionCards(
     const cmc = cached?.cmc ?? 0;
     const rarity = cached?.rarity || 'rare';
     const oracleText = cached?.oracle_text || '';
-    const effectiveSet = (item.set || cached?.set || '').toLowerCase();
-    const effectiveSetName = item.setName || cached?.set_name || '';
-    const effectiveCollectorNumber = item.collectorNumber || cached?.collector_number || '';
-    const imageUrl = (item.scryfallId && uuidRegex.test(item.scryfallId))
-      ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large`
-      : (cached?.image_uris?.large || cached?.image_uris?.normal || '');
+
+    // NEVER overwrite or borrow an arbitrary edition's set, collector number, or scryfall ID from generic name cache!
+    const isExactCached = Boolean(cachedById);
+    const effectiveSet = (item.set || (isExactCached ? cachedById?.set : '') || '').toLowerCase();
+    const effectiveSetName = item.setName || (isExactCached ? cachedById?.set_name : '') || (item.set ? item.set.toUpperCase() : '');
+    const effectiveCollectorNumber = item.collectorNumber || (isExactCached ? cachedById?.collector_number : '') || '';
+    const effectiveScryfallId = item.scryfallId || (isExactCached ? cachedById?.id : '') || '';
+    const imageUrl = (effectiveScryfallId && uuidRegex.test(effectiveScryfallId))
+      ? `https://api.scryfall.com/cards/${effectiveScryfallId}?format=image&version=large`
+      : (isExactCached ? (cachedById?.image_uris?.large || cachedById?.image_uris?.normal || '') : '');
 
     // Non-foil copy
     if (item.quantityRegular > 0) {

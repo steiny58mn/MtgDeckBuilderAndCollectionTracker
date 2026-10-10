@@ -134,7 +134,6 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
         if (matched) {
           const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
           const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
-          const img = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
           const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
             ? matched.colors
             : (Array.isArray(matched.card_faces?.[0]?.colors) && matched.card_faces[0].colors.length > 0)
@@ -149,14 +148,41 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
           const foilPrice = matched.prices?.usd_foil ? parseFloat(matched.prices.usd_foil) : normalPrice;
           const price = c.isFoil ? (foilPrice || normalPrice) : (normalPrice || foilPrice);
 
+          // STRICT: NEVER overwrite any edition/version attributes imported or specified on the card!
+          const isExactPrintingMatch = Boolean(
+            (scryfallId && matched.id && matched.id.toLowerCase() === scryfallId) ||
+            (setCode && collNum && matched.set && matched.collector_number &&
+             matched.set.toLowerCase() === setCode && String(matched.collector_number).toLowerCase() === collNum)
+          );
+
+          // If the card already has an edition attribute (set, setName, collectorNumber, scryfallId), NEVER overwrite it!
+          const set = c.set || (isExactPrintingMatch ? (matched.set || '').toLowerCase() : '');
+          const setName = c.setName || (isExactPrintingMatch ? (matched.set_name || matched.set || '') : '');
+          const collectorNumber = c.collectorNumber || (isExactPrintingMatch ? (matched.collector_number || '') : '');
+          const finalScryfallId = c.scryfallId || (isExactPrintingMatch ? (matched.id || '') : '');
+
+          let imageUrl = c.imageUrl;
+          if (!imageUrl) {
+            if (isExactPrintingMatch && (matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal)) {
+              imageUrl = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal;
+            } else if (finalScryfallId) {
+              imageUrl = `https://api.scryfall.com/cards/${finalScryfallId}?format=image&version=normal`;
+            } else if (!c.set && (matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal)) {
+              imageUrl = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal;
+            }
+          }
+
           return {
             ...c,
-            scryfallId: matched.id || c.scryfallId,
-            set: (matched.set || c.set || '').toLowerCase(),
-            setName: matched.set_name || c.setName || matched.set || '',
-            set_name: matched.set_name || c.setName || matched.set || '',
-            collectorNumber: matched.collector_number || c.collectorNumber || '',
-            collector_number: matched.collector_number || c.collectorNumber || '',
+            // Edition: 100% preserved
+            set: set ? set.toLowerCase() : '',
+            setName: setName || c.setName || set,
+            set_name: setName || c.setName || set,
+            collectorNumber,
+            collector_number: collectorNumber,
+            scryfallId: finalScryfallId,
+            imageUrl: imageUrl || c.imageUrl,
+            // Universal rules & gameplay metadata
             type_line: typeLine,
             typeLine,
             mana_cost: manaCost,
@@ -164,11 +190,10 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             oracle_text: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
             oracleText: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
             cmc: matched.cmc ?? c.cmc ?? 0,
-            imageUrl: img || c.imageUrl,
             colors: colors.length > 0 ? colors : (c.colors || []),
             color_identity: colorIdentity,
             colorIdentity: colorIdentity,
-            rarity: matched.rarity || c.rarity || 'common',
+            rarity: c.rarity || (isExactPrintingMatch ? matched.rarity : undefined) || 'common',
             isGamechanger: isGc,
             game_changer: isGc,
             is_game_changer: isGc,
