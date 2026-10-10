@@ -87,6 +87,7 @@ import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
 import { handleCardImageError, getCardImageUrl } from '../services/api';
 import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
+import { ChecklistPrintButtonGroup, getSavedPrintColumns } from './ChecklistPrintButtonGroup';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -195,6 +196,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
   const [showBinderChecklistModal, setShowBinderChecklistModal] = useState(false);
+  const handleCloseBinderChecklistModal = useCallback(() => {
+    setShowBinderChecklistModal(false);
+  }, []);
   const [selectedCmcFilter, setSelectedCmcFilter] = useState<string | number | null>(null);
   const [cardFilterQuery, setCardFilterQuery] = useState<string>('');
   const [statsScope, setStatsScope] = useState<'main' | 'all'>('main');
@@ -563,22 +567,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return list;
   }, [activeDeck.cards, getCardOwnedQuantity, crossDeckUsageMap]);
 
-  const [printColumns, setPrintColumns] = useState<1 | 2 | 3 | 4>(() => {
-    try {
-      const saved = localStorage.getItem('mtg_checklist_print_cols');
-      if (saved === '1' || saved === '2' || saved === '3' || saved === '4') {
-        return Number(saved) as 1 | 2 | 3 | 4;
-      }
-    } catch (_) {}
-    return 2; // Default to 2 columns to save paper
-  });
+  const handleSelectBinderId = useCallback(async (newBinderId: string) => {
+    const updatedDeck = { ...activeDeck, binderId: newBinderId, updatedAt: Date.now() };
+    await onUpdateDeck(updatedDeck);
+  }, [activeDeck, onUpdateDeck]);
+
+  const handleUpdateCollectionCardFromModal = useCallback(async (updatedCard: CollectionCard) => {
+    await DeckService.saveCollectionCard(updatedCard);
+  }, []);
 
   const handlePrintDeckChecklist = useCallback((colsOverride?: 1 | 2 | 3 | 4) => {
     const activeBinderName = activeDeck.binderId && activeDeck.binderId !== 'all'
       ? binders.find((b) => b.id === activeDeck.binderId)?.name || 'Selected Binder'
       : 'All Binders (Collection)';
 
-    const effectiveCols = colsOverride || printColumns || 2;
+    const effectiveCols = colsOverride || getSavedPrintColumns();
 
     const printItems: ChecklistPrintItem[] = (activeDeck.cards || []).map((card) => {
       const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[(\[].*?[\)\]]/g, '').trim().toLowerCase();
@@ -641,7 +644,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       columns: effectiveCols,
       items: printItems,
     });
-  }, [activeDeck, binders, getCardOwnedQuantity, crossDeckUsageMap, ownershipStats, deckCompletion, printColumns]);
+  }, [activeDeck, binders, getCardOwnedQuantity, crossDeckUsageMap, ownershipStats, deckCompletion]);
 
   const selectedHistoryItem = historyList.find(
     (h) => (h.id || h.historyId) === selectedHistoryId || h.historyId === selectedHistoryId
@@ -2396,36 +2399,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                 </button>
 
                 {/* Print Physical Checklist Quick Action with 1, 2, 3 Column selector */}
-                <div className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-900/80 p-0.5 shadow-xs">
-                  <button
-                    type="button"
-                    onClick={() => handlePrintDeckChecklist(printColumns)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-300 hover:text-emerald-300 text-xs font-semibold hover:bg-slate-800 rounded-md transition-all cursor-pointer"
-                    title={`Print Physical Checklist (${printColumns} column${printColumns > 1 ? 's to save paper' : ''})`}
-                  >
-                    <Printer className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="hidden md:inline">Print ({printColumns}C)</span>
-                  </button>
-                  <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
-                  {([1, 2, 3, 4] as const).map((cols) => (
-                    <button
-                      key={cols}
-                      type="button"
-                      onClick={() => {
-                        setPrintColumns(cols);
-                        try { localStorage.setItem('mtg_checklist_print_cols', String(cols)); } catch (_) {}
-                      }}
-                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-colors ${
-                        printColumns === cols
-                          ? 'bg-emerald-600 text-white'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                      }`}
-                      title={`Print in ${cols} column${cols > 1 ? 's (saves paper)' : ''}`}
-                    >
-                      {`${cols}C`}
-                    </button>
-                  ))}
-                </div>
+                <ChecklistPrintButtonGroup
+                  onPrint={handlePrintDeckChecklist}
+                  size="compact"
+                />
 
                 {/* Owned Percentage Badge */}
                 <div
@@ -3774,17 +3751,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       {/* Binder Physical Checklist Modal */}
       <BinderChecklistModal
         isOpen={showBinderChecklistModal}
-        onClose={() => setShowBinderChecklistModal(false)}
+        onClose={handleCloseBinderChecklistModal}
         cards={collectionCards}
         binders={binders}
         selectedBinderId={activeDeck.binderId || 'all'}
-        onSelectBinderId={async (newBinderId) => {
-          const updatedDeck = { ...activeDeck, binderId: newBinderId, updatedAt: Date.now() };
-          await onUpdateDeck(updatedDeck);
-        }}
-        onUpdateCollectionCard={async (updatedCard) => {
-          await DeckService.saveCollectionCard(updatedCard);
-        }}
+        onSelectBinderId={handleSelectBinderId}
+        onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
         activeDeck={activeDeck}
       />
 

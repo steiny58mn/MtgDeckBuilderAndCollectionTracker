@@ -16,7 +16,7 @@ export interface BinderChecklistModalProps {
   activeDeck?: Deck | null;
 }
 
-export const BinderChecklistModal: React.FC<BinderChecklistModalProps> = ({
+export const BinderChecklistModal: React.FC<BinderChecklistModalProps> = React.memo(({
   isOpen,
   onClose,
   cards,
@@ -52,4 +52,4 @@ export const BinderChecklistModal: React.FC<BinderChecklistModalProps> = ({
       </div>
     </div>
   );
-};
+});

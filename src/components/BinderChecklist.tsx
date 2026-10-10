@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   CheckSquare, 
   Square, 
@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   FolderOpen,
   ArrowUpDown,
-  Printer,
   ExternalLink
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
@@ -26,6 +25,7 @@ import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
 import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
+import { ChecklistPrintButtonGroup, getSavedPrintColumns } from './ChecklistPrintButtonGroup';
 
 export interface BinderChecklistProps {
   cards: CollectionCard[];
@@ -38,6 +38,217 @@ export interface BinderChecklistProps {
   onClose?: () => void;
   isModal?: boolean;
 }
+
+interface ChecklistCardRowProps {
+  card: CollectionCard;
+  isChecked: boolean;
+  cross?: { totalUsed: number; decks: { deckId: string; deckName: string; quantity: number }[] };
+  isInDeck: boolean;
+  isOvercommitted: boolean;
+  priceNum: number;
+  onToggleCheck: (cardId: string) => void;
+  onImageMouseEnter: (e: React.MouseEvent, data: { imageUrl: string; fallbackUrl?: string; name: string }) => void;
+  onImageMouseMove: (e: React.MouseEvent) => void;
+  onImageMouseLeave: () => void;
+  onUpdateCollectionCard?: (card: CollectionCard) => void;
+  onAddCardToDeck?: (card: CollectionCard) => void;
+  activeDeckName?: string;
+}
+
+const ChecklistCardRow: React.FC<ChecklistCardRowProps> = React.memo(({
+  card,
+  isChecked,
+  cross,
+  isInDeck,
+  isOvercommitted,
+  priceNum,
+  onToggleCheck,
+  onImageMouseEnter,
+  onImageMouseMove,
+  onImageMouseLeave,
+  onUpdateCollectionCard,
+  onAddCardToDeck,
+  activeDeckName,
+}) => {
+  const handleCheck = useCallback(() => {
+    onToggleCheck(card.id);
+  }, [onToggleCheck, card.id]);
+
+  const handleMouseEnter = useCallback((e: React.MouseEvent) => {
+    onImageMouseEnter(e, {
+      imageUrl: toHighResImageUrl(card.imageUrl, card.scryfallId),
+      fallbackUrl: card.imageUrl,
+      name: card.name,
+    });
+  }, [onImageMouseEnter, card.imageUrl, card.scryfallId, card.name]);
+
+  const handleDecreaseQty = useCallback(() => {
+    if (onUpdateCollectionCard && card.quantity > 1) {
+      onUpdateCollectionCard({ ...card, quantity: card.quantity - 1 });
+    }
+  }, [onUpdateCollectionCard, card]);
+
+  const handleIncreaseQty = useCallback(() => {
+    if (onUpdateCollectionCard) {
+      onUpdateCollectionCard({ ...card, quantity: card.quantity + 1 });
+    }
+  }, [onUpdateCollectionCard, card]);
+
+  const handleAddDeck = useCallback(() => {
+    if (onAddCardToDeck) {
+      onAddCardToDeck(card);
+    }
+  }, [onAddCardToDeck, card]);
+
+  return (
+    <div
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 transition-colors ${
+        isChecked
+          ? 'bg-emerald-950/20 text-slate-400 hover:bg-emerald-950/30'
+          : 'hover:bg-slate-800/50 text-slate-200'
+      }`}
+    >
+      {/* Left side: Checkbox + Card Info */}
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        {/* Interactive Verification Checkbox */}
+        <button
+          type="button"
+          onClick={handleCheck}
+          className={`p-1 rounded-lg transition-transform active:scale-90 cursor-pointer shrink-0 ${
+            isChecked
+              ? 'text-emerald-400 hover:text-emerald-300'
+              : 'text-slate-600 hover:text-slate-400'
+          }`}
+          title={isChecked ? 'Mark as unverified' : 'Mark as physically verified in binder'}
+        >
+          {isChecked ? (
+            <CheckSquare className="w-5 h-5 fill-emerald-950" />
+          ) : (
+            <Square className="w-5 h-5" />
+          )}
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Card Name with Hover Preview */}
+            <span
+              className={`font-semibold text-xs transition-colors cursor-pointer ${
+                isChecked
+                  ? 'line-through text-slate-400'
+                  : 'text-white hover:text-emerald-300'
+              }`}
+              onMouseEnter={handleMouseEnter}
+              onMouseMove={onImageMouseMove}
+              onMouseLeave={onImageMouseLeave}
+            >
+              {card.name}
+            </span>
+
+            {/* Quantity Pill */}
+            <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/80 font-mono text-[10px] font-bold text-slate-200">
+              {card.quantity}x
+            </span>
+
+            {/* Foil Badge */}
+            {card.isFoil && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-500/50 text-fuchsia-300 text-[10px] font-semibold">
+                <Sparkles className="w-2.5 h-2.5" />
+                <span>Foil</span>
+              </span>
+            )}
+
+            {/* Set and Collector Number */}
+            <span className="text-[10px] font-mono text-slate-400 uppercase">
+              {card.set} #{card.collectorNumber}
+            </span>
+          </div>
+
+          {/* Price and Type Line */}
+          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+            <span>{card.type_line || card.typeLine}</span>
+            {!isNaN(priceNum) && priceNum > 0 && (
+              <span className="font-mono text-emerald-400 font-semibold">
+                ${priceNum.toFixed(2)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Right side: Deck Mentions & Physical Location */}
+      <div className="flex items-center gap-3 justify-between sm:justify-end shrink-0 pl-8 sm:pl-0">
+        {/* Deck Mentions Badge */}
+        {isInDeck && cross ? (
+          <div className="flex flex-col items-start sm:items-end gap-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-950/80 border border-violet-500/60 text-violet-200 text-[11px] font-semibold shadow-xs">
+                <Boxes className="w-3 h-3 text-violet-400" />
+                <span>In {cross.decks.length} {cross.decks.length === 1 ? 'deck' : 'decks'} ({cross.totalUsed}x used)</span>
+              </span>
+              {isOvercommitted && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/90 border border-amber-500/70 text-amber-300 text-[10px] font-bold" title="More copies are used in decks than exist in this binder!">
+                  <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                  <span>Deficit ({cross.totalUsed - card.quantity}x)</span>
+                </span>
+              )}
+            </div>
+            
+            {/* Individual Decks List */}
+            <div className="flex items-center gap-1 flex-wrap text-[10px]">
+              {cross.decks.map((deckEntry) => (
+                <span
+                  key={deckEntry.deckId}
+                  className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:text-white"
+                  title={`Card is physically in deck "${deckEntry.deckName}" (${deckEntry.quantity} copy)`}
+                >
+                  <span>{abbreviateDeckName(deckEntry.deckName)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Quantity quick controls */}
+        {onUpdateCollectionCard && (
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={handleDecreaseQty}
+              disabled={card.quantity <= 1}
+              className="px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-40 cursor-pointer"
+              title="Decrease binder quantity"
+            >
+              <Minus className="w-2.5 h-2.5" />
+            </button>
+            <span className="px-2 font-mono text-xs font-bold text-white">
+              {card.quantity}
+            </span>
+            <button
+              type="button"
+              onClick={handleIncreaseQty}
+              className="px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+              title="Increase binder quantity"
+            >
+              <Plus className="w-2.5 h-2.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Quick add to active deck if open */}
+        {activeDeckName && onAddCardToDeck && (
+          <button
+            type="button"
+            onClick={handleAddDeck}
+            className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer shadow-xs"
+            title={`Add 1 copy of "${card.name}" to deck "${activeDeckName}"`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
 
 export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   cards,
@@ -55,6 +266,10 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'this-deck' | 'binder-only'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'name-desc' | 'price-desc' | 'set'>('name');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
+
+  // Progressive rendering limit for instantaneous UI mount and smooth scrolling
+  const [displayLimit, setDisplayLimit] = useState(80);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Subscribe to all decks for live cross-deck usage calculation
   const [allDecks, setAllDecks] = useState<Deck[]>(() => DeckService.getLocalDecks());
@@ -144,6 +359,11 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     return cards.filter((c) => (c.binderId || 'binder-main') === selectedBinderId);
   }, [cards, selectedBinderId]);
 
+  // Reset progressive display limit when search, filters, or binder changes
+  useEffect(() => {
+    setDisplayLimit(80);
+  }, [searchQuery, filterMode, sortBy, selectedBinderId]);
+
   // Card list filtered by search and checklist verification tab, sorted alphabetically by default
   const displayedCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -198,6 +418,30 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       return (a.name || '').localeCompare(b.name || '');
     });
   }, [binderCards, searchQuery, filterMode, sortBy, checkedIds, crossDeckUsageMap, activeDeckCardNames]);
+
+  // Visible cards slice for instant rendering
+  const visibleCards = useMemo(() => {
+    return displayedCards.slice(0, displayLimit);
+  }, [displayedCards, displayLimit]);
+
+  // Infinite scroll intersection observer to seamlessly load subsequent chunks
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    if (visibleCards.length >= displayedCards.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => Math.min(displayedCards.length, prev + 80));
+        }
+      },
+      { rootMargin: '400px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [displayedCards.length, visibleCards.length]);
 
   // Audit Metrics
   const totalCardsInBinder = binderCards.length;
@@ -263,18 +507,8 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   };
 
   // Print physical checklist formatted for paper / PDF
-  const [printColumns, setPrintColumns] = useState<1 | 2 | 3 | 4>(() => {
-    try {
-      const saved = localStorage.getItem('mtg_checklist_print_cols');
-      if (saved === '1' || saved === '2' || saved === '3' || saved === '4') {
-        return Number(saved) as 1 | 2 | 3 | 4;
-      }
-    } catch (_) {}
-    return 2; // Default to 2 columns to save paper
-  });
-
-  const handlePrintChecklist = (colsOverride?: 1 | 2 | 3 | 4) => {
-    const effectiveCols = colsOverride || printColumns || 2;
+  const handlePrintChecklist = useCallback((colsOverride?: 1 | 2 | 3 | 4) => {
+    const effectiveCols = colsOverride || getSavedPrintColumns();
     const activeBinderName = selectedBinderId === 'all'
       ? 'All Binders (Collection)'
       : (binders.find((b) => b.id === selectedBinderId)?.name || 'Selected Binder');
@@ -331,8 +565,6 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       title,
       subtitle: 'MTG Physical Card Gathering & Verification Checklist',
       binderName: activeBinderName,
-      // Omit deckName for pure binder checklist
-      // Omit deckFormat for pure binder checklist
       verifiedCount: totalVerifiedCount,
       totalCards: totalCardsInBinder,
       percentVerified,
@@ -340,7 +572,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       columns: effectiveCols,
       items,
     });
-  };
+  }, [displayedCards, checkedIds, crossDeckUsageMap, selectedBinderId, binders, totalVerifiedCount, totalCardsInBinder, percentVerified, filterMode, searchQuery]);
 
   const currentBinderName = selectedBinderId === 'all'
     ? 'All Binders'
@@ -422,36 +654,11 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             <span>{copiedToast ? 'Copied!' : 'Copy List'}</span>
           </button>
 
-          <div className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-800 p-0.5 shadow-xs">
-            <button
-              type="button"
-              onClick={() => handlePrintChecklist(printColumns)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-200 text-xs font-semibold hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
-              title={`Print physical checklist (${printColumns} column${printColumns > 1 ? 's to save paper' : ''})`}
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-300" />
-              <span>Print ({printColumns}C)</span>
-            </button>
-            <div className="h-3.5 w-px bg-slate-700 mx-0.5" />
-            {([1, 2, 3, 4] as const).map((cols) => (
-              <button
-                key={cols}
-                type="button"
-                onClick={() => {
-                  setPrintColumns(cols);
-                  try { localStorage.setItem('mtg_checklist_print_cols', String(cols)); } catch (_) {}
-                }}
-                className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-colors ${
-                  printColumns === cols
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                }`}
-                title={`Print in ${cols} column${cols > 1 ? 's (saves paper)' : ''}`}
-              >
-                {`${cols}C`}
-              </button>
-            ))}
-          </div>
+          {/* Dedicated Self-Contained Print Button Group (Zero Re-render Lag) */}
+          <ChecklistPrintButtonGroup
+            onPrint={handlePrintChecklist}
+            size="normal"
+          />
 
           {isModal && onClose && (
             <button
@@ -615,7 +822,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
               title={`Only show cards from this binder in deck "${activeDeck.name}"`}
             >
               <Layers className="w-3 h-3" />
-              <span>In "{activeDeck.name}" ({thisDeckCardsCount})</span>
+              <span>In "${activeDeck.name}" ({thisDeckCardsCount})</span>
             </button>
           )}
           <button
@@ -649,176 +856,40 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             )}
           </div>
         ) : (
-          displayedCards.map((card, index) => {
-            const isChecked = checkedIds.has(card.id);
-            const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
-            const cross = crossDeckUsageMap.get(cleanName);
-            const isInDeck = Boolean(cross && cross.totalUsed > 0);
-            const isOvercommitted = Boolean(cross && cross.totalUsed > card.quantity);
+          <>
+            {visibleCards.map((card) => {
+              const isChecked = checkedIds.has(card.id);
+              const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[([].*?[)\]]/g, '').trim().toLowerCase();
+              const cross = crossDeckUsageMap.get(cleanName);
+              const isInDeck = Boolean(cross && cross.totalUsed > 0);
+              const isOvercommitted = Boolean(cross && cross.totalUsed > card.quantity);
+              const priceNum = Number(card.currentPriceUsd || card.medianPriceUsd || 0);
 
-            // Safe price conversion
-            const priceNum = Number(card.currentPriceUsd || card.medianPriceUsd || 0);
-
-            return (
-              <div
-                key={card.id}
-                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 transition-colors ${
-                  isChecked
-                    ? 'bg-emerald-950/20 text-slate-400 hover:bg-emerald-950/30'
-                    : 'hover:bg-slate-800/50 text-slate-200'
-                }`}
-              >
-                {/* Left side: Checkbox + Card Info */}
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  {/* Interactive Verification Checkbox */}
-                  <button
-                    type="button"
-                    onClick={() => toggleCheck(card.id)}
-                    className={`p-1 rounded-lg transition-transform active:scale-90 cursor-pointer shrink-0 ${
-                      isChecked
-                        ? 'text-emerald-400 hover:text-emerald-300'
-                        : 'text-slate-600 hover:text-slate-400'
-                    }`}
-                    title={isChecked ? 'Mark as unverified' : 'Mark as physically verified in binder'}
-                  >
-                    {isChecked ? (
-                      <CheckSquare className="w-5 h-5 fill-emerald-950" />
-                    ) : (
-                      <Square className="w-5 h-5" />
-                    )}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Card Name with Hover Preview */}
-                      <span
-                        className={`font-semibold text-xs transition-colors cursor-pointer ${
-                          isChecked
-                            ? 'line-through text-slate-400'
-                            : 'text-white hover:text-emerald-300'
-                        }`}
-                        onMouseEnter={(e) =>
-                          onImageMouseEnter(e, {
-                            imageUrl: toHighResImageUrl(card.imageUrl, card.scryfallId),
-                            fallbackUrl: card.imageUrl,
-                            name: card.name,
-                          })
-                        }
-                        onMouseMove={onImageMouseMove}
-                        onMouseLeave={onImageMouseLeave}
-                      >
-                        {card.name}
-                      </span>
-
-                      {/* Quantity Pill */}
-                      <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/80 font-mono text-[10px] font-bold text-slate-200">
-                        {card.quantity}x
-                      </span>
-
-                      {/* Foil Badge */}
-                      {card.isFoil && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-500/50 text-fuchsia-300 text-[10px] font-semibold">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>Foil</span>
-                        </span>
-                      )}
-
-                      {/* Set and Collector Number */}
-                      <span className="text-[10px] font-mono text-slate-400 uppercase">
-                        {card.set} #{card.collectorNumber}
-                      </span>
-                    </div>
-
-                    {/* Price and Type Line */}
-                    <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
-                      <span>{card.type_line || card.typeLine}</span>
-                      {!isNaN(priceNum) && priceNum > 0 && (
-                        <span className="font-mono text-emerald-400 font-semibold">
-                          ${priceNum.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right side: Deck Mentions & Physical Location */}
-                <div className="flex items-center gap-3 justify-between sm:justify-end shrink-0 pl-8 sm:pl-0">
-                  {/* Deck Mentions Badge */}
-                  {isInDeck && cross ? (
-                    <div className="flex flex-col items-start sm:items-end gap-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-950/80 border border-violet-500/60 text-violet-200 text-[11px] font-semibold shadow-xs">
-                          <Boxes className="w-3 h-3 text-violet-400" />
-                          <span>In {cross.decks.length} {cross.decks.length === 1 ? 'deck' : 'decks'} ({cross.totalUsed}x used)</span>
-                        </span>
-                        {isOvercommitted && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/90 border border-amber-500/70 text-amber-300 text-[10px] font-bold" title="More copies are used in decks than exist in this binder!">
-                            <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
-                            <span>Deficit ({cross.totalUsed - card.quantity}x)</span>
-                          </span>
-                        )}
-                      </div>
-                      
-                      {/* Individual Decks List */}
-                      <div className="flex items-center gap-1 flex-wrap text-[10px]">
-                        {cross.decks.map((deckEntry) => (
-                          <span
-                            key={deckEntry.deckId}
-                            className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:text-white"
-                            title={`Card is physically in deck "${deckEntry.deckName}" (${deckEntry.quantity} copy)`}
-                          >
-                            <span>{abbreviateDeckName(deckEntry.deckName)}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Quantity quick controls */}
-                  {onUpdateCollectionCard && (
-                    <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (card.quantity > 1) {
-                            onUpdateCollectionCard({ ...card, quantity: card.quantity - 1 });
-                          }
-                        }}
-                        disabled={card.quantity <= 1}
-                        className="px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-40 cursor-pointer"
-                        title="Decrease binder quantity"
-                      >
-                        <Minus className="w-2.5 h-2.5" />
-                      </button>
-                      <span className="px-2 font-mono text-xs font-bold text-white">
-                        {card.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onUpdateCollectionCard({ ...card, quantity: card.quantity + 1 })}
-                        className="px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
-                        title="Increase binder quantity"
-                      >
-                        <Plus className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Quick add to active deck if open */}
-                  {activeDeck && onAddCardToDeck && (
-                    <button
-                      type="button"
-                      onClick={() => onAddCardToDeck(card)}
-                      className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer shadow-xs"
-                      title={`Add 1 copy of "${card.name}" to deck "${activeDeck.name}"`}
-                    >
-                      <Layers className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+              return (
+                <ChecklistCardRow
+                  key={card.id}
+                  card={card}
+                  isChecked={isChecked}
+                  cross={cross}
+                  isInDeck={isInDeck}
+                  isOvercommitted={isOvercommitted}
+                  priceNum={priceNum}
+                  onToggleCheck={toggleCheck}
+                  onImageMouseEnter={onImageMouseEnter}
+                  onImageMouseMove={onImageMouseMove}
+                  onImageMouseLeave={onImageMouseLeave}
+                  onUpdateCollectionCard={onUpdateCollectionCard}
+                  onAddCardToDeck={onAddCardToDeck}
+                  activeDeckName={activeDeck?.name}
+                />
+              );
+            })}
+            {visibleCards.length < displayedCards.length && (
+              <div ref={sentinelRef} className="py-4 text-center text-xs text-slate-500 font-mono">
+                Showing {visibleCards.length} of {displayedCards.length} cards (scroll down to load more)...
               </div>
-            );
-          })
+            )}
+          </>
         )}
       </div>
 

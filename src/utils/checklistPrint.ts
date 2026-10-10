@@ -127,7 +127,7 @@ export const abbreviateDeckName = (name: string): string => {
  * Uses native PDF vector lines for the star to prevent character encoding issues.
  */
 const drawFoilBadge = (doc: jsPDF, x: number, y: number, height: number, cols: number): number => {
-  const badgeW = cols === 4 ? 11.5 : cols === 3 ? 12.5 : 13.5;
+  const badgeW = cols === 4 ? 7.2 : cols === 3 ? 7.6 : 8.0;
   const badgeH = height;
 
   // Background and border
@@ -136,11 +136,11 @@ const drawFoilBadge = (doc: jsPDF, x: number, y: number, height: number, cols: n
   doc.setLineWidth(0.4);
   doc.roundedRect(x, y, badgeW, badgeH, 1.2, 1.2, 'FD');
 
-  // Draw 5-pointed vector Star on left of badge
-  const cx = x + (cols === 4 ? 2.8 : 3.2);
+  // Draw centered 5-pointed vector Star (slightly bigger, crisp vector lines)
+  const cx = x + badgeW / 2;
   const cy = y + badgeH / 2;
-  const rOuter = cols === 4 ? 1.5 : 1.7;
-  const rInner = cols === 4 ? 0.6 : 0.7;
+  const rOuter = cols === 4 ? 2.2 : 2.5;
+  const rInner = cols === 4 ? 0.9 : 1.0;
   const points: [number, number][] = [];
   for (let i = 0; i < 10; i++) {
     const angle = -Math.PI / 2 + (i * Math.PI) / 5;
@@ -153,12 +153,6 @@ const drawFoilBadge = (doc: jsPDF, x: number, y: number, height: number, cols: n
   }
   doc.setFillColor(162, 28, 175); // fuchsia-700
   doc.lines(deltas, points[0][0], points[0][1], [1, 1], 'F', true);
-
-  // Draw Letter 'F' on right of badge
-  doc.setTextColor(162, 28, 175);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(cols === 4 ? 4.8 : cols === 3 ? 5.2 : 5.6);
-  doc.text('F', x + (cols === 4 ? 6.2 : 6.8), y + badgeH - 1.8);
 
   return badgeW;
 };
@@ -378,8 +372,8 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
         doc.text(missStr, missBadgeX + missBadgeW / 2, badgeY + deckBadgeH - 1.8, { align: 'center' });
       }
 
-      // Foil Badge calculation (Star + 'F')
-      const foilBadgeW = item.isFoil ? (cols === 4 ? 11.5 : cols === 3 ? 12.5 : 13.5) : 0;
+      // Foil Badge calculation (centered Star)
+      const foilBadgeW = item.isFoil ? (cols === 4 ? 7.2 : cols === 3 ? 7.6 : 8.0) : 0;
 
       // Card Name (bold)
       const nameStartX = qtyBadgeX + qtyBadgeW + 2.5;
@@ -402,42 +396,58 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
         drawFoilBadge(doc, foilX, foilY, foilH, cols);
       }
 
+      // Bottom line: Set abbreviation & card number in italics, plus decks usage
+      const bottomY = itemY + (cols === 4 ? 16.5 : cols === 3 ? 16.0 : cols === 2 ? 15.5 : 14.5);
+      const setStr = item.set
+        ? `${item.set.toUpperCase()}${item.collectorNumber ? ` #${item.collectorNumber}` : ''}`
+        : '';
+
+      let setStrW = 0;
+      if (setStr) {
+        doc.setFont('helvetica', 'italic');
+        const setFontSize = cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2;
+        doc.setFontSize(setFontSize);
+        doc.setTextColor(148, 163, 184); // slate-400
+        setStrW = doc.getTextWidth(setStr);
+        // Right-align on bottom to not get in the way of card details
+        doc.text(setStr, itemX + colWidth - 3.5, bottomY, { align: 'right' });
+      }
+
       // Decks info ONLY if copies are in other decks (NO quantities, abbreviated names, all decks listed)
-      if (cols > 1) {
-        let rawDeckNames: string[] = [];
-        if (item.decksList && item.decksList.length > 0) {
-          rawDeckNames = item.decksList.map((d) => d.deckName);
-        } else if (item.deckUsageText && !item.deckUsageText.includes('None') && !item.deckUsageText.includes('Binder Only') && !item.deckUsageText.includes('Not in any decks')) {
-          rawDeckNames = item.deckUsageText.split(',').map((s) => s.replace(/^\s*(in\s+\d+\s+other\s+decks?:\s*|\d+x\s+(in\s+)?)/i, '').replace(/["'“”]/g, '').trim()).filter(Boolean);
-        }
+      let rawDeckNames: string[] = [];
+      if (item.decksList && item.decksList.length > 0) {
+        rawDeckNames = item.decksList.map((d) => d.deckName);
+      } else if (item.deckUsageText && !item.deckUsageText.includes('None') && !item.deckUsageText.includes('Binder Only') && !item.deckUsageText.includes('Not in any decks')) {
+        rawDeckNames = item.deckUsageText.split(',').map((s) => s.replace(/^\s*(in\s+\d+\s+other\s+decks?:\s*|\d+x\s+(in\s+)?)/i, '').replace(/["'“”]/g, '').trim()).filter(Boolean);
+      }
 
-        if (rawDeckNames.length > 0) {
-          const abbrevNames = Array.from(new Set(rawDeckNames.map(abbreviateDeckName).filter(Boolean)));
-          if (abbrevNames.length > 0) {
-            const decksPrefix = cols === 4 ? 'D: ' : 'Decks: ';
-            let decksStr = `${decksPrefix}${abbrevNames.join(', ')}`;
+      if (rawDeckNames.length > 0) {
+        const abbrevNames = Array.from(new Set(rawDeckNames.map(abbreviateDeckName).filter(Boolean)));
+        if (abbrevNames.length > 0) {
+          const decksPrefix = cols === 4 ? 'D: ' : 'Decks: ';
+          let decksStr = `${decksPrefix}${abbrevNames.join(', ')}`;
 
-            const maxDecksWidth = colWidth - 7;
-            let decksFontSize = cols === 4 ? 4.6 : cols === 3 ? 5.0 : 5.5;
-            doc.setFont('helvetica', 'normal');
+          // Reserve space for set abbreviation on the right so they never collide
+          const maxDecksWidth = colWidth - 7 - (setStr ? setStrW + 4 : 0);
+          let decksFontSize = cols === 4 ? 4.5 : cols === 3 ? 4.9 : 5.3;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(decksFontSize);
+
+          while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 3.2) {
+            decksFontSize -= 0.2;
             doc.setFontSize(decksFontSize);
+          }
 
-            while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 3.4) {
+          if (doc.getTextWidth(decksStr) > maxDecksWidth) {
+            decksStr = `${decksPrefix}${abbrevNames.join('/')}`;
+            while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 2.8) {
               decksFontSize -= 0.2;
               doc.setFontSize(decksFontSize);
             }
-
-            if (doc.getTextWidth(decksStr) > maxDecksWidth) {
-              decksStr = `${decksPrefix}${abbrevNames.join('/')}`;
-              while (doc.getTextWidth(decksStr) > maxDecksWidth && decksFontSize > 3.0) {
-                decksFontSize -= 0.2;
-                doc.setFontSize(decksFontSize);
-              }
-            }
-
-            doc.setTextColor(79, 70, 229); // indigo-600
-            doc.text(decksStr, itemX + 3.5, itemY + (cols === 4 ? 14 : cols === 3 ? 14.5 : 15.5));
           }
+
+          doc.setTextColor(79, 70, 229); // indigo-600
+          doc.text(decksStr, itemX + 3.5, bottomY);
         }
       }
     }
@@ -522,7 +532,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#9733; F</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge" title="Foil">&#9733;</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -565,7 +575,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#9733; F</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge" title="Foil">&#9733;</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -597,12 +607,15 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
           </div>
         </div>
 
-        ${decksSummaryHtml ? `
-        <div class="entry-usage">
-          <span class="usage-label">Decks:</span>
-          ${decksSummaryHtml}
+        <div class="entry-bottom">
+          ${decksSummaryHtml ? `
+          <div class="entry-usage">
+            <span class="usage-label">Decks:</span>
+            ${decksSummaryHtml}
+          </div>
+          ` : '<div class="entry-usage"></div>'}
+          ${setInfo ? `<span class="entry-set-info">${setInfo}</span>` : ''}
         </div>
-        ` : ''}
       </div>
     `;
   }).join('');
@@ -899,12 +912,27 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       background: #fae8ff;
       color: #86198f;
       border: 1px solid #f0abfc;
-      padding: 0 3px;
+      padding: 0 2px;
       border-radius: 3px;
-      font-size: 8px;
+      font-size: 10px;
+      line-height: 1;
       font-weight: 700;
       margin-left: 3px;
       vertical-align: middle;
+    }
+    .entry-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .entry-set-info {
+      font-style: italic;
+      color: #94a3b8;
+      font-size: 8px;
+      white-space: nowrap;
+      margin-left: auto;
     }
     .category-badge {
       display: inline-block;
