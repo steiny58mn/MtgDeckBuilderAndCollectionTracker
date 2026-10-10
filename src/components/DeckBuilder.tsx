@@ -71,7 +71,8 @@ import {
   isCardLegalInCommander,
   matchesScryfallTextSearch,
   buildCollectionLookup,
-  calculateDeckCompletion
+  calculateDeckCompletion,
+  isBasicLandName
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -87,7 +88,7 @@ import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
 import { GameSummaryModal } from './GameSummaryModal';
 import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExport';
-import { handleCardImageError, getCardImageUrl } from '../services/api';
+import { handleCardImageError, getCardImageUrl, getCardFromLocalCache } from '../services/api';
 import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
 import { ChecklistPrintButtonGroup, getSavedPrintColumns } from './ChecklistPrintButtonGroup';
 
@@ -690,6 +691,38 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       setSavedCards(JSON.parse(JSON.stringify(deck.cards || [])));
     }
   }, [deck.id]);
+
+  // Automatically hydrate deck cards that are missing type, colors, or mana cost
+  const lastEnrichedRef = useRef<string>('');
+  useEffect(() => {
+    if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return;
+    const missingCount = deck.cards.filter((c) => {
+      const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+      const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
+      const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+      return !hasType || (!hasColorOrMana && !isLand);
+    }).length;
+
+    if (missingCount === 0) return;
+
+    const enrichmentKey = `${deck.id}:${missingCount}:${deck.cards.length}`;
+    if (lastEnrichedRef.current === enrichmentKey) return;
+    lastEnrichedRef.current = enrichmentKey;
+
+    let isMounted = true;
+    DeckService.enrichDeckCards(deck).then((enrichedDeck) => {
+      if (!isMounted) return;
+      if (enrichedDeck && enrichedDeck !== deck) {
+        onUpdateDeck(enrichedDeck, false);
+      }
+    }).catch((err) => {
+      console.warn('[DeckBuilder] Auto-enrich failed:', err);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [deck?.id, deck?.cards?.length]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) {
@@ -1784,7 +1817,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     };
 
     cards.forEach((c) => {
-      const t = c.type_line?.toLowerCase() || '';
+      let t = (c.type_line || c.typeLine || '').toLowerCase();
+      if (!t && c.name) {
+        const cached = getCardFromLocalCache(c.name);
+        if (cached && (cached.type_line || (cached as any).typeLine)) {
+          t = (cached.type_line || (cached as any).typeLine || '').toLowerCase();
+        }
+      }
+      if (!t && c.name && isBasicLandName(c.name)) {
+        t = 'basic land';
+      }
+
       if (t.includes('creature') || t.includes('summon')) groups['Creatures'].push(c);
       else if (t.includes('planeswalker')) groups['Planeswalkers'].push(c);
       else if (t.includes('battle')) groups['Battles'].push(c);
@@ -4009,7 +4052,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       catOrder.forEach((k) => catMap.set(k, []));
 
       cards.forEach((c) => {
-        const t = c.type_line?.toLowerCase() || '';
+        let t = (c.type_line || c.typeLine || '').toLowerCase();
+        if (!t && c.name) {
+          const cached = getCardFromLocalCache(c.name);
+          if (cached && (cached.type_line || (cached as any).typeLine)) {
+            t = (cached.type_line || (cached as any).typeLine || '').toLowerCase();
+          }
+        }
+        if (!t && c.name && isBasicLandName(c.name)) {
+          t = 'basic land';
+        }
         if (t.includes('creature')) catMap.get('Creatures')!.push(c);
         else if (t.includes('planeswalker')) catMap.get('Planeswalkers')!.push(c);
         else if (t.includes('instant')) catMap.get('Instants')!.push(c);
@@ -4628,7 +4680,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </span>
                 ) : null;
               })()}
-              <span className="truncate max-w-[140px] sm:max-w-none">{card.type_line}</span>
+              {(() => {
+                const displayType = card.type_line || card.typeLine || getCardFromLocalCache(card.name)?.type_line || (isBasicLandName(card.name) ? 'Basic Land' : '');
+                return displayType ? (
+                  <span className="truncate max-w-[140px] sm:max-w-none">{displayType}</span>
+                ) : null;
+              })()}
               {isCardGamechanger(card) && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-amber-300 font-bold text-[10px]" title="Commander Gamechanger">
                   <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />

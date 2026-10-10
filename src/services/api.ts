@@ -18,10 +18,12 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
 
   // Normalization for colors: can be "B", ["B"], or empty
   let colors: string[] | undefined = undefined;
-  if (Array.isArray(c.colors)) {
+  if (Array.isArray(c.colors) && c.colors.length > 0) {
     colors = c.colors;
   } else if (typeof c.colors === 'string' && c.colors.trim() !== '') {
     colors = c.colors.split('').filter((ch: string) => /[WUBRG]/i.test(ch));
+  } else if (Array.isArray(c.card_faces?.[0]?.colors) && c.card_faces[0].colors.length > 0) {
+    colors = c.card_faces[0].colors;
   }
 
   // Normalization for color_identity:
@@ -51,6 +53,8 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
       art_crop: c.image_url,
       png: c.image_url,
     };
+  } else if (!image_uris && c.card_faces?.[0]?.image_uris) {
+    image_uris = c.card_faces[0].image_uris;
   }
 
   const isGc = Boolean(
@@ -74,10 +78,10 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     name: c.name,
     layout: c.layout || 'normal',
     oracle_id: c.oracle_id,
-    mana_cost: c.mana_cost,
+    mana_cost: c.mana_cost || c.card_faces?.[0]?.mana_cost || '',
     cmc,
-    type_line: c.type_line || c.type || '',
-    oracle_text: c.oracle_text || '',
+    type_line: c.type_line || c.type || c.typeLine || c.card_faces?.[0]?.type_line || '',
+    oracle_text: c.oracle_text || c.card_faces?.[0]?.oracle_text || '',
     power: c.power,
     toughness: c.toughness,
     loyalty: c.loyalty,
@@ -163,10 +167,17 @@ const fallbackCache = new Map<string, any>();
 
 // Local cache for card lookup and details to prevent extraneous DB reads
 const LOCAL_CARD_CACHE_KEY = 'fp_db_card_cache_v1';
-const localCardCache = new Map<string, ScryfallCard>();
+export const localCardCache = new Map<string, ScryfallCard>();
 const autocompleteCache = new Map<string, { items: string[]; timestamp: number }>();
 const printsCache = new Map<string, ScryfallCard[]>();
-const cardByIdCache = new Map<string, ScryfallCard>();
+export const cardByIdCache = new Map<string, ScryfallCard>();
+
+export function getCardFromLocalCache(nameOrId: string): ScryfallCard | undefined {
+  if (!nameOrId || typeof nameOrId !== 'string') return undefined;
+  const trimmed = nameOrId.trim().toLowerCase();
+  const front = trimmed.split(' // ')[0].trim();
+  return localCardCache.get(trimmed) || localCardCache.get(front) || cardByIdCache.get(trimmed);
+}
 
 // Initialize persistent card cache from localStorage
 if (typeof window !== 'undefined') {
@@ -747,17 +758,83 @@ export async function fetchBatchCardsCollection(
     }
   }
 
-  // Attempt individual API lookup for missing items (up to 10)
-  for (const item of missingFromFrostpoint.slice(0, 10)) {
-    try {
-      const single = await getCardById(item.name);
-      if (single) {
-        const exact = item.name.toLowerCase().trim();
-        cardMap.set(exact, single);
-        localCardCache.set(exact, single);
+  // Batch resolve cards missing from Frostpointlabs via Scryfall collection endpoint
+  if (missingFromFrostpoint.length > 0) {
+    const scryChunkSize = 75;
+    for (let i = 0; i < missingFromFrostpoint.length; i += scryChunkSize) {
+      const scryChunk = missingFromFrostpoint.slice(i, i + scryChunkSize);
+      try {
+        const identifiers = scryChunk.map((it) => {
+          const cleanName = it.name.trim();
+          if (it.set && it.set.trim().length >= 3) {
+            return { name: cleanName, set: it.set.trim().toLowerCase() };
+          }
+          return { name: cleanName };
+        });
+
+        const sRes = await fetch('https://api.scryfall.com/cards/collection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ identifiers }),
+        });
+
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          if (sJson.data && Array.isArray(sJson.data)) {
+            GamechangerService.registerCardsFromLookup(sJson.data);
+            for (const raw of sJson.data) {
+              if (raw && raw.name) {
+                const normalized = normalizeFrostpointCard(raw);
+                const exactLower = normalized.name.toLowerCase().trim();
+                cardMap.set(exactLower, normalized);
+                localCardCache.set(exactLower, normalized);
+                const frontName = exactLower.split(' // ')[0].trim();
+                cardMap.set(frontName, normalized);
+                localCardCache.set(frontName, normalized);
+                if (normalized.id) cardByIdCache.set(normalized.id, normalized);
+              }
+            }
+          }
+
+          // If some items were not found with set specified, retry them by name only
+          if (sJson.not_found && Array.isArray(sJson.not_found) && sJson.not_found.length > 0) {
+            const retryItems = sJson.not_found
+              .filter((nf) => nf && nf.name && nf.set)
+              .map((nf) => ({ name: nf.name }));
+            if (retryItems.length > 0) {
+              try {
+                const retryRes = await fetch('https://api.scryfall.com/cards/collection', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                  body: JSON.stringify({ identifiers: retryItems }),
+                });
+                if (retryRes.ok) {
+                  const retryJson = await retryRes.json();
+                  if (retryJson.data && Array.isArray(retryJson.data)) {
+                    GamechangerService.registerCardsFromLookup(retryJson.data);
+                    for (const raw of retryJson.data) {
+                      if (raw && raw.name) {
+                        const normalized = normalizeFrostpointCard(raw);
+                        const exactLower = normalized.name.toLowerCase().trim();
+                        cardMap.set(exactLower, normalized);
+                        localCardCache.set(exactLower, normalized);
+                        const frontName = exactLower.split(' // ')[0].trim();
+                        cardMap.set(frontName, normalized);
+                        localCardCache.set(frontName, normalized);
+                        if (normalized.id) cardByIdCache.set(normalized.id, normalized);
+                      }
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          persistLocalCards();
+        }
+      } catch (err) {
+        console.warn('[CardService] Scryfall batch collection resolution error:', err);
       }
-    } catch (e) {
-      // ignore
     }
   }
 

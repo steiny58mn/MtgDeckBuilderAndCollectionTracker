@@ -809,10 +809,20 @@ export function getCardEffectiveColors(card: {
 
   // 4. If card has color_identity and is NOT a land or artifact (or has double-face // in name)
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  const isLand = typeLine.includes('land');
+  const isLand = typeLine.includes('land') || (card.name && isBasicLandName(card.name));
   const isArtifact = typeLine.includes('artifact');
   if (!isLand && !isArtifact && Array.isArray(card.color_identity) && card.color_identity.length > 0) {
     return sortWUBRG(card.color_identity);
+  }
+
+  // 5. Basic land name fallback
+  if (card.name && isBasicLandName(card.name)) {
+    const clean = card.name.toLowerCase().trim();
+    if (clean.includes('plains')) return ['W'];
+    if (clean.includes('island')) return ['U'];
+    if (clean.includes('swamp')) return ['B'];
+    if (clean.includes('mountain')) return ['R'];
+    if (clean.includes('forest')) return ['G'];
   }
 
   return [];
@@ -831,7 +841,7 @@ export function getCardColorGroup(card: {
   color_identity?: string[];
 }): 'W' | 'U' | 'B' | 'R' | 'G' | 'multi' | 'colorless' | 'land' {
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  if (typeLine.includes('land')) {
+  if (typeLine.includes('land') || (card.name && isBasicLandName(card.name))) {
     return 'land';
   }
 

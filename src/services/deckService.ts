@@ -5,7 +5,7 @@
  */
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
-import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice, getCardById } from './api';
+import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice, getCardById, getCardFromLocalCache } from './api';
 import { AuthService } from './authService';
 import { GamechangerService } from './gamechangerService';
 import {
@@ -17,6 +17,7 @@ import {
   MTG_COLOR_NAMES,
   isCardGamechanger,
   getCardEffectiveColors,
+  isBasicLandName,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
 
@@ -138,28 +139,32 @@ export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
  */
 export function normalizeCard(card: any): DeckCard {
   if (!card || typeof card !== 'object') return card;
-  const typeLine = card.type_line || card.typeLine || card.TypeLine || '';
-  const manaCost = card.mana_cost || card.manaCost || card.ManaCost || '';
-  const setName = card.set_name || card.setName || card.SetName || '';
-  const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || '';
-  const rawColorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || [];
-  const rawColors = card.colors || card.Colors || [];
-  const effectiveCols = getCardEffectiveColors(card);
+  const cached = getCardFromLocalCache(card.name || card.scryfallId || card.id);
+  const isBasic = isBasicLandName(card.name);
+  const typeLine = card.type_line || card.typeLine || card.TypeLine || cached?.type_line || cached?.card_faces?.[0]?.type_line || (isBasic ? 'Basic Land' : '');
+  const manaCost = card.mana_cost || card.manaCost || card.ManaCost || cached?.mana_cost || cached?.card_faces?.[0]?.mana_cost || '';
+  const setName = card.set_name || card.setName || card.SetName || cached?.set_name || '';
+  const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || cached?.collector_number || '';
+  const rawColorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || cached?.color_identity || [];
+  const rawColors = card.colors || card.Colors || cached?.colors || cached?.card_faces?.[0]?.colors || [];
+  const effectiveCols = getCardEffectiveColors(card.name ? { ...card, type_line: typeLine, mana_cost: manaCost, colors: rawColors, color_identity: rawColorIdentity } : card);
   const colors = (Array.isArray(rawColors) && rawColors.length > 0) ? rawColors : effectiveCols;
-  const colorIdentity = (Array.isArray(rawColorIdentity) && rawColorIdentity.length > 0) ? rawColorIdentity : effectiveCols;
+  const colorIdentity = (Array.isArray(rawColorIdentity) && rawColorIdentity.length > 0) ? rawColorIdentity : (cached?.color_identity?.length ? cached.color_identity : effectiveCols);
   const quantity = typeof card.quantity === 'number' ? card.quantity : (typeof card.Quantity === 'number' ? card.Quantity : 1);
   const category = (card.category || card.Category || 'main').toLowerCase();
+  const imageUrl = card.imageUrl || card.ImageUrl || cached?.image_uris?.normal || cached?.card_faces?.[0]?.image_uris?.normal;
+  const oracleText = card.oracle_text ?? card.OracleText ?? card.oracleText ?? cached?.oracle_text ?? cached?.card_faces?.[0]?.oracle_text;
 
   return {
     ...card,
     id: card.id || card.Id || card.cardId || card.CardId || `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-    scryfallId: card.scryfallId || card.ScryfallId || '',
+    scryfallId: card.scryfallId || card.ScryfallId || cached?.id || '',
     name: card.name || card.Name || '',
     printed_name: card.printed_name || card.printedName || card.PrintedName || undefined,
     printedName: card.printedName || card.printed_name || card.PrintedName || undefined,
     flavor_name: card.flavor_name || card.flavorName || card.FlavorName || undefined,
     flavorName: card.flavorName || card.flavor_name || card.FlavorName || undefined,
-    set: card.set || card.Set || '',
+    set: card.set || card.Set || cached?.set || '',
     set_name: setName,
     setName,
     collector_number: collectorNumber,
@@ -169,25 +174,25 @@ export function normalizeCard(card: any): DeckCard {
     isFoil: card.isFoil ?? card.IsFoil,
     mana_cost: manaCost,
     manaCost,
-    cmc: card.cmc ?? card.Cmc ?? 0,
+    cmc: card.cmc ?? card.Cmc ?? cached?.cmc ?? 0,
     type_line: typeLine,
     typeLine,
-    oracle_text: card.oracle_text ?? card.OracleText ?? card.oracleText,
-    keywords: card.keywords ?? card.Keywords,
+    oracle_text: oracleText,
+    keywords: card.keywords ?? card.Keywords ?? cached?.keywords,
     colors,
     color_identity: colorIdentity,
     colorIdentity,
-    rarity: card.rarity || card.Rarity || 'common',
-    imageUrl: card.imageUrl || card.ImageUrl,
+    rarity: card.rarity || card.Rarity || cached?.rarity || 'common',
+    imageUrl,
     backImageUrl: card.backImageUrl || card.BackImageUrl,
     priceUsd: card.priceUsd ?? card.PriceUsd,
     priceUsdFoil: card.priceUsdFoil ?? card.PriceUsdFoil,
-    legalities: card.legalities || card.Legalities || card.legalities_json || {},
-    isGamechanger: isCardGamechanger(card),
-    game_changer: isCardGamechanger(card),
-    is_game_changer: isCardGamechanger(card),
-    isGameChanger: isCardGamechanger(card),
-    IsGameChanger: isCardGamechanger(card),
+    legalities: card.legalities || card.Legalities || card.legalities_json || cached?.legalities || {},
+    isGamechanger: isCardGamechanger(card) || isCardGamechanger(cached),
+    game_changer: isCardGamechanger(card) || isCardGamechanger(cached),
+    is_game_changer: isCardGamechanger(card) || isCardGamechanger(cached),
+    isGameChanger: isCardGamechanger(card) || isCardGamechanger(cached),
+    IsGameChanger: isCardGamechanger(card) || isCardGamechanger(cached),
   };
 }
 
@@ -301,8 +306,13 @@ export function normalizeBinderCard(card: any): CollectionCard {
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
 
-  // If cards are already pre-hydrated by backend (have typeLine, manaCost, isGameChanger, etc.), skip external lookups
-  const needsEnrichment = deck.cards.some((c) => !c.type_line && !c.typeLine);
+  const needsEnrichment = deck.cards.some((c) => {
+    const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+    const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
+    const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+    return !hasType || (!hasColorOrMana && !isLand);
+  });
+
   if (!needsEnrichment) {
     return deck;
   }
@@ -318,36 +328,67 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
     const updatedCards = deck.cards.map((c) => {
       const exact = (c.name || '').toLowerCase().trim();
       const front = exact.split(' // ')[0].trim();
-      const matched = scryfallMap.get(exact) || scryfallMap.get(front);
+      const matched = scryfallMap.get(exact) || scryfallMap.get(front) || getCardFromLocalCache(c.name);
       if (matched) {
-        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
-        const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
+        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || c.typeLine || '';
+        const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || c.manaCost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
-        // Check gamechanger from API response property
+        const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
+          ? matched.colors
+          : (Array.isArray(matched.card_faces?.[0]?.colors) && matched.card_faces[0].colors.length > 0)
+            ? matched.card_faces[0].colors
+            : getCardEffectiveColors(matched);
+        const colorIdentity = (Array.isArray(matched.color_identity) && matched.color_identity.length > 0)
+          ? matched.color_identity
+          : (c.color_identity || []);
         const isGc = isCardGamechanger(matched);
-        const gcMismatch = isCardGamechanger(c) !== isGc;
-        const typeMismatch = !c.type_line && Boolean(typeLine);
-        const colorMismatch = matched.color_identity && (!c.color_identity || c.color_identity.length === 0);
-        const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
 
-        if (gcMismatch || typeMismatch || colorMismatch || oracleMismatch) {
+        const typeMismatch = (!c.type_line || !c.typeLine) && Boolean(typeLine);
+        const colorMismatch = (!c.colors || c.colors.length === 0) && colors.length > 0;
+        const manaMismatch = (!c.mana_cost || !c.manaCost) && Boolean(manaCost);
+        const gcMismatch = isCardGamechanger(c) !== isGc;
+        const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
+        const imgMismatch = !c.imageUrl && Boolean(img);
+
+        if (typeMismatch || colorMismatch || manaMismatch || gcMismatch || oracleMismatch || imgMismatch) {
           changed = true;
           return {
             ...c,
+            scryfallId: matched.id || c.scryfallId,
             type_line: typeLine,
-            typeLine: typeLine || c.typeLine,
+            typeLine: typeLine,
             mana_cost: manaCost,
-            manaCost: manaCost || c.manaCost,
+            manaCost: manaCost,
             oracle_text: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
-            cmc: matched.cmc ?? c.cmc,
+            cmc: matched.cmc ?? c.cmc ?? 0,
             imageUrl: img || c.imageUrl,
-            colors: matched.colors || c.colors,
-            color_identity: matched.color_identity || c.color_identity,
-            rarity: matched.rarity || c.rarity,
-            set_name: matched.set_name || c.set_name,
+            colors: colors.length > 0 ? colors : (c.colors || []),
+            color_identity: colorIdentity,
+            colorIdentity: colorIdentity,
+            rarity: matched.rarity || c.rarity || 'common',
+            set: c.set || matched.set || '',
+            set_name: matched.set_name || c.set_name || c.setName,
+            setName: matched.set_name || c.setName || c.set_name,
+            collector_number: c.collector_number || c.collectorNumber || matched.collector_number || '',
+            collectorNumber: c.collector_number || c.collectorNumber || matched.collector_number || '',
             isGamechanger: isGc,
             game_changer: isGc,
             is_game_changer: isGc,
+          };
+        }
+      } else if (c.name && isBasicLandName(c.name)) {
+        const clean = c.name.toLowerCase().trim();
+        const bType = 'Basic Land';
+        const bColor = clean.includes('plains') ? ['W'] : clean.includes('island') ? ['U'] : clean.includes('swamp') ? ['B'] : clean.includes('mountain') ? ['R'] : clean.includes('forest') ? ['G'] : [];
+        if (!c.type_line || !c.typeLine) {
+          changed = true;
+          return {
+            ...c,
+            type_line: bType,
+            typeLine: bType,
+            colors: bColor,
+            color_identity: bColor,
+            colorIdentity: bColor,
           };
         }
       }

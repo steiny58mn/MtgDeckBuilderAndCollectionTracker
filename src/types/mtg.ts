@@ -22,6 +22,8 @@ export interface ScryfallCardFace {
   power?: string;
   toughness?: string;
   loyalty?: string;
+  colors?: string[];
+  color_indicator?: string[];
   image_uris?: {
     small?: string;
     normal?: string;
