@@ -5,7 +5,7 @@
  */
 
 import { Deck, CollectionCard, DeckCard, Binder, DeckHistoryItem, DeckComparisonSummaryResult, MTGFormat } from '../types/mtg';
-import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice, getCardById, getCardFromLocalCache } from './api';
+import { fetchBatchCardPrices, fetchBatchCardsCollection, getKnownMedianPrice, getCardById, getCardFromLocalCache, cardByIdCache } from './api';
 import { AuthService } from './authService';
 import { GamechangerService } from './gamechangerService';
 import {
@@ -327,14 +327,29 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
     const validCards = deck.cards.filter((c) => Boolean(c.name));
     if (validCards.length === 0) return deck;
 
-    const cardsToFetch = validCards.map((c) => ({ name: c.name, set: c.set }));
+    const cardsToFetch = validCards.map((c) => ({
+      name: c.name,
+      set: c.set,
+      id: c.scryfallId,
+      scryfallId: c.scryfallId,
+      collectorNumber: c.collector_number || c.collectorNumber,
+    }));
     const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
     let changed = false;
     const updatedCards = deck.cards.map((c) => {
+      const scryfallId = (c.scryfallId || '').toLowerCase().trim();
       const exact = (c.name || '').toLowerCase().trim();
       const front = exact.split(' // ')[0].trim();
-      const matched = scryfallMap.get(exact) || scryfallMap.get(front) || getCardFromLocalCache(c.name);
+      const setCode = (c.set || '').toLowerCase().trim();
+      const collNum = String(c.collectorNumber || c.collector_number || '').trim();
+
+      const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
+        || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
+        || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
+        || scryfallMap.get(exact)
+        || scryfallMap.get(front)
+        || (scryfallId ? null : getCardFromLocalCache(c.name));
       if (matched) {
         const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || c.typeLine || '';
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || c.manaCost || '';
@@ -436,7 +451,8 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
     const hasType = Boolean((c.type_line || c.typeLine || '').trim());
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
     const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
-    return !hasType || (!hasColorOrMana && !isLand);
+    const hasSet = Boolean((c.set || '').trim());
+    return !hasType || (!hasColorOrMana && !isLand) || !hasSet;
   });
 
   if (cardsNeedingEnrichment.length === 0) {
@@ -445,7 +461,13 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
 
   try {
     const validCards = cardsNeedingEnrichment.filter((c) => Boolean(c.name));
-    const cardsToFetch = validCards.map((c) => ({ name: c.name, set: c.set }));
+    const cardsToFetch = validCards.map((c) => ({
+      name: c.name,
+      set: c.set,
+      id: c.scryfallId,
+      scryfallId: c.scryfallId,
+      collectorNumber: c.collectorNumber || c.collector_number,
+    }));
     const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
     let totalEnriched = 0;
@@ -453,13 +475,22 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
     for (const binder of bindersToEnrich) {
       let binderChanged = false;
       const updatedCards = (binder.cards || []).map((c) => {
+        const scryfallId = (c.scryfallId || '').toLowerCase().trim();
         const exact = (c.name || '').toLowerCase().trim();
         const front = exact.split(' // ')[0].trim();
-        const matched = scryfallMap.get(exact) || scryfallMap.get(front) || getCardFromLocalCache(c.name);
+        const setCode = (c.set || '').toLowerCase().trim();
+        const collNum = String(c.collectorNumber || c.collector_number || '').trim();
+
+        const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
+          || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
+          || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
+          || scryfallMap.get(exact)
+          || scryfallMap.get(front)
+          || (scryfallId ? null : getCardFromLocalCache(c.name));
         if (matched) {
           const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || c.typeLine || '';
           const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || c.manaCost || '';
-          const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
+          const img = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
           const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
             ? matched.colors
             : (Array.isArray(matched.card_faces?.[0]?.colors) && matched.card_faces[0].colors.length > 0)
@@ -475,8 +506,10 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
           const manaMismatch = (!c.mana_cost || !c.manaCost) && Boolean(manaCost);
           const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
           const imgMismatch = !c.imageUrl && Boolean(img);
+          const setMismatch = (!c.set || !c.setName) && Boolean(matched.set || matched.set_name);
+          const numberMismatch = (!c.collectorNumber && !c.collector_number) && Boolean(matched.collector_number);
 
-          if (typeMismatch || colorMismatch || manaMismatch || oracleMismatch || imgMismatch) {
+          if (typeMismatch || colorMismatch || manaMismatch || oracleMismatch || imgMismatch || setMismatch || numberMismatch) {
             binderChanged = true;
             totalEnriched++;
             return {

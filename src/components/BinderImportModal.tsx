@@ -4,6 +4,8 @@ import { Binder } from '../types/mtg';
 import { DeckService } from '../services/deckService';
 import { parseCollectionCsv, convertParsedCardsToCollectionCards } from '../utils/csvCollectionParser';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { fetchBatchCardsCollection, getCardFromLocalCache, cardByIdCache } from '../services/api';
+import { getCardEffectiveColors, isCardGamechanger } from '../utils/deckUtils';
 
 interface BinderImportModalProps {
   isOpen: boolean;
@@ -105,18 +107,90 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
       setStatusMessage(`Adding ${parsed.length} card entries to binder...`);
       const newCollectionCards = convertParsedCardsToCollectionCards(parsed, targetBinderId);
 
+      setStatusMessage(`Resolving exact printings & metadata from Scryfall (${newCollectionCards.length} cards)...`);
+      const cardsToFetch = newCollectionCards.map((c) => ({
+        name: c.name,
+        set: c.set,
+        id: c.scryfallId,
+        scryfallId: c.scryfallId,
+        collectorNumber: c.collectorNumber,
+      }));
+      const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
+
+      const enrichedCollectionCards = newCollectionCards.map((c) => {
+        const scryfallId = (c.scryfallId || '').toLowerCase().trim();
+        const exact = (c.name || '').toLowerCase().trim();
+        const front = exact.split(' // ')[0].trim();
+        const setCode = (c.set || '').toLowerCase().trim();
+        const collNum = String(c.collectorNumber || '').trim();
+
+        const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
+          || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
+          || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
+          || scryfallMap.get(exact)
+          || scryfallMap.get(front)
+          || (scryfallId ? null : getCardFromLocalCache(c.name));
+
+        if (matched) {
+          const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
+          const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
+          const img = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
+          const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
+            ? matched.colors
+            : (Array.isArray(matched.card_faces?.[0]?.colors) && matched.card_faces[0].colors.length > 0)
+              ? matched.card_faces[0].colors
+              : getCardEffectiveColors(matched);
+          const colorIdentity = (Array.isArray(matched.color_identity) && matched.color_identity.length > 0)
+            ? matched.color_identity
+            : (c.color_identity || []);
+          const isGc = isCardGamechanger(matched);
+
+          const normalPrice = matched.prices?.usd ? parseFloat(matched.prices.usd) : 0;
+          const foilPrice = matched.prices?.usd_foil ? parseFloat(matched.prices.usd_foil) : normalPrice;
+          const price = c.isFoil ? (foilPrice || normalPrice) : (normalPrice || foilPrice);
+
+          return {
+            ...c,
+            scryfallId: matched.id || c.scryfallId,
+            set: (matched.set || c.set || '').toLowerCase(),
+            setName: matched.set_name || c.setName || matched.set || '',
+            set_name: matched.set_name || c.setName || matched.set || '',
+            collectorNumber: matched.collector_number || c.collectorNumber || '',
+            collector_number: matched.collector_number || c.collectorNumber || '',
+            type_line: typeLine,
+            typeLine,
+            mana_cost: manaCost,
+            manaCost,
+            oracle_text: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
+            oracleText: matched.oracle_text || matched.card_faces?.[0]?.oracle_text || c.oracle_text,
+            cmc: matched.cmc ?? c.cmc ?? 0,
+            imageUrl: img || c.imageUrl,
+            colors: colors.length > 0 ? colors : (c.colors || []),
+            color_identity: colorIdentity,
+            colorIdentity: colorIdentity,
+            rarity: matched.rarity || c.rarity || 'common',
+            isGamechanger: isGc,
+            game_changer: isGc,
+            is_game_changer: isGc,
+            currentPriceUsd: price > 0 ? price : (c.currentPriceUsd || 0),
+            medianPriceUsd: price > 0 ? price : (c.medianPriceUsd || 0),
+          };
+        }
+        return c;
+      });
+
       const existingCards = targetBinder.cards || [];
       const updatedBinder: Binder = {
         ...targetBinder,
-        cards: [...existingCards, ...newCollectionCards],
+        cards: [...existingCards, ...enrichedCollectionCards],
         updatedAt: Date.now(),
       };
 
+      setStatusMessage('Saving binder...');
       await DeckService.saveBinder(updatedBinder);
 
       // Background price & card detail refresh
-      setStatusMessage('Enriching cards with database card data in background...');
-      DeckService.refreshCollectionPrices(newCollectionCards).catch(() => {});
+      DeckService.refreshCollectionPrices(enrichedCollectionCards).catch(() => {});
 
       onImportComplete(updatedBinder);
       onClose();
@@ -143,7 +217,7 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Upload or paste your CSV collection with card names, quantities, and Card IDs.
+                Upload or paste your CSV collection with card names, quantities, and Scryfall Card IDs.
               </p>
             </div>
           </div>
@@ -261,16 +335,16 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             value={csvText}
             onChange={(e) => handleTextChange(e.target.value)}
             rows={7}
-            placeholder={`"Oracle Name","ID: Card","ID: Gatherer","Haves: Paper","Haves: Foil","Haves: Etched"\n"Red Elemental Blast","4fafd3f9-f7de-4d6e-8824-6b60866fc50f",512,1,0,0\n"Taiga","01006833-6007-4c16-9ebb-20d31c60a57a",883,1,1,0`}
+            placeholder={`\"Oracle Name\",\"Collector Number\",\"Set Scryfall SetID\",\"Set Code\",\"Set Name\",\"Haves: Paper\",\"Haves: Foil\",\"ID: Scryfall\"\\n\"Red Elemental Blast\",170,\"5307bd88-637c-4a5c-9801-a0d887715302\",\"leb\",\"Limited Edition Beta\",1,0,\"4fafd3f9-f7de-4d6e-8824-6b60866fc50f\"\\n\"Birds of Paradise\",187,\"5307bd88-637c-4a5c-9801-a0d887715302\",\"leb\",\"Limited Edition Beta\",1,0,\"852d7a68-8682-4073-a44b-f10f5613879c\"`}
             className="w-full p-3 font-mono text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 focus:outline-none focus:border-emerald-500 placeholder-slate-600"
           />
 
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span>
-              Supports columns: <strong>Oracle Name</strong>, <strong>ID: Card</strong>, <strong>Haves: Paper</strong>, <strong>Haves: Foil</strong>, and <strong>Haves: Etched</strong>.
+              Supports columns: <strong>Oracle Name</strong>, <strong>Collector Number</strong>, <strong>Set Code</strong>, <strong>Set Name</strong>, <strong>Haves: Paper</strong>, <strong>Haves: Foil</strong>, and <strong>ID: Scryfall</strong>.
             </span>
             <span className="text-emerald-400 font-medium">
-              Etched is treated as Foil
+              Exact printings & metadata resolved via Scryfall
             </span>
           </div>
         </div>
@@ -303,25 +377,25 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={isProcessing}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleImport}
-            disabled={isProcessing || !csvText.trim() || !previewCount}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-50 transition-all cursor-pointer"
+            disabled={isProcessing || !csvText.trim() || (previewCount?.totalRows || 0) === 0}
+            className="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/30 cursor-pointer"
           >
             {isProcessing ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Importing...</span>
+                <span>Importing & Resolving...</span>
               </>
             ) : (
               <>
                 <Upload className="w-4 h-4" />
-                <span>Create & Import Binder</span>
+                <span>Import Cards</span>
               </>
             )}
           </button>

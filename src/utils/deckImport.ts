@@ -87,6 +87,7 @@ export interface ParsedImportCard {
   set?: string;
   collector_number?: string;
   isFoil?: boolean;
+  scryfallId?: string;
 }
 
 export interface ParsedDeckImport {
@@ -563,6 +564,8 @@ export function parseCSV(content: string): ParsedDeckImport {
   const catIdx = headerCells.findIndex((h) => h.includes('category') || h.includes('board') || h.includes('section'));
   const setIdx = headerCells.findIndex((h) => h.includes('set') || h.includes('edition'));
   const foilIdx = headerCells.findIndex((h) => h.includes('foil'));
+  const scryfallIdx = headerCells.findIndex((h) => h.includes('scryfall') || h === 'id');
+  const numberIdx = headerCells.findIndex((h) => h.includes('collector') || h.includes('number') || h === 'cn');
 
   const startIndex = (qtyIdx !== -1 || nameIdx !== -1) ? 1 : 0;
   const actualQtyIdx = qtyIdx !== -1 ? qtyIdx : 0;
@@ -589,13 +592,19 @@ export function parseCSV(content: string): ParsedDeckImport {
 
     const set = setIdx !== -1 && cells[setIdx] ? cells[setIdx].toLowerCase() : undefined;
     const isFoil = foilIdx !== -1 && cells[foilIdx] ? /^(yes|true|foil|1)$/i.test(cells[foilIdx]) : undefined;
+    const rawScryfallId = scryfallIdx !== -1 && cells[scryfallIdx] ? cells[scryfallIdx].trim() : undefined;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const scryfallId = (rawScryfallId && uuidRegex.test(rawScryfallId)) ? rawScryfallId.toLowerCase() : undefined;
+    const collectorNumber = numberIdx !== -1 && cells[numberIdx] ? cells[numberIdx].trim() : undefined;
 
     cards.push({
       quantity: qty,
       name,
       category,
       set,
+      collector_number: collectorNumber,
       isFoil,
+      scryfallId,
     });
   }
 

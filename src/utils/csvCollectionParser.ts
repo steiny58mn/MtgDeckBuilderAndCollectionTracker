@@ -1,8 +1,14 @@
 import { CollectionCard } from '../types/mtg';
+import { getKnownMedianPrice, getCardFromLocalCache, cardByIdCache } from '../services/api';
+import { getCardEffectiveColors, isBasicLandName } from '../utils/deckUtils';
 
 export interface ParsedCsvCard {
   name: string;
   scryfallId?: string;
+  set?: string;
+  setName?: string;
+  collectorNumber?: string;
+  scryfallSetId?: string;
   quantityRegular: number;
   quantityFoil: number; // Includes both Foil and Etched
 }
@@ -48,19 +54,30 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
 
   // Identify column indices
   const nameIdx = colIndexMap.get('oraclename') ?? colIndexMap.get('cardname') ?? colIndexMap.get('name') ?? 0;
-  const scryfallIdx = colIndexMap.get('idscryfall') ?? colIndexMap.get('scryfallid') ?? colIndexMap.get('scryfall') ?? -1;
-  const paperIdx = colIndexMap.get('havespaper') ?? colIndexMap.get('paper') ?? colIndexMap.get('quantity') ?? colIndexMap.get('regular') ?? -1;
+  const scryfallIdx = colIndexMap.get('idscryfall') ?? colIndexMap.get('scryfallid') ?? colIndexMap.get('scryfall') ?? colIndexMap.get('id') ?? -1;
+  const setCodeIdx = colIndexMap.get('setcode') ?? colIndexMap.get('set') ?? colIndexMap.get('editioncode') ?? colIndexMap.get('edition') ?? -1;
+  const setNameIdx = colIndexMap.get('setname') ?? colIndexMap.get('editionname') ?? colIndexMap.get('expansion') ?? -1;
+  const collectorIdx = colIndexMap.get('collectornumber') ?? colIndexMap.get('cardnumber') ?? colIndexMap.get('number') ?? colIndexMap.get('cn') ?? -1;
+  const scryfallSetIdIdx = colIndexMap.get('setscryfallsetid') ?? colIndexMap.get('scryfallsetid') ?? -1;
+  const paperIdx = colIndexMap.get('havespaper') ?? colIndexMap.get('paper') ?? colIndexMap.get('quantity') ?? colIndexMap.get('regular') ?? colIndexMap.get('count') ?? colIndexMap.get('qty') ?? -1;
   const foilIdx = colIndexMap.get('havesfoil') ?? colIndexMap.get('foil') ?? -1;
   const etchedIdx = colIndexMap.get('havesetched') ?? colIndexMap.get('etched') ?? -1;
 
   const results: ParsedCsvCard[] = [];
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseLine(lines[i]);
     if (cols.length === 0 || !cols[nameIdx]) continue;
 
     const name = cols[nameIdx];
-    const scryfallId = scryfallIdx >= 0 ? cols[scryfallIdx] : undefined;
+    const rawScryfallId = scryfallIdx >= 0 ? cols[scryfallIdx]?.trim() : undefined;
+    const scryfallId = (rawScryfallId && uuidRegex.test(rawScryfallId)) ? rawScryfallId.toLowerCase() : undefined;
+
+    const set = setCodeIdx >= 0 ? cols[setCodeIdx]?.trim().toLowerCase() : undefined;
+    const setName = setNameIdx >= 0 ? cols[setNameIdx]?.trim() : undefined;
+    const collectorNumber = collectorIdx >= 0 ? cols[collectorIdx]?.trim() : undefined;
+    const scryfallSetId = scryfallSetIdIdx >= 0 ? cols[scryfallSetIdIdx]?.trim() : undefined;
 
     let paperQty = 0;
     if (paperIdx >= 0) {
@@ -77,7 +94,11 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
     if (paperQty > 0 || totalFoil > 0) {
       results.push({
         name,
-        scryfallId: scryfallId || undefined,
+        scryfallId,
+        set,
+        setName,
+        collectorNumber,
+        scryfallSetId,
         quantityRegular: paperQty,
         quantityFoil: totalFoil,
       });
@@ -87,34 +108,58 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   return results;
 }
 
-import { getKnownMedianPrice } from '../services/api';
-
 export function convertParsedCardsToCollectionCards(
   parsed: ParsedCsvCard[],
   binderId: string
 ): CollectionCard[] {
   const cards: CollectionCard[] = [];
   const now = Date.now();
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   parsed.forEach((item, index) => {
     const knownMedian = getKnownMedianPrice(item.name);
+    const cached = (item.scryfallId ? cardByIdCache.get(item.scryfallId) : null) || getCardFromLocalCache(item.name);
+    const typeLine = cached?.type_line || (isBasicLandName(item.name) ? 'Basic Land' : '');
+    const manaCost = cached?.mana_cost || '';
+    const colors = cached ? getCardEffectiveColors(cached) : [];
+    const colorIdentity = cached?.color_identity || [];
+    const cmc = cached?.cmc ?? 0;
+    const rarity = cached?.rarity || 'rare';
+    const oracleText = cached?.oracle_text || '';
+    const effectiveSet = (item.set || cached?.set || '').toLowerCase();
+    const effectiveSetName = item.setName || cached?.set_name || '';
+    const effectiveCollectorNumber = item.collectorNumber || cached?.collector_number || '';
+    const imageUrl = (item.scryfallId && uuidRegex.test(item.scryfallId))
+      ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large`
+      : (cached?.image_uris?.large || cached?.image_uris?.normal || '');
+
     // Non-foil copy
     if (item.quantityRegular > 0) {
       cards.push({
         id: `card-${now}-${index}-reg-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
-        scryfallId: item.scryfallId || '',
-        imageUrl: item.scryfallId ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large` : '',
+        scryfallId: item.scryfallId || cached?.id || '',
+        imageUrl,
         name: item.name,
-        set: '',
-        setName: '',
-        collectorNumber: '',
+        set: effectiveSet,
+        setName: effectiveSetName,
+        set_name: effectiveSetName,
+        collectorNumber: effectiveCollectorNumber,
+        collector_number: effectiveCollectorNumber,
         quantity: item.quantityRegular,
         isFoil: false,
         condition: 'NM',
-        cmc: 0,
-        type_line: '',
-        rarity: 'rare',
+        cmc,
+        type_line: typeLine,
+        typeLine,
+        mana_cost: manaCost,
+        manaCost,
+        colors,
+        color_identity: colorIdentity,
+        colorIdentity,
+        rarity,
+        oracle_text: oracleText,
+        oracleText,
         currentPriceUsd: knownMedian,
         medianPriceUsd: knownMedian,
         isPriceEstimated: Boolean(knownMedian),
@@ -127,18 +172,28 @@ export function convertParsedCardsToCollectionCards(
       cards.push({
         id: `card-${now}-${index}-foil-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
-        scryfallId: item.scryfallId || '',
-        imageUrl: item.scryfallId ? `https://api.scryfall.com/cards/${item.scryfallId}?format=image&version=large` : '',
+        scryfallId: item.scryfallId || cached?.id || '',
+        imageUrl,
         name: item.name,
-        set: '',
-        setName: '',
-        collectorNumber: '',
+        set: effectiveSet,
+        setName: effectiveSetName,
+        set_name: effectiveSetName,
+        collectorNumber: effectiveCollectorNumber,
+        collector_number: effectiveCollectorNumber,
         quantity: item.quantityFoil,
         isFoil: true,
         condition: 'NM',
-        cmc: 0,
-        type_line: '',
-        rarity: 'rare',
+        cmc,
+        type_line: typeLine,
+        typeLine,
+        mana_cost: manaCost,
+        manaCost,
+        colors,
+        color_identity: colorIdentity,
+        colorIdentity,
+        rarity,
+        oracle_text: oracleText,
+        oracleText,
         currentPriceUsd: knownMedian,
         medianPriceUsd: knownMedian,
         isPriceEstimated: Boolean(knownMedian),

@@ -669,36 +669,66 @@ export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<s
   return priceMap;
 }
 
+export interface BatchCardFetchItem {
+  name: string;
+  set?: string;
+  id?: string;
+  scryfallId?: string;
+  collectorNumber?: string;
+  collector_number?: string;
+}
+
 /**
- * Batch resolve cards by name and optional set code using Frostpointlabs deckbuilder lookup endpoint.
+ * Batch resolve cards using Scryfall ID, set & collector number, or card name.
+ * Uses Scryfall collection endpoint for exact printings/editions, and Frostpointlabs for generic lookups.
  */
 export async function fetchBatchCardsCollection(
-  cardsToFetch: Array<{ name: string; set?: string }>
+  cardsToFetch: BatchCardFetchItem[]
 ): Promise<Map<string, ScryfallCard>> {
   const cardMap = new Map<string, ScryfallCard>();
   if (cardsToFetch.length === 0) return cardMap;
 
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   // Deduplicate identifiers
   const seenKeys = new Set<string>();
-  const uniqueItems: Array<{ name: string; set?: string }> = [];
+  const uniqueItems: BatchCardFetchItem[] = [];
 
   for (const item of cardsToFetch) {
-    const key = `${item.name.toLowerCase().trim()}|${(item.set || '').toLowerCase().trim()}`;
+    const rawId = (item.id && uuidRegex.test(item.id)) ? item.id.toLowerCase() : (item.scryfallId && uuidRegex.test(item.scryfallId)) ? item.scryfallId.toLowerCase() : '';
+    const collNum = String(item.collectorNumber || item.collector_number || '').trim();
+    const setCode = (item.set || '').toLowerCase().trim();
+    const nameStr = (item.name || '').toLowerCase().trim();
+
+    const key = rawId ? `id:${rawId}` : (setCode && collNum) ? `setnum:${setCode}|${collNum}` : `${nameStr}|${setCode}`;
     if (!seenKeys.has(key)) {
       seenKeys.add(key);
       uniqueItems.push(item);
     }
   }
 
-  // Check local cache first to cut down on extraneous DB lookups
-  const itemsToFetch: Array<{ name: string; set?: string }> = [];
+  // Check local cache first to cut down on extraneous network requests
+  const itemsToFetch: BatchCardFetchItem[] = [];
   for (const item of uniqueItems) {
-    const exact = item.name.toLowerCase().trim();
+    const rawId = (item.id && uuidRegex.test(item.id)) ? item.id.toLowerCase() : (item.scryfallId && uuidRegex.test(item.scryfallId)) ? item.scryfallId.toLowerCase() : '';
+    const exact = (item.name || '').toLowerCase().trim();
     const front = exact.split(' // ')[0].trim();
-    const cached = localCardCache.get(exact) || localCardCache.get(front);
+    const setCode = (item.set || '').toLowerCase().trim();
+
+    const cachedById = rawId ? cardByIdCache.get(rawId) : null;
+    const cachedByName = (!rawId && !setCode) ? (localCardCache.get(exact) || localCardCache.get(front)) : null;
+    const cached = cachedById || cachedByName;
+
     if (cached) {
-      cardMap.set(exact, cached);
-      cardMap.set(front, cached);
+      if (cached.id) cardMap.set(cached.id.toLowerCase(), cached);
+      if (exact) cardMap.set(exact, cached);
+      if (front) cardMap.set(front, cached);
+      if (cached.set && cached.collector_number) {
+        cardMap.set(`${cached.set.toLowerCase()}|${cached.collector_number}`, cached);
+      }
+      if (cached.set && exact) {
+        cardMap.set(`${exact}|${cached.set.toLowerCase()}`, cached);
+      }
     } else {
       itemsToFetch.push(item);
     }
@@ -708,66 +738,65 @@ export async function fetchBatchCardsCollection(
     return cardMap;
   }
 
-  const chunkSize = 50;
-  const chunks: Array<Array<{ name: string; set?: string }>> = [];
-  for (let i = 0; i < itemsToFetch.length; i += chunkSize) {
-    chunks.push(itemsToFetch.slice(i, i + chunkSize));
-  }
+  // Helper to ingest and cache a ScryfallCard
+  const registerCard = (raw: any) => {
+    if (!raw || !raw.name) return;
+    const normalized = normalizeFrostpointCard(raw);
+    const exactLower = normalized.name.toLowerCase().trim();
+    const frontName = exactLower.split(' // ')[0].trim();
+    const setLower = (normalized.set || '').toLowerCase().trim();
+    const collNum = String(normalized.collector_number || '').trim();
 
-  const missingFromFrostpoint: Array<{ name: string; set?: string }> = [];
-
-  for (const chunk of chunks) {
-    try {
-      const names = chunk.map((c) => c.name);
-      const res = await apiFetch('/deckbuilder/cards/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(names),
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          GamechangerService.registerCardsFromLookup(json.data);
-          for (const raw of json.data) {
-            if (raw && raw.name && (raw.type_line || raw.mana_cost || raw.set || raw.image_uris || raw.game_changer !== undefined)) {
-              const card = normalizeFrostpointCard(raw);
-              const exactLower = card.name.toLowerCase().trim();
-              cardMap.set(exactLower, card);
-              localCardCache.set(exactLower, card);
-              const frontName = exactLower.split(' // ')[0].trim();
-              cardMap.set(frontName, card);
-              localCardCache.set(frontName, card);
-              if (card.id) cardByIdCache.set(card.id, card);
-            }
-          }
-          persistLocalCards();
-        }
-      }
-    } catch (err) {
-      console.warn('[CardService] Frostpoint lookup error:', err);
+    if (normalized.id) {
+      const normId = normalized.id.toLowerCase().trim();
+      cardMap.set(normId, normalized);
+      cardByIdCache.set(normalized.id, normalized);
     }
+    if (setLower && collNum) {
+      cardMap.set(`${setLower}|${collNum}`, normalized);
+    }
+    if (setLower && exactLower) {
+      cardMap.set(`${exactLower}|${setLower}`, normalized);
+    }
+    cardMap.set(exactLower, normalized);
+    cardMap.set(frontName, normalized);
+    localCardCache.set(exactLower, normalized);
+    localCardCache.set(frontName, normalized);
+  };
 
-    // Check which items in this chunk were not populated
-    for (const item of chunk) {
-      const exact = item.name.toLowerCase().trim();
-      const front = exact.split(' // ')[0].trim();
-      if (!cardMap.has(exact) && !cardMap.has(front)) {
-        missingFromFrostpoint.push(item);
-      }
+  // Split into specific printing requests vs. generic name-only requests
+  const scryfallDirectItems: BatchCardFetchItem[] = [];
+  const genericNameItems: BatchCardFetchItem[] = [];
+
+  for (const it of itemsToFetch) {
+    const rawId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : '';
+    const setCode = (it.set || '').trim();
+    if (rawId || setCode) {
+      scryfallDirectItems.push(it);
+    } else {
+      genericNameItems.push(it);
     }
   }
 
-  // Batch resolve cards missing from Frostpointlabs via Scryfall collection endpoint
-  if (missingFromFrostpoint.length > 0) {
+  // 1. Resolve specific printings directly via Scryfall collection endpoint
+  if (scryfallDirectItems.length > 0) {
     const scryChunkSize = 75;
-    for (let i = 0; i < missingFromFrostpoint.length; i += scryChunkSize) {
-      const scryChunk = missingFromFrostpoint.slice(i, i + scryChunkSize);
+    for (let i = 0; i < scryfallDirectItems.length; i += scryChunkSize) {
+      const scryChunk = scryfallDirectItems.slice(i, i + scryChunkSize);
       try {
         const identifiers = scryChunk.map((it) => {
-          const cleanName = it.name.trim();
-          if (it.set && it.set.trim().length >= 3) {
-            return { name: cleanName, set: it.set.trim().toLowerCase() };
+          const cleanId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : undefined;
+          if (cleanId) {
+            return { id: cleanId };
+          }
+          const cleanSet = (it.set || '').trim().toLowerCase();
+          const collNum = String(it.collectorNumber || it.collector_number || '').trim();
+          if (cleanSet && collNum) {
+            return { set: cleanSet, collector_number: collNum };
+          }
+          const cleanName = (it.name || '').trim();
+          if (cleanSet && cleanName) {
+            return { name: cleanName, set: cleanSet };
           }
           return { name: cleanName };
         });
@@ -783,23 +812,14 @@ export async function fetchBatchCardsCollection(
           if (sJson.data && Array.isArray(sJson.data)) {
             GamechangerService.registerCardsFromLookup(sJson.data);
             for (const raw of sJson.data) {
-              if (raw && raw.name) {
-                const normalized = normalizeFrostpointCard(raw);
-                const exactLower = normalized.name.toLowerCase().trim();
-                cardMap.set(exactLower, normalized);
-                localCardCache.set(exactLower, normalized);
-                const frontName = exactLower.split(' // ')[0].trim();
-                cardMap.set(frontName, normalized);
-                localCardCache.set(frontName, normalized);
-                if (normalized.id) cardByIdCache.set(normalized.id, normalized);
-              }
+              registerCard(raw);
             }
           }
 
-          // If some items were not found with set specified, retry them by name only
+          // If some items were not found with set or id, retry them by name
           if (sJson.not_found && Array.isArray(sJson.not_found) && sJson.not_found.length > 0) {
             const retryItems = sJson.not_found
-              .filter((nf) => nf && nf.name && nf.set)
+              .filter((nf) => nf && nf.name)
               .map((nf) => ({ name: nf.name }));
             if (retryItems.length > 0) {
               try {
@@ -813,34 +833,90 @@ export async function fetchBatchCardsCollection(
                   if (retryJson.data && Array.isArray(retryJson.data)) {
                     GamechangerService.registerCardsFromLookup(retryJson.data);
                     for (const raw of retryJson.data) {
-                      if (raw && raw.name) {
-                        const normalized = normalizeFrostpointCard(raw);
-                        const exactLower = normalized.name.toLowerCase().trim();
-                        cardMap.set(exactLower, normalized);
-                        localCardCache.set(exactLower, normalized);
-                        const frontName = exactLower.split(' // ')[0].trim();
-                        cardMap.set(frontName, normalized);
-                        localCardCache.set(frontName, normalized);
-                        if (normalized.id) cardByIdCache.set(normalized.id, normalized);
-                      }
+                      registerCard(raw);
                     }
                   }
                 }
               } catch {}
             }
           }
-
-          persistLocalCards();
         }
       } catch (err) {
-        console.warn('[CardService] Scryfall batch collection resolution error:', err);
+        console.warn('[CardService] Scryfall batch direct resolution error:', err);
       }
     }
   }
 
+  // 2. Resolve generic name-only requests via Frostpoint lookup
+  if (genericNameItems.length > 0) {
+    const chunkSize = 50;
+    const chunks: Array<BatchCardFetchItem[]> = [];
+    for (let i = 0; i < genericNameItems.length; i += chunkSize) {
+      chunks.push(genericNameItems.slice(i, i + chunkSize));
+    }
+
+    const missingFromFrostpoint: BatchCardFetchItem[] = [];
+
+    for (const chunk of chunks) {
+      try {
+        const names = chunk.map((c) => c.name);
+        const res = await apiFetch('/deckbuilder/cards/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(names),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            GamechangerService.registerCardsFromLookup(json.data);
+            for (const raw of json.data) {
+              registerCard(raw);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[CardService] Frostpoint lookup error:', err);
+      }
+
+      for (const item of chunk) {
+        const exact = item.name.toLowerCase().trim();
+        const front = exact.split(' // ')[0].trim();
+        if (!cardMap.has(exact) && !cardMap.has(front)) {
+          missingFromFrostpoint.push(item);
+        }
+      }
+    }
+
+    // Resolve any remaining missing names via Scryfall
+    if (missingFromFrostpoint.length > 0) {
+      const scryChunkSize = 75;
+      for (let i = 0; i < missingFromFrostpoint.length; i += scryChunkSize) {
+        const scryChunk = missingFromFrostpoint.slice(i, i + scryChunkSize);
+        try {
+          const identifiers = scryChunk.map((it) => ({ name: it.name.trim() }));
+          const sRes = await fetch('https://api.scryfall.com/cards/collection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ identifiers }),
+          });
+          if (sRes.ok) {
+            const sJson = await sRes.json();
+            if (sJson.data && Array.isArray(sJson.data)) {
+              GamechangerService.registerCardsFromLookup(sJson.data);
+              for (const raw of sJson.data) {
+                registerCard(raw);
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+  }
+
+  persistLocalCards();
   return cardMap;
 }
-
 export function toHighResImageUrl(url?: string, scryfallId?: string, name?: string): string {
   if (url && typeof url === 'string' && url.trim() !== '') {
     let upgraded = url
