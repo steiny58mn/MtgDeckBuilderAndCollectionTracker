@@ -807,10 +807,11 @@ export function getCardEffectiveColors(card: {
     }
   }
 
-  // 4. If card has color_identity and is NOT a land (or has double-face // in name)
+  // 4. If card has color_identity and is NOT a land or artifact (or has double-face // in name)
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
   const isLand = typeLine.includes('land');
-  if (!isLand && Array.isArray(card.color_identity) && card.color_identity.length > 0) {
+  const isArtifact = typeLine.includes('artifact');
+  if (!isLand && !isArtifact && Array.isArray(card.color_identity) && card.color_identity.length > 0) {
     return sortWUBRG(card.color_identity);
   }
 
@@ -858,6 +859,7 @@ export function getCardColorCategoryRank(card: {
   card_faces?: Array<{ colors?: string[]; mana_cost?: string; type_line?: string }>;
   mana_cost?: string;
   type_line?: string;
+  typeLine?: string;
   color_identity?: string[];
 }): number {
   const group = getCardColorGroup(card);
@@ -872,6 +874,33 @@ export function getCardColorCategoryRank(card: {
     case 'land': return 8;
     default: return 9;
   }
+}
+
+/**
+ * Compares two cards for color sorting in standard MTG order:
+ * 1. White (W)
+ * 2. Blue (U)
+ * 3. Black (B)
+ * 4. Red (R)
+ * 5. Green (G)
+ * 6. Multicolor (all multicolor cards grouped together regardless of colors)
+ * 7. Artifacts and colorless nonlands (grouped together)
+ * 8. Lands (final category)
+ *
+ * Within each category, cards are sorted ALPHABETICALLY by name (A-Z).
+ */
+export function compareCardsByColor(
+  a: { name?: string; colors?: string[]; card_faces?: any[]; mana_cost?: string; type_line?: string; typeLine?: string; color_identity?: string[]; collectorNumber?: string; collector_number?: string },
+  b: { name?: string; colors?: string[]; card_faces?: any[]; mana_cost?: string; type_line?: string; typeLine?: string; color_identity?: string[]; collectorNumber?: string; collector_number?: string }
+): number {
+  const rankA = getCardColorCategoryRank(a);
+  const rankB = getCardColorCategoryRank(b);
+  if (rankA !== rankB) return rankA - rankB;
+  const nameDiff = (a.name || '').localeCompare(b.name || '');
+  if (nameDiff !== 0) return nameDiff;
+  const collA = a.collectorNumber || a.collector_number || (a as any).CollectorNumber || '';
+  const collB = b.collectorNumber || b.collector_number || (b as any).CollectorNumber || '';
+  return collA.localeCompare(collB, undefined, { numeric: true });
 }
 
 export function getDeckCommander(deck?: Deck | null): {

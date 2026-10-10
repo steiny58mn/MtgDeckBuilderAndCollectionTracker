@@ -36,6 +36,9 @@ export interface ChecklistPrintItem {
   deckUsageText?: string;
   category?: string;
   isMissing?: boolean;
+  colors?: string[];
+  manaCost?: string;
+  colorRank?: number;
 }
 
 export interface ChecklistPrintOptions {

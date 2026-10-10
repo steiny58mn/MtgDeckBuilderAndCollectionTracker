@@ -62,6 +62,7 @@ import {
   getCardCategorySortOrder,
   getCardEffectiveColors,
   getCardColorCategoryRank,
+  compareCardsByColor,
   getCardColorGroup,
   detectGamechangers,
   isCardGamechanger,
@@ -80,6 +81,7 @@ import { ManaCurveChart } from './ManaCurveChart';
 import { DeckStatsModal } from './DeckStatsModal';
 import { CommanderRecommendationsModal } from './CommanderRecommendationsModal';
 import { BinderChecklistModal } from './BinderChecklistModal';
+import { BinderChecklist } from './BinderChecklist';
 import { SampleHandSimulator } from './SampleHandSimulator';
 import { DeckExportModal } from './DeckExportModal';
 import { DeckCompareModal } from './DeckCompareModal';
@@ -160,10 +162,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     } catch {}
     return 'main';
   });
-  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid' | 'piles'>(() => {
+  const [viewMode, setViewMode] = useState<'tabbed' | 'category-grid' | 'grid' | 'piles' | 'checklist'>(() => {
     try {
       const saved = localStorage.getItem('deck_builder_view_mode');
-      if (saved === 'grid' || saved === 'tabbed' || saved === 'category-grid' || saved === 'piles') return saved;
+      if (saved === 'grid' || saved === 'tabbed' || saved === 'category-grid' || saved === 'piles' || saved === 'checklist') return saved;
     } catch {}
     return 'grid'; // Default the display to a grid
   });
@@ -619,6 +621,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         set: card.set,
         collectorNumber: card.collector_number || card.collectorNumber || '',
         typeLine: card.type_line,
+        colors: card.colors || [],
+        manaCost: card.mana_cost || card.manaCost || '',
         isFoil: Boolean(card.isFoil),
         price: getCardUnitPrice(card),
         isChecked: isOwned,
@@ -628,8 +632,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       };
     });
 
-    // Sort items left-to-right in alphabetical order
-    printItems.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    // Sort items according to active deck sort preference (Color, Price, or Alphabetical)
+    if (sortCardsBy === 'color') {
+      printItems.sort((a, b) => compareCardsByColor(a, b));
+    } else if (sortCardsBy === 'price') {
+      printItems.sort((a, b) => {
+        const priceA = Number(a.price || 0);
+        const priceB = Number(b.price || 0);
+        if (priceB !== priceA) return priceB - priceA;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    } else {
+      printItems.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
 
     printChecklist({
       title: `Deck Checklist: ${activeDeck.name}`,
@@ -1697,15 +1712,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         return a.name.localeCompare(b.name);
       }
       if (sortCardsBy === 'color') {
-        const rankA = getCardColorCategoryRank(a);
-        const rankB = getCardColorCategoryRank(b);
-        if (rankA !== rankB) return rankA - rankB;
-        // Secondary sort by mana value
-        const cmcA = a.cmc || 0;
-        const cmcB = b.cmc || 0;
-        if (cmcA !== cmcB) return cmcA - cmcB;
-        // Tertiary sort by name
-        return a.name.localeCompare(b.name);
+        return compareCardsByColor(a, b);
       }
       return a.name.localeCompare(b.name);
     });
@@ -3056,6 +3063,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <Layers className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Piles</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('checklist')}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
+                viewMode === 'checklist' ? 'bg-slate-800 text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Checklist View & Physical Audit"
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Checklist</span>
+            </button>
           </div>
 
           <button
@@ -3155,8 +3173,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         </div>
       )}
 
-      {/* Category Grid View */}
-      {viewMode === 'category-grid' ? (
+      {/* Checklist View Mode */}
+      {viewMode === 'checklist' ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden p-3 sm:p-4">
+          <BinderChecklist
+            cards={collectionCards}
+            binders={binders}
+            selectedBinderId={activeDeck.binderId || 'all'}
+            onSelectBinderId={handleSelectBinderId}
+            onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
+            activeDeck={activeDeck}
+          />
+        </div>
+      ) : viewMode === 'category-grid' ? (
         <div className="space-y-4">
           {renderCommanderPanel()}
           <div className="flex items-center justify-between text-xs text-slate-400 px-1">
@@ -3930,7 +3959,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         { key: 'R', title: 'Red' },
         { key: 'G', title: 'Green' },
         { key: 'multi', title: 'Multicolor' },
-        { key: 'colorless', title: 'Colorless' },
+        { key: 'colorless', title: 'Artifacts & Colorless' },
         { key: 'land', title: 'Lands' },
       ];
 
@@ -3950,7 +3979,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       colorOrder.forEach((o) => {
         const pileCards = colorMap.get(o.key) || [];
         if (pileCards.length > 0) {
-          pileCards.sort((a, b) => (a.cmc || 0) - (b.cmc || 0) || a.name.localeCompare(b.name));
+          pileCards.sort((a, b) => a.name.localeCompare(b.name));
           piles.push({
             id: `color-${o.key}`,
             title: o.title,

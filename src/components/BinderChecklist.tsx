@@ -20,7 +20,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
-import { buildCrossDeckUsageMap } from '../utils/deckUtils';
+import { buildCrossDeckUsageMap, compareCardsByColor } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
@@ -270,7 +270,19 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'this-deck' | 'binder-only'>('all');
-  const [sortBy, setSortBy] = useState<'name' | 'name-desc' | 'price-desc' | 'set'>('name');
+  const [sortBy, setSortBy] = useState<'name' | 'color' | 'name-desc' | 'price-desc' | 'set'>(() => {
+    try {
+      const saved = localStorage.getItem('binder_checklist_sort_by');
+      if (saved === 'name' || saved === 'color' || saved === 'name-desc' || saved === 'price-desc' || saved === 'set') return saved;
+    } catch {}
+    return 'name';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('binder_checklist_sort_by', sortBy);
+    } catch {}
+  }, [sortBy]);
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
 
   // Progressive rendering limit for instantaneous UI mount and smooth scrolling
@@ -397,8 +409,11 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       return true;
     });
 
-    // Default sort in binder: Alphabetical (A-Z)
+    // Sort in checklist mode: Supports Color (WUBRG • Multi • Artifacts • Lands), Alphabetical, Price, Set
     return [...filtered].sort((a, b) => {
+      if (sortBy === 'color') {
+        return compareCardsByColor(a, b);
+      }
       if (sortBy === 'name') {
         const diff = (a.name || '').localeCompare(b.name || '');
         if (diff !== 0) return diff;
@@ -556,6 +571,8 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         set: c.set || (c as any).set_code || (c as any).setCode || '',
         collectorNumber: c.collectorNumber || c.collector_number || (c as any).CollectorNumber || '',
         typeLine: c.type_line || c.typeLine,
+        colors: (c as any).colors || [],
+        manaCost: (c as any).mana_cost || (c as any).manaCost || '',
         isFoil: Boolean(c.isFoil),
         price: c.currentPriceUsd || c.medianPriceUsd || 0,
         isChecked,
@@ -563,7 +580,17 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
       };
     });
 
-    items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    if (sortBy === 'color') {
+      items.sort(compareCardsByColor);
+    } else if (sortBy === 'name-desc') {
+      items.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+    } else if (sortBy === 'price-desc') {
+      items.sort((a, b) => Number(b.price || 0) - Number(a.price || 0) || (a.name || '').localeCompare(b.name || ''));
+    } else if (sortBy === 'set') {
+      items.sort((a, b) => (a.set || '').localeCompare(b.set || '') || (a.collectorNumber || '').localeCompare(b.collectorNumber || '', undefined, { numeric: true }));
+    } else {
+      items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
 
     const title = `Binder Checklist: ${activeBinderName}`;
 
@@ -764,6 +791,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
               title="Sort cards in checklist"
             >
               <option value="name" className="bg-slate-900 text-white">Sort: A-Z (Alphabetical)</option>
+              <option value="color" className="bg-slate-900 text-white">Sort: Color (WUBRG • Multi • Artifacts • Lands)</option>
               <option value="name-desc" className="bg-slate-900 text-white">Sort: Z-A</option>
               <option value="price-desc" className="bg-slate-900 text-white">Sort: Highest Price</option>
               <option value="set" className="bg-slate-900 text-white">Sort: Set & Collector #</option>
