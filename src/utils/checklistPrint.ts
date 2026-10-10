@@ -398,18 +398,19 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
 
       // Bottom line: Set abbreviation & card number in italics, plus decks usage
       const bottomY = itemY + (cols === 4 ? 16.5 : cols === 3 ? 16.0 : cols === 2 ? 15.5 : 14.5);
+      const collNum = item.collectorNumber || (item as any).collector_number || '';
       const setStr = item.set
-        ? `${item.set.toUpperCase()}${item.collectorNumber ? ` #${item.collectorNumber}` : ''}`
+        ? `${item.set.toUpperCase()}${collNum ? ` #${collNum}` : ''}`
         : '';
 
       let setStrW = 0;
       if (setStr) {
         doc.setFont('helvetica', 'italic');
-        const setFontSize = cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2;
+        const setFontSize = cols === 4 ? 4.6 : cols === 3 ? 5.0 : 5.4;
         doc.setFontSize(setFontSize);
-        doc.setTextColor(148, 163, 184); // slate-400
+        doc.setTextColor(100, 116, 139); // slate-500 for crisp print readability
         setStrW = doc.getTextWidth(setStr);
-        // Right-align on bottom to not get in the way of card details
+        // Right-align on bottom of pane to not get in the way of card details
         doc.text(setStr, itemX + colWidth - 3.5, bottomY, { align: 'right' });
       }
 

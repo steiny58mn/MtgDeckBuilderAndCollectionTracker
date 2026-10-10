@@ -617,7 +617,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         totalInDecks: totalInOtherDecks,
         decksList: decksList,
         set: card.set,
-        collectorNumber: card.collector_number || (card as any).collectorNumber,
+        collectorNumber: card.collector_number || card.collectorNumber || '',
         typeLine: card.type_line,
         isFoil: Boolean(card.isFoil),
         price: getCardUnitPrice(card),
@@ -2019,6 +2019,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <p>No commander assigned yet. Click <strong>&quot;+ Add Commander&quot;</strong> or assign any legendary card from your deck.</p>
           </div>
         )}
+
       </div>
     );
   };
@@ -4431,6 +4432,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           </div>
         )}
+
+        {/* Resting Expansion & Card Number Badge at Bottom (visible when NOT hovered) */}
+        <div
+          className={`absolute bottom-1 right-1.5 z-10 pointer-events-none transition-opacity duration-150 ${
+            isActive ? 'opacity-0' : 'opacity-100'
+          }`}
+        >
+          <span className="px-1 py-0.5 rounded bg-slate-950/80 text-slate-400 font-mono italic text-[8px] border border-slate-800/60 shadow-xs backdrop-blur-xs">
+            {card.set?.toUpperCase()}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
+          </span>
+        </div>
       </div>
     );
   }
@@ -4569,8 +4581,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </div>
             
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
-              <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner">
-                {card.set}
+              <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner italic">
+                {card.set}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
               </span>
               <span className="truncate max-w-[140px] sm:max-w-none">{card.type_line}</span>
               {isCardGamechanger(card) && (
@@ -5018,6 +5030,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               <span>Assign as Partner</span>
             </button>
           )}
+
+          {/* Card Version & Collector Number (out of the way at the bottom of the pane) */}
+          <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono italic pt-1 border-t border-slate-800/40 mt-1 select-none">
+            <span title={`${card.set_name || card.setName || card.set} #${card.collector_number || card.collectorNumber || ''}`}>
+              {card.set ? card.set.toUpperCase() : ''}{card.collector_number || card.collectorNumber ? ` #${card.collector_number || card.collectorNumber}` : ''}
+            </span>
+            {card.rarity && (
+              <span className="capitalize text-[9px] text-slate-500/70 not-italic font-sans">
+                {card.rarity}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     );
