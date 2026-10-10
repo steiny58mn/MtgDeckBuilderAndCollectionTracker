@@ -516,13 +516,15 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
           const colorMismatch = (!c.colors || c.colors.length === 0) && colors.length > 0;
           const manaMismatch = (!c.mana_cost || !c.manaCost) && Boolean(manaCost);
           const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);
+          const rarityMismatch = Boolean(matched.rarity && c.rarity !== matched.rarity);
 
-          if (typeMismatch || colorMismatch || manaMismatch || oracleMismatch) {
+          if (typeMismatch || colorMismatch || manaMismatch || oracleMismatch || rarityMismatch) {
             binderChanged = true;
             totalEnriched++;
             return {
               ...c,
               // Strictly preserve card's version / set / printing - NEVER touch or overwrite edition attributes!
+              rarity: (matched.rarity as any) || c.rarity || 'common',
               type_line: typeLine,
               typeLine,
               mana_cost: manaCost,

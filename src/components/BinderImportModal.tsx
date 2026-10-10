@@ -193,7 +193,7 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             colors: colors.length > 0 ? colors : (c.colors || []),
             color_identity: colorIdentity,
             colorIdentity: colorIdentity,
-            rarity: c.rarity || (isExactPrintingMatch ? matched.rarity : undefined) || 'common',
+            rarity: (matched.rarity as any) || c.rarity || 'common',
             isGamechanger: isGc,
             game_changer: isGc,
             is_game_changer: isGc,

@@ -9,6 +9,7 @@ export interface ParsedCsvCard {
   setName?: string;
   collectorNumber?: string;
   scryfallSetId?: string;
+  rarity?: string;
   quantityRegular: number;
   quantityFoil: number; // Includes both Foil and Etched
 }
@@ -62,6 +63,7 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   const paperIdx = colIndexMap.get('havespaper') ?? colIndexMap.get('paper') ?? colIndexMap.get('quantity') ?? colIndexMap.get('regular') ?? colIndexMap.get('count') ?? colIndexMap.get('qty') ?? -1;
   const foilIdx = colIndexMap.get('havesfoil') ?? colIndexMap.get('foil') ?? -1;
   const etchedIdx = colIndexMap.get('havesetched') ?? colIndexMap.get('etched') ?? -1;
+  const rarityIdx = colIndexMap.get('rarity') ?? colIndexMap.get('cardrarity') ?? colIndexMap.get('r') ?? -1;
 
   const results: ParsedCsvCard[] = [];
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,6 +80,17 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
     const setName = setNameIdx >= 0 ? cols[setNameIdx]?.trim() : undefined;
     const collectorNumber = collectorIdx >= 0 ? cols[collectorIdx]?.trim() : undefined;
     const scryfallSetId = scryfallSetIdIdx >= 0 ? cols[scryfallSetIdIdx]?.trim() : undefined;
+
+    let parsedRarity: string | undefined = undefined;
+    if (rarityIdx >= 0 && cols[rarityIdx]) {
+      const rawR = cols[rarityIdx].trim().toLowerCase();
+      if (rawR.startsWith('m')) parsedRarity = 'mythic';
+      else if (rawR.startsWith('r')) parsedRarity = 'rare';
+      else if (rawR.startsWith('u')) parsedRarity = 'uncommon';
+      else if (rawR.startsWith('c')) parsedRarity = 'common';
+      else if (rawR.startsWith('s')) parsedRarity = 'special';
+      else if (rawR.startsWith('b')) parsedRarity = 'bonus';
+    }
 
     let paperQty = 0;
     if (paperIdx >= 0) {
@@ -99,6 +112,7 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
         setName,
         collectorNumber,
         scryfallSetId,
+        rarity: parsedRarity,
         quantityRegular: paperQty,
         quantityFoil: totalFoil,
       });
@@ -126,7 +140,7 @@ export function convertParsedCardsToCollectionCards(
     const colors = cached ? getCardEffectiveColors(cached) : [];
     const colorIdentity = cached?.color_identity || [];
     const cmc = cached?.cmc ?? 0;
-    const rarity = cached?.rarity || 'rare';
+    const rarity = (item.rarity as any) || cachedById?.rarity || cachedByName?.rarity || (isBasicLandName(item.name) ? 'common' : 'common');
     const oracleText = cached?.oracle_text || '';
 
     // NEVER overwrite or borrow an arbitrary edition's set, collector number, or scryfall ID from generic name cache!
