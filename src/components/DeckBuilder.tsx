@@ -4517,24 +4517,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           </div>
         )}
 
-        {/* Resting Expansion & Card Number Badge at Bottom (visible when NOT hovered) */}
-        {(() => {
-          const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
-          const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
-          const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
-          if (!versionText) return null;
-          return (
-            <div
-              className={`absolute bottom-1 right-1.5 z-10 pointer-events-none transition-opacity duration-150 ${
-                isActive ? 'opacity-0' : 'opacity-100'
-              }`}
-            >
-              <span className="px-1 py-0.5 rounded bg-slate-950/80 text-slate-400 font-mono italic text-[8px] border border-slate-800/60 shadow-xs backdrop-blur-xs">
-                {versionText}
-              </span>
-            </div>
-          );
-        })()}
       </div>
     );
   }
@@ -4673,16 +4655,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </div>
             
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
-              {(() => {
-                const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
-                const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
-                const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
-                return versionText ? (
-                  <span className="uppercase font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shadow-inner italic">
-                    {versionText}
-                  </span>
-                ) : null;
-              })()}
               {(() => {
                 const displayType = card.type_line || card.typeLine || getCardFromLocalCache(card.name)?.type_line || (isBasicLandName(card.name) ? 'Basic Land' : '');
                 return displayType ? (
@@ -5138,25 +5110,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             </button>
           )}
 
-          {/* Card Version & Collector Number (out of the way at the bottom of the pane) */}
-          {(() => {
-            const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
-            const collNum = card.collector_number || card.collectorNumber || (card as any).CollectorNumber || '';
-            const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
-            if (!versionText && !card.rarity) return null;
-            return (
-              <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono italic pt-1 border-t border-slate-800/40 mt-1 select-none">
-                <span title={`${card.set_name || card.setName || setCode} ${collNum ? `#${collNum}` : ''}`.trim()}>
-                  {versionText}
-                </span>
-                {card.rarity && (
-                  <span className="capitalize text-[9px] text-slate-500/70 not-italic font-sans">
-                    {card.rarity}
-                  </span>
-                )}
-              </div>
-            );
-          })()}
         </div>
       </div>
     );
