@@ -17,10 +17,11 @@ import {
   AlertTriangle,
   FolderOpen,
   ArrowUpDown,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import { CollectionCard, Deck, Binder } from '../types/mtg';
-import { buildCrossDeckUsageMap, compareCardsByColor } from '../utils/deckUtils';
+import { buildCrossDeckUsageMap, compareCardsByColor, isBasicLandName } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 import { toHighResImageUrl } from '../services/api';
 import { useImageHoverPreview, ImageHoverPopup } from './ImageHoverPopup';
@@ -34,6 +35,7 @@ export interface BinderChecklistProps {
   onSelectBinderId?: (binderId: string) => void;
   onUpdateCollectionCard?: (card: CollectionCard) => void;
   onAddCardToDeck?: (card: CollectionCard) => void;
+  onSelectCard?: (card: CollectionCard) => void;
   activeDeck?: Deck | null;
   onClose?: () => void;
   isModal?: boolean;
@@ -52,6 +54,7 @@ interface ChecklistCardRowProps {
   onImageMouseLeave: () => void;
   onUpdateCollectionCard?: (card: CollectionCard) => void;
   onAddCardToDeck?: (card: CollectionCard) => void;
+  onSelectCard?: (card: CollectionCard) => void;
   activeDeckName?: string;
 }
 
@@ -68,6 +71,7 @@ const ChecklistCardRow: React.FC<ChecklistCardRowProps> = React.memo(({
   onImageMouseLeave,
   onUpdateCollectionCard,
   onAddCardToDeck,
+  onSelectCard,
   activeDeckName,
 }) => {
   const handleCheck = useCallback(() => {
@@ -134,16 +138,18 @@ const ChecklistCardRow: React.FC<ChecklistCardRowProps> = React.memo(({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Card Name with Hover Preview */}
+            {/* Card Name with Hover Preview & Inspection Click */}
             <span
               className={`font-semibold text-xs transition-colors cursor-pointer ${
                 isChecked
                   ? 'line-through text-slate-400'
                   : 'text-white hover:text-emerald-300'
               }`}
+              onClick={() => onSelectCard?.(card)}
               onMouseEnter={handleMouseEnter}
               onMouseMove={onImageMouseMove}
               onMouseLeave={onImageMouseLeave}
+              title="Click to view card details & printings"
             >
               {card.name}
             </span>
@@ -263,10 +269,32 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   onSelectBinderId,
   onUpdateCollectionCard,
   onAddCardToDeck,
+  onSelectCard,
   activeDeck,
   onClose,
   isModal = false,
 }) => {
+  const [isEnrichingMetadata, setIsEnrichingMetadata] = useState(false);
+  const [enrichToast, setEnrichToast] = useState<string | null>(null);
+
+  const handleEnrichBinderMetadata = async () => {
+    setIsEnrichingMetadata(true);
+    setEnrichToast(null);
+    try {
+      const res = await DeckService.enrichBinderCards(selectedBinderId);
+      if (res.enrichedCount > 0) {
+        setEnrichToast(`Successfully loaded metadata for ${res.enrichedCount} card(s)!`);
+      } else {
+        setEnrichToast('All binder cards already have full metadata!');
+      }
+      setTimeout(() => setEnrichToast(null), 3500);
+    } catch (err: any) {
+      setEnrichToast('Error loading metadata: ' + (err?.message || 'Failed'));
+      setTimeout(() => setEnrichToast(null), 3500);
+    } finally {
+      setIsEnrichingMetadata(false);
+    }
+  };
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'unverified' | 'verified' | 'in-decks' | 'this-deck' | 'binder-only'>('all');
@@ -376,6 +404,38 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
     }
     return cards.filter((c) => (c.binderId || 'binder-main') === selectedBinderId);
   }, [cards, selectedBinderId]);
+
+// Auto-enrich binder cards with metadata if missing
+  const lastEnrichedBinderRef = useRef<string>('');
+  useEffect(() => {
+    if (!binderCards || binderCards.length === 0) return;
+    const missingCount = binderCards.filter((c) => {
+      const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+      const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
+      const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+      return !hasType || (!hasColorOrMana && !isLand);
+    }).length;
+
+    if (missingCount === 0) return;
+
+    const key = `${selectedBinderId}:${missingCount}:${binderCards.length}`;
+    if (lastEnrichedBinderRef.current === key) return;
+    lastEnrichedBinderRef.current = key;
+
+    let isMounted = true;
+    DeckService.enrichBinderCards(selectedBinderId).then((res) => {
+      if (!isMounted) return;
+      if (res.enrichedCount > 0) {
+        console.log(`[BinderChecklist] Auto-enriched ${res.enrichedCount} binder cards with Scryfall metadata.`);
+      }
+    }).catch((err) => {
+      console.warn('[BinderChecklist] Auto-enrich failed:', err);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedBinderId, binderCards?.length]);
 
   // Reset progressive display limit when search, filters, or binder changes
   useEffect(() => {
@@ -693,6 +753,22 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
             size="normal"
           />
 
+          {/* Load Complete Metadata Button */}
+          <button
+            type="button"
+            onClick={handleEnrichBinderMetadata}
+            disabled={isEnrichingMetadata}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-950/80 hover:bg-violet-900 border border-violet-700/70 text-violet-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            title="Load complete card metadata (types, colors, mana costs, and art) from Scryfall for all cards in this binder"
+          >
+            {isEnrichingMetadata ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+            )}
+            <span>{isEnrichingMetadata ? 'Loading Metadata...' : 'Load Metadata'}</span>
+          </button>
+
           {isModal && onClose && (
             <button
               type="button"
@@ -705,6 +781,12 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
           )}
         </div>
       </div>
+
+      {enrichToast && (
+        <div className="py-2.5 px-4 my-2 rounded-xl bg-violet-950/80 border border-violet-700/80 text-violet-200 text-xs text-center font-semibold animate-in fade-in shadow-md">
+          {enrichToast}
+        </div>
+      )}
 
       {/* Progress & Verification Stats Banner */}
       <div className="py-3 px-4 my-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
@@ -914,6 +996,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
                   onImageMouseLeave={onImageMouseLeave}
                   onUpdateCollectionCard={onUpdateCollectionCard}
                   onAddCardToDeck={onAddCardToDeck}
+                  onSelectCard={onSelectCard}
                   activeDeckName={activeDeck?.name}
                 />
               );

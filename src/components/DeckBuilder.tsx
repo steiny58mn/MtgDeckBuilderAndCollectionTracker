@@ -91,6 +91,7 @@ import { resolveMtgNexusEditUrl, generateExportContent } from '../utils/deckExpo
 import { handleCardImageError, getCardImageUrl, getCardFromLocalCache } from '../services/api';
 import { printChecklist, ChecklistPrintItem, ChecklistPrintDeckUsage, abbreviateDeckName } from '../utils/checklistPrint';
 import { ChecklistPrintButtonGroup, getSavedPrintColumns } from './ChecklistPrintButtonGroup';
+import { cardToScryfallCard } from './CollectionManager';
 
 // Helper to safely get numeric card unit price
 export const getCardUnitPrice = (card: DeckCard): number => {
@@ -3225,6 +3226,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             selectedBinderId={activeDeck.binderId || 'all'}
             onSelectBinderId={handleSelectBinderId}
             onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
+            onSelectCard={(c) => onSelectCard(cardToScryfallCard(c))}
             activeDeck={activeDeck}
           />
         </div>
@@ -3830,6 +3832,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         selectedBinderId={activeDeck.binderId || 'all'}
         onSelectBinderId={handleSelectBinderId}
         onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
+        onSelectCard={(c) => onSelectCard(cardToScryfallCard(c))}
         activeDeck={activeDeck}
       />
 

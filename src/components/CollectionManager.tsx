@@ -178,7 +178,26 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
   const [categoryLimits, setCategoryLimits] = useState<Record<string, number>>({});
   const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
+  const [isEnrichingMetadata, setIsEnrichingMetadata] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
+
+  const handleEnrichMetadata = async () => {
+    setIsEnrichingMetadata(true);
+    setRefreshToast(null);
+    try {
+      const res = await DeckService.enrichBinderCards(selectedBinderFilter);
+      if (res.enrichedCount > 0) {
+        setRefreshToast(`Successfully loaded metadata for ${res.enrichedCount} card(s)!`);
+      } else {
+        setRefreshToast('All binder cards already have full metadata!');
+      }
+      setTimeout(() => setRefreshToast(null), 3500);
+    } catch (err: any) {
+      setRefreshToast('Metadata loading error: ' + (err?.message || 'Error'));
+    } finally {
+      setIsEnrichingMetadata(false);
+    }
+  };
   const [showImportModal, setShowImportModal] = useState(false);
   const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(() => {
     try {
@@ -869,6 +888,15 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               <span className="hidden sm:inline">{isRefreshingPrices ? 'Syncing...' : 'Live Prices'}</span>
             </button>
             <button
+              onClick={handleEnrichMetadata}
+              disabled={isEnrichingMetadata}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-950/80 hover:bg-violet-900 border border-violet-700/80 text-violet-200 hover:text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
+              title="Load full card metadata (types, colors, mana costs, and art) from Scryfall for all cards in this binder"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${isEnrichingMetadata ? 'animate-spin text-violet-400' : 'text-violet-400'}`} />
+              <span className="hidden sm:inline">{isEnrichingMetadata ? 'Loading...' : 'Load Metadata'}</span>
+            </button>
+            <button
               onClick={() => setShowImportModal(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-emerald-400 hover:text-emerald-300 text-xs font-semibold transition-all cursor-pointer shadow-sm"
               title="Import Collection from CSV"
@@ -1327,6 +1355,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           }}
           onUpdateCollectionCard={onUpdateCollectionCard}
           onAddCardToDeck={onAddCardToDeck}
+          onSelectCard={(c) => onSelectCard(cardToScryfallCard(c))}
           activeDeck={activeDeck}
         />
       ) : filteredCards.length > 0 ? (

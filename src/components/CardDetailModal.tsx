@@ -14,10 +14,11 @@ import {
   Crown,
   Trash2
 } from 'lucide-react';
-import { ScryfallCard, Deck, CardCondition, DeckCategory, Binder } from '../types/mtg';
-import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError } from '../services/api';
+import { ScryfallCard, Deck, DeckCard, CollectionCard, CardCondition, DeckCategory, Binder } from '../types/mtg';
+import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError, getCardFromLocalCache, localCardCache } from '../services/api';
+import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
-import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander } from '../utils/deckUtils';
+import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander, getCardEffectiveColors } from '../utils/deckUtils';
 
 interface CardDetailModalProps {
   card: ScryfallCard | null;
@@ -131,15 +132,98 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     setPrintingToast(null);
 
     const cardId = card.id || (card as any).scryfallId;
-    if (cardId && (!card.oracle_text || !card.image_uris?.large)) {
+    const cleanName = (card.name || '').trim();
+    const query = (cardId && !cardId.startsWith('c-') && !cardId.startsWith('bc-')) ? cardId : cleanName;
+
+    const lacksDetails = !card.type_line ||
+      (!card.colors || card.colors.length === 0 && !card.mana_cost) ||
+      !card.oracle_text ||
+      !card.image_uris?.large;
+
+    if (query && lacksDetails) {
       setIsLoadingFull(true);
-      getCardById(cardId)
-        .then((fullData) => {
-          if (fullData) {
-            setDisplayCard((prev) => (prev ? { ...prev, ...fullData } : fullData));
+
+      const applyFullData = (fullData: ScryfallCard) => {
+        setDisplayCard((prev) => (prev ? { ...prev, ...fullData } : fullData));
+
+        const exact = cleanName.toLowerCase().trim();
+        const front = exact.split(' // ')[0].trim();
+        localCardCache.set(exact, fullData);
+        localCardCache.set(front, fullData);
+
+        const typeLine = fullData.type_line || fullData.card_faces?.[0]?.type_line || '';
+        const manaCost = fullData.mana_cost || fullData.card_faces?.[0]?.mana_cost || '';
+        const colors = (Array.isArray(fullData.colors) && fullData.colors.length > 0)
+          ? fullData.colors
+          : (Array.isArray(fullData.card_faces?.[0]?.colors) && fullData.card_faces[0].colors.length > 0)
+            ? fullData.card_faces[0].colors
+            : getCardEffectiveColors(fullData);
+
+        // Update card in activeDeck if matching
+        if (activeDeck && Array.isArray(activeDeck.cards)) {
+          const deckCardId = (card as any).deckCardId || card.id;
+          const matchingIndex = activeDeck.cards.findIndex((c) => c.id === deckCardId || c.name.toLowerCase().trim() === exact);
+          if (matchingIndex >= 0) {
+            const oldC = activeDeck.cards[matchingIndex];
+            const updatedC: DeckCard = {
+              ...oldC,
+              scryfallId: fullData.id || oldC.scryfallId,
+              type_line: typeLine || oldC.type_line,
+              typeLine: typeLine || oldC.typeLine,
+              mana_cost: manaCost || oldC.mana_cost,
+              manaCost: manaCost || oldC.manaCost,
+              oracle_text: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || oldC.oracle_text,
+              colors: colors.length > 0 ? colors : oldC.colors,
+              color_identity: fullData.color_identity || oldC.color_identity,
+              colorIdentity: fullData.color_identity || oldC.colorIdentity,
+              cmc: fullData.cmc ?? oldC.cmc,
+              rarity: fullData.rarity || oldC.rarity,
+              imageUrl: fullData.image_uris?.normal || oldC.imageUrl,
+            };
+            const updatedCards = [...activeDeck.cards];
+            updatedCards[matchingIndex] = updatedC;
+            DeckService.updateDeckMetadataInMemory({ ...activeDeck, cards: updatedCards });
           }
-        })
-        .finally(() => setIsLoadingFull(false));
+        }
+
+        // Update card in collection / binder if matching
+        const collectionCardId = (card as any).collectionCardId || card.id;
+        const allCollection = DeckService.getLocalCollection();
+        const matchingCol = allCollection.find((c) => c.id === collectionCardId || c.name.toLowerCase().trim() === exact);
+        if (matchingCol) {
+          const updatedCol: CollectionCard = {
+            ...matchingCol,
+            scryfallId: fullData.id || matchingCol.scryfallId,
+            type_line: typeLine || matchingCol.type_line,
+            typeLine: typeLine || matchingCol.typeLine,
+            mana_cost: manaCost || matchingCol.mana_cost,
+            manaCost: manaCost || matchingCol.manaCost,
+            oracle_text: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracle_text,
+            oracleText: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracleText,
+            colors: colors.length > 0 ? colors : matchingCol.colors,
+            color_identity: fullData.color_identity || matchingCol.color_identity,
+            colorIdentity: fullData.color_identity || matchingCol.colorIdentity,
+            cmc: fullData.cmc ?? matchingCol.cmc,
+            rarity: fullData.rarity || matchingCol.rarity,
+            imageUrl: fullData.image_uris?.normal || matchingCol.imageUrl,
+          };
+          DeckService.saveCollectionCard(updatedCol).catch(() => {});
+        }
+      };
+
+      const cached = getCardFromLocalCache(cleanName);
+      if (cached && cached.type_line && (cached.colors?.length || cached.mana_cost)) {
+        applyFullData(cached);
+        setIsLoadingFull(false);
+      } else {
+        getCardById(query)
+          .then((fullData) => {
+            if (fullData) {
+              applyFullData(fullData);
+            }
+          })
+          .finally(() => setIsLoadingFull(false));
+      }
     }
   }, [card?.id, (card as any)?.scryfallId, isOpen]);
 
@@ -202,23 +286,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-slate-100 my-auto flex flex-col md:flex-row max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Controls: Delete (if from binder) and Close */}
+        {/* Top Controls: Close */}
         <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-          {Boolean((displayCard as any)?.collectionCardId || (card as any)?.collectionCardId) && onDeleteCollectionCard && (
-            <button
-              type="button"
-              onClick={async () => {
-                const targetId = (displayCard as any)?.collectionCardId || (card as any)?.collectionCardId;
-                await onDeleteCollectionCard(targetId);
-                onClose();
-              }}
-              className="px-2.5 py-1.5 rounded-full bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800/70 transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
-              title="Delete this card from binder if scan was incorrect"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden sm:inline">Delete Card</span>
-            </button>
-          )}
           <button
             onClick={onClose}
             className="p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"

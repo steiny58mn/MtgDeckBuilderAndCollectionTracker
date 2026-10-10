@@ -13,6 +13,7 @@ export interface BinderChecklistModalProps {
   onSelectBinderId?: (binderId: string) => void;
   onUpdateCollectionCard?: (card: CollectionCard) => void;
   onAddCardToDeck?: (card: CollectionCard) => void;
+  onSelectCard?: (card: CollectionCard) => void;
   activeDeck?: Deck | null;
 }
 
@@ -25,6 +26,7 @@ export const BinderChecklistModal: React.FC<BinderChecklistModalProps> = React.m
   onSelectBinderId,
   onUpdateCollectionCard,
   onAddCardToDeck,
+  onSelectCard,
   activeDeck,
 }) => {
   useBodyScrollLock(isOpen);
@@ -45,6 +47,7 @@ export const BinderChecklistModal: React.FC<BinderChecklistModalProps> = React.m
           onSelectBinderId={onSelectBinderId}
           onUpdateCollectionCard={onUpdateCollectionCard}
           onAddCardToDeck={onAddCardToDeck}
+          onSelectCard={onSelectCard}
           activeDeck={activeDeck}
           onClose={onClose}
           isModal={true}
