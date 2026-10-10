@@ -265,17 +265,17 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
   };
 
   // Print physical checklist formatted for paper / PDF
-  const [printColumns, setPrintColumns] = useState<1 | 2 | 3>(() => {
+  const [printColumns, setPrintColumns] = useState<1 | 2 | 3 | 4>(() => {
     try {
       const saved = localStorage.getItem('mtg_checklist_print_cols');
-      if (saved === '1' || saved === '2' || saved === '3') {
-        return Number(saved) as 1 | 2 | 3;
+      if (saved === '1' || saved === '2' || saved === '3' || saved === '4') {
+        return Number(saved) as 1 | 2 | 3 | 4;
       }
     } catch (_) {}
     return 2; // Default to 2 columns to save paper
   });
 
-  const handlePrintChecklist = (colsOverride?: 1 | 2 | 3) => {
+  const handlePrintChecklist = (colsOverride?: 1 | 2 | 3 | 4) => {
     const effectiveCols = colsOverride || printColumns || 2;
     const activeBinderName = selectedBinderId === 'all'
       ? 'All Binders (Collection)'
@@ -326,6 +326,8 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         deckUsageText,
       };
     });
+
+    items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const title = `Binder Checklist: ${activeBinderName}`;
 
@@ -435,7 +437,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
               <span>Print ({printColumns}C)</span>
             </button>
             <div className="h-3.5 w-px bg-slate-700 mx-0.5" />
-            {([1, 2, 3] as const).map((cols) => (
+            {([1, 2, 3, 4] as const).map((cols) => (
               <button
                 key={cols}
                 type="button"

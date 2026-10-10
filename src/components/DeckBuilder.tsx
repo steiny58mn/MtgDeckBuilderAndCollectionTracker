@@ -563,17 +563,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     return list;
   }, [activeDeck.cards, getCardOwnedQuantity, crossDeckUsageMap]);
 
-  const [printColumns, setPrintColumns] = useState<1 | 2 | 3>(() => {
+  const [printColumns, setPrintColumns] = useState<1 | 2 | 3 | 4>(() => {
     try {
       const saved = localStorage.getItem('mtg_checklist_print_cols');
-      if (saved === '1' || saved === '2' || saved === '3') {
-        return Number(saved) as 1 | 2 | 3;
+      if (saved === '1' || saved === '2' || saved === '3' || saved === '4') {
+        return Number(saved) as 1 | 2 | 3 | 4;
       }
     } catch (_) {}
     return 2; // Default to 2 columns to save paper
   });
 
-  const handlePrintDeckChecklist = useCallback((colsOverride?: 1 | 2 | 3) => {
+  const handlePrintDeckChecklist = useCallback((colsOverride?: 1 | 2 | 3 | 4) => {
     const activeBinderName = activeDeck.binderId && activeDeck.binderId !== 'all'
       ? binders.find((b) => b.id === activeDeck.binderId)?.name || 'Selected Binder'
       : 'All Binders (Collection)';
@@ -629,13 +629,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       };
     });
 
-    // Sort items: Commander first, then category sort order, then name
-    printItems.sort((a, b) => {
-      const catRankA = a.category === 'commander' ? 0 : a.category === 'main' ? 1 : a.category === 'sideboard' ? 2 : 3;
-      const catRankB = b.category === 'commander' ? 0 : b.category === 'main' ? 1 : b.category === 'sideboard' ? 2 : 3;
-      if (catRankA !== catRankB) return catRankA - catRankB;
-      return a.name.localeCompare(b.name);
-    });
+    // Sort items left-to-right in alphabetical order
+    printItems.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     printChecklist({
       title: `Deck Checklist: ${activeDeck.name}`,
@@ -2416,7 +2411,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     <span className="hidden md:inline">Print ({printColumns}C)</span>
                   </button>
                   <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
-                  {([1, 2, 3] as const).map((cols) => (
+                  {([1, 2, 3, 4] as const).map((cols) => (
                     <button
                       key={cols}
                       type="button"

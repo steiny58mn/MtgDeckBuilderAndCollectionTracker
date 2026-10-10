@@ -1,8 +1,9 @@
 ﻿/**
  * Utility for generating and printing high-readability MTG Physical Checklists.
  * Formatted for clean printing on standard paper (Letter / A4) or PDF export.
- * Supports 1, 2, or 3 columns to optimize paper savings while preserving
+ * Supports 1, 2, 3, or 4 columns to optimize paper savings while preserving
  * complete card details and cross-deck usage information.
+ * Cards display left-to-right in alphabetical order.
  */
 
 export interface ChecklistPrintDeckUsage {
@@ -18,6 +19,7 @@ export interface ChecklistPrintItem {
   quantity: number;
   totalOwned?: number;
   totalInDecks?: number;
+  totalInOtherDecks?: number;
   decksList?: ChecklistPrintDeckUsage[];
   set?: string;
   collectorNumber?: string;
@@ -41,7 +43,7 @@ export interface ChecklistPrintOptions {
   totalCards?: number;
   percentVerified?: number;
   filterLabel?: string;
-  columns?: 1 | 2 | 3;
+  columns?: 1 | 2 | 3 | 4;
   items: ChecklistPrintItem[];
 }
 
@@ -89,8 +91,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; Foil</span>' : '';
     const conditionBadge = item.condition ? `<span class="cond-badge">${escapeHtml(item.condition)}</span>` : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
-    const priceNum = typeof item.price === 'number' ? item.price : parseFloat(String(item.price || 0));
-    const priceFormatted = !isNaN(priceNum) && priceNum > 0 ? `$${priceNum.toFixed(2)}` : '-';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
     const totalOwned = item.totalOwned !== undefined ? item.totalOwned : item.quantity;
@@ -129,7 +129,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
         </td>
         <td class="col-set">${setInfo}</td>
         <td class="col-type">${escapeHtml(item.typeLine || '-')}</td>
-        <td class="col-price text-right">${priceFormatted}</td>
         <td class="col-total text-center font-bold">${totalOwned}</td>
         <td class="col-indecks text-center font-bold ${totalInDecks > 0 ? 'text-indecks' : 'text-idle'}">${totalInDecks}</td>
         <td class="col-decks">${decksSummaryHtml}</td>
@@ -137,7 +136,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     `;
   }).join('');
 
-  // Generate Card Entries (for multi-column grid: 1, 2, or 3 columns)
+  // Generate Card Entries (for multi-column grid: 1, 2, 3, or 4 columns, flowing left to right)
   const cardsHtml = items.map((item, index) => {
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
@@ -145,8 +144,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; Foil</span>' : '';
     const conditionBadge = item.condition ? `<span class="cond-badge">${escapeHtml(item.condition)}</span>` : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
-    const priceNum = typeof item.price === 'number' ? item.price : parseFloat(String(item.price || 0));
-    const priceFormatted = !isNaN(priceNum) && priceNum > 0 ? `$${priceNum.toFixed(2)}` : '-';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
     const totalOwned = item.totalOwned !== undefined ? item.totalOwned : item.quantity;
@@ -178,7 +175,9 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
             ${categoryBadge}
           </div>
           <div class="entry-right">
-            <span class="entry-price">${priceFormatted}</span>
+            <span class="stat-pill stat-total">${isDeckChecklist ? 'Total' : 'Total'}: <b>${totalOwned}</b></span>
+            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}: <b>${totalInDecks}</b></span>
+            ${item.isMissing ? `<span class="stat-pill stat-missing">&#9888; Missing</span>` : ''}
           </div>
         </div>
 
@@ -188,11 +187,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
         </div>
 
         <div class="entry-usage">
-          <div class="usage-stats">
-            <span class="stat-pill stat-total">${isDeckChecklist ? 'Total Owned' : 'Total'}: <b>${totalOwned}</b></span>
-            <span class="stat-pill ${totalInDecks > 0 ? 'stat-indecks' : 'stat-idle'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}: <b>${totalInDecks}</b></span>
-            ${item.isMissing ? `<span class="stat-pill stat-missing">&#9888; Missing</span>` : ''}
-          </div>
           <div class="usage-decks-list">
             ${decksSummaryHtml}
           </div>
@@ -449,7 +443,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     .col-name { min-width: 160px; }
     .col-set { width: 80px; font-family: monospace; font-size: 9px; color: #475569; }
     .col-type { width: 130px; color: #64748b; font-size: 9.5px; }
-    .col-price { width: 55px; font-family: monospace; font-size: 9.5px; color: #047857; font-weight: 600; }
     .col-total { width: 50px; font-family: monospace; font-size: 9.5px; }
     .col-indecks { width: 58px; font-family: monospace; font-size: 9.5px; }
     .col-decks { min-width: 160px; font-size: 9.5px; }
@@ -549,18 +542,18 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       font-weight: 700;
     }
 
-    /* Cards Grid Flow (Multi-Column Layout) */
+    /* Cards Grid Flow (Left-to-Right Row Layout) */
     .cards-container {
       width: 100%;
     }
     .checklist-grid {
       width: 100%;
+      display: grid;
     }
 
     .card-entry {
       break-inside: avoid;
       page-break-inside: avoid;
-      -webkit-column-break-inside: avoid;
       border: 1px solid #e2e8f0;
       border-radius: 4px;
       background: #ffffff;
@@ -580,7 +573,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
     .entry-header {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
       gap: 6px;
     }
@@ -589,6 +582,8 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       align-items: center;
       flex-wrap: wrap;
       gap: 4px;
+      flex: 1;
+      min-width: 0;
     }
     .entry-num {
       color: #64748b;
@@ -606,13 +601,10 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     }
     .entry-right {
       flex-shrink: 0;
-      text-align: right;
-    }
-    .entry-price {
-      font-family: monospace;
-      font-weight: 700;
-      color: #047857;
-      font-size: 9.5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-left: auto;
     }
 
     .entry-sub {
@@ -639,12 +631,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       padding-left: 17px;
       margin-top: 1px;
     }
-    .usage-stats {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
     .stat-pill {
       display: inline-flex;
       align-items: center;
@@ -655,6 +641,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       border: 1px solid #cbd5e1;
       background: #f8fafc;
       color: #334155;
+      white-space: nowrap;
     }
     .stat-pill b {
       color: #0f172a;
@@ -679,32 +666,24 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       color: #475569;
     }
 
-    /* Dynamic Multi-Column Variations */
+    /* Dynamic Left-to-Right Row Layouts */
     /* 1 Column Cards Layout */
     body[data-columns="1"] .checklist-grid {
-      column-count: 1;
+      grid-template-columns: 1fr;
+      gap: 5px;
     }
     body[data-columns="1"] .card-entry {
-      padding: 6px 8px;
-      margin-bottom: 5px;
+      padding: 5px 8px;
       font-size: 11px;
     }
-    body[data-columns="1"] .entry-usage {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
 
-    /* 2 Columns Layout (Saves ~50% Paper) */
+    /* 2 Columns Layout (Left to Right - Saves ~50% Paper) */
     body[data-columns="2"] .checklist-grid {
-      column-count: 2;
-      column-gap: 12px;
-      column-rule: 1px dashed #cbd5e1;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px 10px;
     }
     body[data-columns="2"] .card-entry {
       padding: 3.5px 5.5px;
-      margin-bottom: 4px;
       font-size: 9.5px;
       line-height: 1.25;
     }
@@ -712,15 +691,13 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       font-size: 9.5px;
     }
 
-    /* 3 Columns Layout (Saves ~65% Paper - Ultra Compact) */
+    /* 3 Columns Layout (Left to Right - Saves ~65% Paper - Ultra Compact) */
     body[data-columns="3"] .checklist-grid {
-      column-count: 3;
-      column-gap: 8px;
-      column-rule: 1px dashed #cbd5e1;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 3.5px 8px;
     }
     body[data-columns="3"] .card-entry {
       padding: 2.5px 4px;
-      margin-bottom: 3.5px;
       font-size: 8.5px;
       line-height: 1.2;
     }
@@ -733,19 +710,51 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     }
     body[data-columns="3"] .stat-pill {
       font-size: 7.5px;
-      padding: 0 3px;
+      padding: 0 2.5px;
     }
     body[data-columns="3"] .usage-decks-list {
       font-size: 8px;
     }
 
+    /* 4 Columns Layout (Left to Right - Saves ~75% Paper - Maximum Compact) */
+    body[data-columns="4"] .checklist-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px 6px;
+    }
+    body[data-columns="4"] .card-entry {
+      padding: 2px 3.5px;
+      font-size: 7.5px;
+      line-height: 1.15;
+    }
+    body[data-columns="4"] .entry-name {
+      font-size: 8px;
+    }
+    body[data-columns="4"] .entry-sub {
+      font-size: 7px;
+      gap: 3px;
+      padding-left: 14px;
+    }
+    body[data-columns="4"] .stat-pill {
+      font-size: 6.5px;
+      padding: 0 2px;
+    }
+    body[data-columns="4"] .usage-decks-list {
+      font-size: 7px;
+      line-height: 1.15;
+    }
+    body[data-columns="4"] .entry-usage {
+      padding-left: 14px;
+    }
+
     /* View Switcher Visibility */
     body[data-columns="2"] .table-container,
-    body[data-columns="3"] .table-container {
+    body[data-columns="3"] .table-container,
+    body[data-columns="4"] .table-container {
       display: none !important;
     }
     body[data-columns="2"] .cards-container,
-    body[data-columns="3"] .cards-container {
+    body[data-columns="3"] .cards-container,
+    body[data-columns="4"] .cards-container {
       display: block !important;
     }
 
@@ -796,7 +805,6 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       .card-entry {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
-        -webkit-column-break-inside: avoid !important;
         border-color: #cbd5e1 !important;
         box-shadow: none !important;
       }
@@ -817,18 +825,25 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
         color: #64748b !important;
       }
 
+      .checklist-grid {
+        display: grid !important;
+      }
+
       body[data-columns="1"] .checklist-grid {
-        column-count: 1 !important;
+        grid-template-columns: 1fr !important;
+        gap: 4px !important;
       }
       body[data-columns="2"] .checklist-grid {
-        column-count: 2 !important;
-        column-gap: 10px !important;
-        column-rule: 1px dashed #cbd5e1 !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 3.5px 8px !important;
       }
       body[data-columns="3"] .checklist-grid {
-        column-count: 3 !important;
-        column-gap: 6px !important;
-        column-rule: 1px dashed #cbd5e1 !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 3px 6px !important;
+      }
+      body[data-columns="4"] .checklist-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 2.5px 5px !important;
       }
     }
   </style>
@@ -839,7 +854,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       <span><b>MTG Physical Checklist</b></span>
       <span class="bar-pill">${items.length} cards (${totalQuantity} copies)</span>
       <span class="paper-badge" id="paper-savings-badge">
-        ${columns === 3 ? '&#127793; Saves ~65% Paper (3 Columns)' : columns === 2 ? '&#127793; Saves ~50% Paper (2 Columns)' : 'Full Width (1 Column)'}
+        ${columns === 4 ? '&#127793; Saves ~75% Paper (4 Columns - Maximum Savings)' : columns === 3 ? '&#127793; Saves ~65% Paper (3 Columns - Left to Right)' : columns === 2 ? '&#127793; Saves ~50% Paper (2 Columns - Left to Right)' : 'Full Width (1 Column)'}
       </span>
     </div>
 
@@ -847,8 +862,9 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       <span class="switcher-label">Print Columns:</span>
       <div class="btn-group-toggle">
         <button id="btn-col-1" class="toggle-btn ${columns === 1 ? 'active' : ''}" onclick="applyLayout(1)" title="1 Column (Standard Full Width)">1 Col</button>
-        <button id="btn-col-2" class="toggle-btn ${columns === 2 ? 'active' : ''}" onclick="applyLayout(2)" title="2 Columns - Saves ~50% Paper">2 Cols (Save ~50%)</button>
-        <button id="btn-col-3" class="toggle-btn ${columns === 3 ? 'active' : ''}" onclick="applyLayout(3)" title="3 Columns - Saves ~65% Paper">3 Cols (Ultra Compact)</button>
+        <button id="btn-col-2" class="toggle-btn ${columns === 2 ? 'active' : ''}" onclick="applyLayout(2)" title="2 Columns - Saves ~50% Paper (Left to Right)">2 Cols (Save ~50%)</button>
+        <button id="btn-col-3" class="toggle-btn ${columns === 3 ? 'active' : ''}" onclick="applyLayout(3)" title="3 Columns - Saves ~65% Paper (Left to Right)">3 Cols (Ultra Compact)</button>
+        <button id="btn-col-4" class="toggle-btn ${columns === 4 ? 'active' : ''}" onclick="applyLayout(4)" title="4 Columns - Saves ~75% Paper (Left to Right - Maximum Savings)">4 Cols (Save ~75%)</button>
       </div>
       <div id="view-mode-container" class="view-mode-group" style="${columns === 1 ? 'display: inline-flex;' : 'display: none;'}">
         <span class="switcher-label" style="margin-left: 6px;">1-Col View:</span>
@@ -895,19 +911,18 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
             <th class="col-name">Card Name</th>
             <th class="col-set">Set / #</th>
             <th class="col-type">Type</th>
-            <th class="col-price text-right">Price</th>
             <th class="col-total text-center" title="${isDeckChecklist ? 'Total copies owned in collection' : 'Total copies owned in binder'}">${isDeckChecklist ? 'Total Owned' : 'Total'}</th>
             <th class="col-indecks text-center" title="${isDeckChecklist ? 'Copies currently in other decks' : 'Copies currently in decks'}">${isDeckChecklist ? 'Other Decks' : 'In Decks'}</th>
             <th class="col-decks">${isDeckChecklist ? 'Other Decks with Copies / Status' : 'Decks with Copies / Status'}</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="10" class="text-center" style="padding: 24px; color: #64748b;">No cards to display.</td></tr>'}
+          ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="9" class="text-center" style="padding: 24px; color: #64748b;">No cards to display.</td></tr>'}
         </tbody>
       </table>
     </div>
 
-    <!-- Multi-Column Cards Container (1, 2, or 3 Columns) -->
+    <!-- Multi-Column Cards Container (1, 2, 3, or 4 Columns, Left to Right) -->
     <div class="cards-container">
       <div class="checklist-grid">
         ${cardsHtml.length > 0 ? cardsHtml : '<div style="padding: 24px; text-align: center; color: #64748b;">No cards to display.</div>'}
@@ -916,7 +931,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
     <div class="footer">
       <span>MTG Deck Builder & Collection Tracker &bull; Physical Audit Sheet</span>
-      <span id="footer-layout-info">${columns} Column${columns > 1 ? 's' : ''} Layout</span>
+      <span id="footer-layout-info">${columns} Column${columns > 1 ? 's' : ''} Layout (Left to Right)</span>
     </div>
   </div>
 
@@ -930,6 +945,8 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
       document.getElementById('btn-col-1').className = 'toggle-btn ' + (cols === 1 ? 'active' : '');
       document.getElementById('btn-col-2').className = 'toggle-btn ' + (cols === 2 ? 'active' : '');
       document.getElementById('btn-col-3').className = 'toggle-btn ' + (cols === 3 ? 'active' : '');
+      var btn4 = document.getElementById('btn-col-4');
+      if (btn4) btn4.className = 'toggle-btn ' + (cols === 4 ? 'active' : '');
 
       var viewContainer = document.getElementById('view-mode-container');
       if (viewContainer) {
@@ -938,10 +955,12 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
       var badge = document.getElementById('paper-savings-badge');
       if (badge) {
-        if (cols === 3) {
-          badge.innerHTML = '&#127793; Saves ~65% Paper (3 Columns)';
+        if (cols === 4) {
+          badge.innerHTML = '&#127793; Saves ~75% Paper (4 Columns - Maximum Savings)';
+        } else if (cols === 3) {
+          badge.innerHTML = '&#127793; Saves ~65% Paper (3 Columns - Left to Right)';
         } else if (cols === 2) {
-          badge.innerHTML = '&#127793; Saves ~50% Paper (2 Columns)';
+          badge.innerHTML = '&#127793; Saves ~50% Paper (2 Columns - Left to Right)';
         } else {
           badge.innerHTML = 'Full Width (1 Column)';
         }
@@ -949,7 +968,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
 
       var footerInfo = document.getElementById('footer-layout-info');
       if (footerInfo) {
-        footerInfo.textContent = cols + ' Column' + (cols > 1 ? 's' : '') + ' Layout';
+        footerInfo.textContent = cols + ' Column' + (cols > 1 ? 's' : '') + ' Layout (Left to Right)';
       }
     }
 
