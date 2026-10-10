@@ -122,10 +122,51 @@ export const abbreviateDeckName = (name: string): string => {
   return clean;
 };
 
+/**
+ * Draw a compact, crisp vector Foil badge with a 5-pointed Star and the letter 'F'.
+ * Uses native PDF vector lines for the star to prevent character encoding issues.
+ */
+const drawFoilBadge = (doc: jsPDF, x: number, y: number, height: number, cols: number): number => {
+  const badgeW = cols === 4 ? 11.5 : cols === 3 ? 12.5 : 13.5;
+  const badgeH = height;
+
+  // Background and border
+  doc.setFillColor(250, 232, 255); // fuchsia-100
+  doc.setDrawColor(240, 171, 252); // fuchsia-300
+  doc.setLineWidth(0.4);
+  doc.roundedRect(x, y, badgeW, badgeH, 1.2, 1.2, 'FD');
+
+  // Draw 5-pointed vector Star on left of badge
+  const cx = x + (cols === 4 ? 2.8 : 3.2);
+  const cy = y + badgeH / 2;
+  const rOuter = cols === 4 ? 1.5 : 1.7;
+  const rInner = cols === 4 ? 0.6 : 0.7;
+  const points: [number, number][] = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+    const r = i % 2 === 0 ? rOuter : rInner;
+    points.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+  }
+  const deltas: [number, number][] = [];
+  for (let i = 1; i < points.length; i++) {
+    deltas.push([points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]]);
+  }
+  doc.setFillColor(162, 28, 175); // fuchsia-700
+  doc.lines(deltas, points[0][0], points[0][1], [1, 1], 'F', true);
+
+  // Draw Letter 'F' on right of badge
+  doc.setTextColor(162, 28, 175);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(cols === 4 ? 4.8 : cols === 3 ? 5.2 : 5.6);
+  doc.text('F', x + (cols === 4 ? 6.2 : 6.8), y + badgeH - 1.8);
+
+  return badgeW;
+};
+
 export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
   const {
     title,
-    subtitle = 'MTG Physical Card Verification & Gathering Checklist',
+    subtitle = 'MTG Physical Card Verification and Gathering Checklist',
     binderName,
     deckName,
     deckFormat,
@@ -337,13 +378,8 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
         doc.text(missStr, missBadgeX + missBadgeW / 2, badgeY + deckBadgeH - 1.8, { align: 'center' });
       }
 
-      // Foil Badge calculation
-      let foilBadgeW = 0;
-      if (item.isFoil) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2);
-        foilBadgeW = doc.getTextWidth('✦FOIL') + 3.5;
-      }
+      // Foil Badge calculation (Star + 'F')
+      const foilBadgeW = item.isFoil ? (cols === 4 ? 11.5 : cols === 3 ? 12.5 : 13.5) : 0;
 
       // Card Name (bold)
       const nameStartX = qtyBadgeX + qtyBadgeW + 2.5;
@@ -357,21 +393,13 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
       const truncName = doc.splitTextToSize(cardDisplayName, maxNameWidth)[0] || cardDisplayName;
       doc.text(truncName, nameStartX, itemY + (cols === 4 ? 7.6 : 8.2));
 
-      // Draw Foil Badge (fuchsia pill)
+      // Draw Foil Badge (Star + 'F' pill)
       if (item.isFoil) {
         const nameTextW = doc.getTextWidth(truncName);
         const foilX = nameStartX + nameTextW + 2;
         const foilY = itemY + 2.2;
         const foilH = cols === 4 ? 6.5 : 7.2;
-
-        doc.setFillColor(250, 232, 255); // fuchsia-100
-        doc.setDrawColor(240, 171, 252); // fuchsia-300
-        doc.setLineWidth(0.4);
-        doc.roundedRect(foilX, foilY, foilBadgeW, foilH, 1.2, 1.2, 'FD');
-        doc.setTextColor(162, 28, 175); // fuchsia-700
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(cols === 4 ? 4.4 : cols === 3 ? 4.8 : 5.2);
-        doc.text('✦FOIL', foilX + foilBadgeW / 2, foilY + foilH - 1.8, { align: 'center' });
+        drawFoilBadge(doc, foilX, foilY, foilH, cols);
       }
 
       // Decks info ONLY if copies are in other decks (NO quantities, abbreviated names, all decks listed)
@@ -424,7 +452,7 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
-    doc.text('MTG Deck Builder & Collection Tracker  •  Physical Audit Sheet', margin, pageHeight - margin + 8);
+    doc.text('MTG Deck Builder and Collection Tracker  •  Physical Audit Sheet', margin, pageHeight - margin + 8);
     doc.text(`Page ${p} of ${totalPages}`, pageWidth - margin, pageHeight - margin + 8, { align: 'right' });
   }
 
@@ -466,7 +494,7 @@ export const downloadChecklistPdf = (options: ChecklistPrintOptions): void => {
 export const generateChecklistHtml = (options: ChecklistPrintOptions): string => {
   const {
     title,
-    subtitle = 'MTG Physical Card Verification & Gathering Checklist',
+    subtitle = 'MTG Physical Card Verification and Gathering Checklist',
     binderName,
     deckName,
     deckFormat,
@@ -494,7 +522,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; FOIL</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge">&#9733; F</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -537,7 +565,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     const isChecked = Boolean(item.isChecked);
     const boxContent = isChecked ? '&#10003;' : '';
     const boxClass = isChecked ? 'check-box checked' : 'check-box';
-    const foilBadge = item.isFoil ? '<span class="foil-badge">&#10022; FOIL</span>' : '';
+    const foilBadge = item.isFoil ? '<span class="foil-badge">&#9733; F</span>' : '';
     const setInfo = item.set ? `${escapeHtml(item.set.toUpperCase())}${item.collectorNumber ? ` #${escapeHtml(item.collectorNumber)}` : ''}` : '';
     const categoryBadge = item.category && item.category !== 'main' ? `<span class="category-badge">${escapeHtml(item.category)}</span>` : '';
 
@@ -1308,7 +1336,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     </div>
 
     <div class="footer">
-      <span>MTG Deck Builder & Collection Tracker &bull; Physical Audit Sheet</span>
+      <span>MTG Deck Builder and Collection Tracker &bull; Physical Audit Sheet</span>
       <span id="footer-layout-info">${columns} Column${columns > 1 ? 's' : ''} Layout (Left to Right)</span>
     </div>
   </div>

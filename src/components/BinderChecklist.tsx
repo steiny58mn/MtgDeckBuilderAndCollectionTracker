@@ -329,7 +329,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
 
     printChecklist({
       title,
-      subtitle: 'MTG Physical Card Gathering & Verification Checklist',
+      subtitle: 'MTG Physical Card Gathering and Verification Checklist',
       binderName: activeBinderName,
       // Omit deckName for pure binder checklist
       // Omit deckFormat for pure binder checklist

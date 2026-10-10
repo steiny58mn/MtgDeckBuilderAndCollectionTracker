@@ -630,7 +630,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
     printChecklist({
       title: `Deck Checklist: ${activeDeck.name}`,
-      subtitle: `${activeDeck.format ? activeDeck.format.toUpperCase() : 'COMMANDER'} DECK • PHYSICAL AUDIT & GATHERING CHECKLIST`,
+      subtitle: `${activeDeck.format ? activeDeck.format.toUpperCase() : 'COMMANDER'} DECK • PHYSICAL AUDIT AND GATHERING CHECKLIST`,
       binderName: activeBinderName,
       deckName: activeDeck.name,
       deckFormat: activeDeck.format,
@@ -2389,7 +2389,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   type="button"
                   onClick={() => setShowBinderChecklistModal(true)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-xs font-semibold shadow-xs transition-all cursor-pointer"
-                  title="Open Binder Physical Checklist & Cross-Reference to verify cards against physical collection and see which cards are in decks"
+                  title="Open Binder Physical Checklist and Cross-Reference to verify cards against physical collection and see which cards are in decks"
                 >
                   <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span className="hidden md:inline">Checklist</span>
