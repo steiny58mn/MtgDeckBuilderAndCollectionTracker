@@ -125,6 +125,7 @@ export default function App() {
       setActiveTab(initialTab);
     }
 
+    let initialDeckHandled = !initialDeckId;
     const unsubDecks = DeckService.subscribeDecks((updatedDecks) => {
       console.log(`[App] 📥 Received updated decks (${updatedDecks.length} deck(s)):`, updatedDecks.map(d => ({
         id: d.id,
@@ -135,9 +136,10 @@ export default function App() {
       setDecks(updatedDecks);
       setActiveDeck(prev => {
         if (prev) {
-          return updatedDecks.find(d => d.id === prev.id) || prev;
+          return updatedDecks.find(d => d.id === prev.id) || null;
         }
-        if (initialDeckId) {
+        if (!initialDeckHandled && initialDeckId) {
+          initialDeckHandled = true;
           const match = updatedDecks.find(d => d.id === initialDeckId);
           if (match) {
             setActiveTab('decks');
@@ -153,6 +155,7 @@ export default function App() {
       setCollectionCards(updatedCol);
     });
 
+    let initialBinderHandled = !initialBinderId;
     const unsubBinders = DeckService.subscribeBinders((updatedBinders) => {
       console.log(`[App] 📥 Received updated binders (${updatedBinders.length} binder(s)):`, updatedBinders.map(b => ({
         id: b.id,
@@ -162,9 +165,10 @@ export default function App() {
       setBinders(updatedBinders);
       setActiveBinder(prev => {
         if (prev) {
-          return updatedBinders.find(b => b.id === prev.id) || prev;
+          return updatedBinders.find(b => b.id === prev.id) || null;
         }
-        if (initialBinderId) {
+        if (!initialBinderHandled && initialBinderId) {
+          initialBinderHandled = true;
           const match = updatedBinders.find(b => b.id === initialBinderId);
           if (match) {
             setActiveTab('collection');
@@ -998,9 +1002,15 @@ export default function App() {
 
   const handleDeleteBinder = async (binderId: string) => {
     await DeckService.deleteBinder(binderId);
-    if (activeBinder?.id === binderId) {
-      setActiveBinder(null);
-    }
+    setActiveBinder((current) => (current?.id === binderId ? null : current));
+    setActiveTab('collection');
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('binder') === binderId) {
+        url.searchParams.delete('binder');
+        window.history.replaceState({ deckId: null, binderId: null, tab: 'collection' }, '', url.toString());
+      }
+    } catch {}
     showToast('Binder deleted');
   };
 

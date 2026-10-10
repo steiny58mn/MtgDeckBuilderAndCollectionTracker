@@ -3984,7 +3984,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       cmcKeys.forEach((key) => {
         const pileCards = cmcMap.get(key) || [];
         if (pileCards.length > 0) {
-          pileCards.sort((a, b) => a.name.localeCompare(b.name));
+          pileCards.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true }) || (a.name || '').localeCompare(b.name || ''));
           piles.push({
             id: `cmc-${key}`,
             title: `${key} MV`,
@@ -4025,7 +4025,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       colorOrder.forEach((o) => {
         const pileCards = colorMap.get(o.key) || [];
         if (pileCards.length > 0) {
-          pileCards.sort((a, b) => a.name.localeCompare(b.name));
+          pileCards.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true }) || (a.name || '').localeCompare(b.name || ''));
           piles.push({
             id: `color-${o.key}`,
             title: o.title,

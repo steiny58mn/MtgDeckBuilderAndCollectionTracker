@@ -539,9 +539,12 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       if (sortBy === 'color') {
         const diffRank = metaA.colorRank - metaB.colorRank;
         if (diffRank !== 0) return diffRank;
-        const diffCmc = metaA.cmc - metaB.cmc;
-        if (diffCmc !== 0) return diffCmc;
-        return metaA.nameLower < metaB.nameLower ? -1 : metaA.nameLower > metaB.nameLower ? 1 : 0;
+        const nameDiff = metaA.nameLower.localeCompare(metaB.nameLower, undefined, { sensitivity: 'base', numeric: true }) ||
+          (a.name || '').localeCompare(b.name || '');
+        if (nameDiff !== 0) return nameDiff;
+        const collA = a.collectorNumber || a.collector_number || '';
+        const collB = b.collectorNumber || b.collector_number || '';
+        return collA.localeCompare(collB, undefined, { numeric: true });
       }
       return 0;
     });
@@ -772,6 +775,26 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
+            )}
+            {activeBinder && onDeleteBinder && (
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmState({
+                    isOpen: true,
+                    title: 'Delete Binder',
+                    message: `Are you sure you want to delete the binder "${activeBinder.name}"? Cards within the binder will remain in your collection.`,
+                    onConfirm: async () => {
+                      await onDeleteBinder(activeBinder.id);
+                      if (onBackToBinders) onBackToBinders();
+                    }
+                  });
+                }}
+                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors inline-flex items-center justify-center cursor-pointer ml-0.5"
+                title={`Delete binder "${activeBinder.name}"`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             )}
             <span className="text-xs text-slate-500 shrink-0">
               {selectedBinderFilter !== 'all'

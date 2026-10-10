@@ -906,7 +906,8 @@ export function compareCardsByColor(
   const rankA = getCardColorCategoryRank(a);
   const rankB = getCardColorCategoryRank(b);
   if (rankA !== rankB) return rankA - rankB;
-  const nameDiff = (a.name || '').localeCompare(b.name || '');
+  const nameDiff = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true }) ||
+    (a.name || '').localeCompare(b.name || '');
   if (nameDiff !== 0) return nameDiff;
   const collA = a.collectorNumber || a.collector_number || (a as any).CollectorNumber || '';
   const collB = b.collectorNumber || b.collector_number || (b as any).CollectorNumber || '';
