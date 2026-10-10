@@ -166,7 +166,7 @@ const drawFoilBadge = (doc: jsPDF, x: number, y: number, height: number, cols: n
 export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
   const {
     title,
-    subtitle = 'MTG Physical Card Verification and Gathering Checklist',
+    subtitle = 'MTG Physical Card Verification & Gathering Checklist',
     binderName,
     deckName,
     deckFormat,
@@ -452,7 +452,7 @@ export const generateChecklistPdf = (options: ChecklistPrintOptions): jsPDF => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
-    doc.text('MTG Deck Builder and Collection Tracker  •  Physical Audit Sheet', margin, pageHeight - margin + 8);
+    doc.text('MTG Deck Builder & Collection Tracker  •  Physical Audit Sheet', margin, pageHeight - margin + 8);
     doc.text(`Page ${p} of ${totalPages}`, pageWidth - margin, pageHeight - margin + 8, { align: 'right' });
   }
 
@@ -494,7 +494,7 @@ export const downloadChecklistPdf = (options: ChecklistPrintOptions): void => {
 export const generateChecklistHtml = (options: ChecklistPrintOptions): string => {
   const {
     title,
-    subtitle = 'MTG Physical Card Verification and Gathering Checklist',
+    subtitle = 'MTG Physical Card Verification & Gathering Checklist',
     binderName,
     deckName,
     deckFormat,
@@ -1336,7 +1336,7 @@ export const generateChecklistHtml = (options: ChecklistPrintOptions): string =>
     </div>
 
     <div class="footer">
-      <span>MTG Deck Builder and Collection Tracker &bull; Physical Audit Sheet</span>
+      <span>MTG Deck Builder & Collection Tracker &bull; Physical Audit Sheet</span>
       <span id="footer-layout-info">${columns} Column${columns > 1 ? 's' : ''} Layout (Left to Right)</span>
     </div>
   </div>
