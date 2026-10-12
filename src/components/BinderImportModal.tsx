@@ -214,9 +214,6 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
       setStatusMessage('Saving binder...');
       await DeckService.saveBinder(updatedBinder);
 
-      // Background price & card detail refresh
-      DeckService.refreshCollectionPrices(enrichedCollectionCards).catch(() => {});
-
       onImportComplete(updatedBinder);
       onClose();
     } catch (err: any) {

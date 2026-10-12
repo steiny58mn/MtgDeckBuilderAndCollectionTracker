@@ -1727,20 +1727,37 @@ export async function saveRemoteBinder(binder: Binder): Promise<boolean> {
     const typeLine = c.type_line || (c as any).typeLine || (c as any).TypeLine || '';
     const manaCost = c.mana_cost || (c as any).manaCost || (c as any).ManaCost || '';
     const setName = c.setName || c.set_name || (c as any).SetName || '';
-    const collectorNumber = c.collectorNumber || c.collector_number || (c as any).CollectorNumber || '';
-    const colorIdentity = c.color_identity || (c as any).colorIdentity || (c as any).ColorIdentity || [];
+    const collectorNumber = String(c.collectorNumber || c.collector_number || (c as any).CollectorNumber || '');
+    const colorIdentity = (Array.isArray(c.color_identity) && c.color_identity.length > 0)
+      ? c.color_identity
+      : (Array.isArray(c.colorIdentity) && c.colorIdentity.length > 0)
+        ? c.colorIdentity
+        : [];
+    const colors = Array.isArray(c.colors) ? c.colors : [];
+
+    // Lean DTO matching backend BinderCardDto (omits massive oracle_text and redundant casing)
     return {
-      ...c,
-      type_line: typeLine,
-      typeLine,
-      mana_cost: manaCost,
-      manaCost,
-      set_name: setName,
+      id: c.id,
+      cardId: c.id,
+      binderId: binder.id,
+      scryfallId: c.scryfallId || '',
+      name: c.name,
+      set: (c.set || '').toLowerCase(),
       setName,
-      collector_number: collectorNumber,
       collectorNumber,
-      color_identity: colorIdentity,
+      quantity: c.quantity || 1,
+      isFoil: Boolean(c.isFoil),
+      condition: c.condition || 'NM',
+      cmc: c.cmc || 0,
+      manaCost,
+      typeLine,
+      colors,
       colorIdentity,
+      rarity: c.rarity || 'common',
+      currentPriceUsd: c.currentPriceUsd,
+      acquiredPrice: c.acquiredPrice,
+      addedAt: c.addedAt || Date.now(),
+      notes: c.notes || undefined,
     };
   });
 
