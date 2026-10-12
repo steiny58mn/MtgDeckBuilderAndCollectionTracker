@@ -4588,11 +4588,52 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     );
   }
 
+  // Helper to extract high quality art-crop thumbnail URL for list view
+  function getCardArtThumbnailUrl(card: DeckCard): string {
+    const imgUris = (card as any).image_uris || (card as any).card_faces?.[0]?.image_uris;
+    if (imgUris?.art_crop) return imgUris.art_crop;
+
+    const rawUrl = card.imageUrl || (card as any).image_url;
+    if (rawUrl && typeof rawUrl === 'string' && rawUrl.trim() !== '') {
+      if (rawUrl.includes('/normal/')) {
+        return rawUrl.replace('/normal/', '/art_crop/');
+      }
+      if (rawUrl.includes('/large/')) {
+        return rawUrl.replace('/large/', '/art_crop/');
+      }
+      if (rawUrl.includes('/small/')) {
+        return rawUrl.replace('/small/', '/art_crop/');
+      }
+      if (rawUrl.includes('version=normal') || rawUrl.includes('version=large') || rawUrl.includes('version=small')) {
+        return rawUrl.replace(/version=(normal|large|small)/, 'version=art_crop');
+      }
+      if (rawUrl.includes('format=image') && !rawUrl.includes('version=')) {
+        return `${rawUrl}&version=art_crop`;
+      }
+      if (rawUrl.includes('/art_crop/')) {
+        return rawUrl;
+      }
+    }
+
+    const scryId = card.scryfallId || (card as any).id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (scryId && uuidRegex.test(scryId)) {
+      return `https://api.scryfall.com/cards/${scryId}?format=image&version=art_crop`;
+    }
+
+    if (card.name) {
+      const cleanName = card.name.split(' // ')[0].trim();
+      return `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cleanName)}&format=image&version=art_crop`;
+    }
+
+    return 'https://cards.scryfall.io/back.jpg';
+  }
+
   // Helper row renderer
   function renderCardRow(card: DeckCard) {
     const unitPrice = getCardUnitPrice(card);
     const lineTotal = ((Number(unitPrice) || 0) * card.quantity).toFixed(2);
-    const thumbUrl = (card.imageUrl ? card.imageUrl.replace('version=small', 'version=normal') : undefined) || (card.scryfallId ? `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal` : undefined);
+    const artThumbUrl = getCardArtThumbnailUrl(card);
 
     const isThisCommander = card.category === 'commander';
     const canAddAsCommander =
@@ -4610,7 +4651,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       >
         {/* Top Row: Card Details */}
         <div className="flex items-center gap-3">
-          {/* Thumbnail */}
+          {/* Card Art Thumbnail */}
           <div
             onClick={() => {
               if (wasChordTriggeredRecently()) return;
@@ -4630,7 +4671,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             onMouseEnter={(e) =>
               onImageMouseEnter(e, {
                 imageUrl: getCardLargeImageUrl(card),
-                fallbackUrl: thumbUrl,
+                fallbackUrl: artThumbUrl,
                 name: card.name,
                 backImageUrl: card.backImageUrl,
                 scryfallId: card.scryfallId,
@@ -4638,17 +4679,27 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             }
             onMouseMove={onImageMouseMove}
             onMouseLeave={onImageMouseLeave}
-            className="w-12 h-16 rounded bg-slate-950 overflow-hidden shrink-0 border border-slate-800 cursor-pointer hover:border-fuchsia-400 transition-colors shadow-sm"
+            className="w-14 h-11 sm:w-16 sm:h-12 aspect-[4/3] rounded-lg bg-slate-950 overflow-hidden shrink-0 border border-slate-800 cursor-pointer hover:border-violet-400 transition-colors shadow-sm relative group/thumb"
+            title="Click to inspect card | Hover for full card preview"
           >
-            {thumbUrl ? (
+            {artThumbUrl ? (
               <img
-                src={thumbUrl}
+                src={artThumbUrl}
                 alt={card.name}
-                className="w-full h-full object-cover"
+                loading="lazy"
+                className="w-full h-full object-cover transition-transform duration-200 group-hover/thumb:scale-105"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
-                  if (card.scryfallId && !e.currentTarget.src.includes('format=image')) {
-                    e.currentTarget.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=normal`;
+                  const target = e.currentTarget;
+                  if (card.scryfallId && !target.src.includes(`cards/${card.scryfallId}`)) {
+                    target.src = `https://api.scryfall.com/cards/${card.scryfallId}?format=image&version=art_crop`;
+                  } else if (card.name && !target.src.includes('/cards/named')) {
+                    const clean = card.name.split(' // ')[0].trim();
+                    target.src = `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(clean)}&format=image&version=art_crop`;
+                  } else if (card.imageUrl && target.src !== card.imageUrl) {
+                    target.src = card.imageUrl;
+                  } else if (!target.src.includes('back.jpg')) {
+                    target.src = 'https://cards.scryfall.io/back.jpg';
                   }
                 }}
               />

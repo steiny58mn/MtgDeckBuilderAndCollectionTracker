@@ -44,9 +44,9 @@ import {
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames, getCanonicalCardName } from '../utils/cardNameUtils';
 import { DeckService } from '../services/deckService';
-import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError, getCardFromLocalCache } from '../services/api';
+import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError, getCardFromLocalCache, cardByIdCache, localCardCache } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
-import { getCardColorCategoryRank, getCardEffectiveColors, getCardFrontTypeLine } from '../utils/deckUtils';
+import { getCardColorCategoryRank, getCardEffectiveColors, getCardFrontTypeLine, cardCanBeFoil, cardCanBeNonfoil } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
 import { BinderChecklist } from './BinderChecklist';
@@ -71,6 +71,16 @@ export function getCardMarketPrice(card: CollectionCard): { price: number; isMed
 
 export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
   const effectiveColors = getCardEffectiveColors(card as any);
+  const cardId = card.scryfallId || card.id;
+  const cached = (cardId ? (cardByIdCache.get(cardId.toLowerCase()) || localCardCache.get(cardId.toLowerCase())) : null) ||
+    getCardFromLocalCache(card.name);
+
+  const finishes = card.finishes || cached?.finishes;
+  const foil = card.foil !== undefined ? card.foil : cached?.foil;
+  const nonfoil = card.nonfoil !== undefined ? card.nonfoil : cached?.nonfoil;
+  const frame_effects = card.frame_effects || cached?.frame_effects;
+  const promo_types = card.promo_types || cached?.promo_types;
+
   return {
     id: card.scryfallId,
     name: card.name,
@@ -84,8 +94,8 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
     rarity: card.rarity,
     colors: effectiveColors,
     color_identity: (Array.isArray(card.color_identity) && card.color_identity.length > 0) ? card.color_identity : effectiveColors,
-    legalities: {},
-    prices: { usd: card.currentPriceUsd?.toString() },
+    legalities: cached?.legalities || {},
+    prices: cached?.prices || { usd: card.currentPriceUsd?.toString() },
     image_uris: {
       small: card.imageUrl,
       normal: card.imageUrl,
@@ -96,6 +106,11 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
     scryfallId: card.scryfallId,
     set_name: card.setName,
     isFoil: card.isFoil,
+    foil,
+    nonfoil,
+    finishes,
+    frame_effects,
+    promo_types,
     collectionCardId: card.id,
     quantity: card.quantity,
     binderId: card.binderId,
@@ -252,6 +267,12 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
 
   const handleFoilClick = (card: CollectionCard) => {
     const targetFoil = !card.isFoil;
+    if (targetFoil && !cardCanBeFoil(card as any)) {
+      return;
+    }
+    if (!targetFoil && !cardCanBeNonfoil(card as any)) {
+      return;
+    }
     if (card.quantity > 1) {
       setFoilModalData({
         card,
@@ -1503,31 +1524,49 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                         </div>
                                       );
                                     })()}
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleFoilClick(card);
-                                      }}
-                                      title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
-                                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
-                                        card.isFoil
-                                          ? "bg-fuchsia-950/90 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs"
-                                          : "bg-slate-800/80 hover:bg-slate-750 border-slate-700 hover:border-slate-600 text-slate-400 hover:text-slate-200"
-                                      }`}
-                                    >
-                                      {card.isFoil ? (
-                                        <>
-                                          <Sparkles className="w-2.5 h-2.5 text-amber-300" />
-                                          <span>Foil</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                                          <span>Non-foil</span>
-                                        </>
-                                      )}
-                                    </button>
+                                    {(() => {
+                                      const canFoil = cardCanBeFoil(card as any);
+                                      const canNonfoil = cardCanBeNonfoil(card as any);
+                                      const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+                                      const btnTitle = !canFoil
+                                        ? "This version is not available in foil"
+                                        : !canNonfoil
+                                          ? "This version is only available in foil/etched"
+                                          : card.isFoil
+                                            ? "Click to change to Non-foil"
+                                            : "Click to change to Foil";
+
+                                      return (
+                                        <button
+                                          type="button"
+                                          disabled={isLocked}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!isLocked) handleFoilClick(card);
+                                          }}
+                                          title={btnTitle}
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all border ${
+                                            isLocked
+                                              ? "opacity-60 cursor-not-allowed " + (card.isFoil ? "bg-fuchsia-950/90 border-amber-600/70 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                                              : card.isFoil
+                                                ? "bg-fuchsia-950/90 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                                                : "bg-slate-800/80 hover:bg-slate-750 border-slate-700 hover:border-slate-600 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                                          }`}
+                                        >
+                                          {card.isFoil ? (
+                                            <>
+                                              <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                              <span>Foil</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                              <span>Non-foil</span>
+                                            </>
+                                          )}
+                                        </button>
+                                      );
+                                    })()}
                                   </div>
                                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                                     {(() => {
@@ -1536,7 +1575,17 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                       const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
                                       return versionText ? (
                                         <>
-                                          <span className="uppercase font-mono italic text-[10px] text-slate-400">{versionText}</span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onSelectCard(cardToScryfallCard(card));
+                                            }}
+                                            className="uppercase font-mono italic text-[10px] text-slate-400 hover:text-violet-300 hover:underline cursor-pointer transition-colors"
+                                            title="Click to change edition or view all printings"
+                                          >
+                                            {versionText}
+                                          </button>
                                           <span>·</span>
                                         </>
                                       ) : null;
@@ -1670,31 +1719,45 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           }}
                         />
 
-                        {card.isFoil ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleFoilClick(card);
-                            }}
-                            title="Click to change to Non-foil"
-                            className="absolute top-1.5 right-1.5 bg-fuchsia-950/90 hover:bg-fuchsia-900 border border-amber-600/80 hover:border-amber-400 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 hover:text-white flex items-center gap-0.5 shadow-md transition-all cursor-pointer active:scale-95 z-10"
-                          >
-                            <Sparkles className="w-2.5 h-2.5 text-amber-300" /> Foil
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleFoilClick(card);
-                            }}
-                            title="Click to change to Foil"
-                            className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-900/90 hover:bg-violet-950/90 border border-slate-700 hover:border-violet-500/80 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-300 hover:text-violet-200 flex items-center gap-1 shadow-md transition-all cursor-pointer active:scale-95 z-10"
-                          >
-                            <Sparkles className="w-2.5 h-2.5 text-violet-400" /> + Foil
-                          </button>
-                        )}
+                        {(() => {
+                          const canFoil = cardCanBeFoil(card as any);
+                          const canNonfoil = cardCanBeNonfoil(card as any);
+                          const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+
+                          if (card.isFoil) {
+                            return (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isLocked) handleFoilClick(card);
+                                }}
+                                title={!canNonfoil ? "This version is only available in foil/etched" : "Click to change to Non-foil"}
+                                className={`absolute top-1.5 right-1.5 bg-fuchsia-950/90 border border-amber-600/80 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-300 flex items-center gap-0.5 shadow-md transition-all z-10 ${
+                                  isLocked ? "opacity-75 cursor-default" : "hover:bg-fuchsia-900 hover:border-amber-400 hover:text-white cursor-pointer active:scale-95"
+                                }`}
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-amber-300" /> Foil
+                              </button>
+                            );
+                          } else if (canFoil) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFoilClick(card);
+                                }}
+                                title="Click to change to Foil"
+                                className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-900/90 hover:bg-violet-950/90 border border-slate-700 hover:border-violet-500/80 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-300 hover:text-violet-200 flex items-center gap-1 shadow-md transition-all cursor-pointer active:scale-95 z-10"
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-violet-400" /> + Foil
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
 
                         <div className="absolute bottom-1.5 left-1.5 bg-slate-950/90 backdrop-blur-xs border border-slate-800 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400 flex items-center gap-1">
                           <span>${(Number(lineTotal) || 0).toFixed(2)}</span>
@@ -1726,6 +1789,24 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                     {names.subtitle}
                                   </div>
                                 )}
+                                {(() => {
+                                  const setCode = (card.set || (card as any).set_code || (card as any).setCode || '').toUpperCase();
+                                  const collNum = card.collectorNumber || card.collector_number || (card as any).CollectorNumber || '';
+                                  const versionText = setCode ? (collNum ? `${setCode} #${collNum}` : setCode) : (collNum ? `#${collNum}` : '');
+                                  return versionText ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectCard(cardToScryfallCard(card));
+                                      }}
+                                      className="uppercase font-mono italic text-[10px] text-slate-400 hover:text-violet-300 hover:underline cursor-pointer block text-left mt-0.5"
+                                      title="Click to change edition or view all printings"
+                                    >
+                                      {versionText}
+                                    </button>
+                                  ) : null;
+                                })()}
                               </div>
                             );
                           })()}
@@ -1765,31 +1846,49 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           </div>
 
                           <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleFoilClick(card);
-                              }}
-                              title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
-                                card.isFoil
-                                  ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs"
-                                  : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200"
-                              }`}
-                            >
-                              {card.isFoil ? (
-                                <>
-                                  <Sparkles className="w-2.5 h-2.5 text-amber-300" />
-                                  <span>Foil</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                                  <span>Reg</span>
-                                </>
-                              )}
-                            </button>
+                            {(() => {
+                              const canFoil = cardCanBeFoil(card as any);
+                              const canNonfoil = cardCanBeNonfoil(card as any);
+                              const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+                              const btnTitle = !canFoil
+                                ? "This version is not available in foil"
+                                : !canNonfoil
+                                  ? "This version is only available in foil/etched"
+                                  : card.isFoil
+                                    ? "Click to change to Non-foil"
+                                    : "Click to change to Foil";
+
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isLocked) handleFoilClick(card);
+                                  }}
+                                  title={btnTitle}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all border ${
+                                    isLocked
+                                      ? "opacity-60 cursor-not-allowed " + (card.isFoil ? "bg-fuchsia-950/80 border-amber-600/60 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                                      : card.isFoil
+                                        ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                                        : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                                  }`}
+                                >
+                                  {card.isFoil ? (
+                                    <>
+                                      <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                      <span>Foil</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                      <span>Reg</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
 
                             {activeDeck && (
                               <button
@@ -1979,31 +2078,49 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                             <span className="text-slate-500 block text-[10px] truncate max-w-[120px]">{card.setName}</span>
                           </td>
                           <td className="py-2 px-3">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleFoilClick(card);
-                              }}
-                              title={card.isFoil ? "Click to change to Non-foil" : "Click to change to Foil"}
-                              className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border active:scale-95 ${
-                                card.isFoil
-                                  ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs"
-                                  : "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200"
-                              }`}
-                            >
-                              {card.isFoil ? (
-                                <>
-                                  <Sparkles className="w-3 h-3 text-amber-300" />
-                                  <span>Foil</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                                  <span>Regular</span>
-                                </>
-                              )}
-                            </button>
+                            {(() => {
+                              const canFoil = cardCanBeFoil(card as any);
+                              const canNonfoil = cardCanBeNonfoil(card as any);
+                              const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+                              const btnTitle = !canFoil
+                                ? "This version is not available in foil"
+                                : !canNonfoil
+                                  ? "This version is only available in foil/etched"
+                                  : card.isFoil
+                                    ? "Click to change to Non-foil"
+                                    : "Click to change to Foil";
+
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isLocked) handleFoilClick(card);
+                                  }}
+                                  title={btnTitle}
+                                  className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center gap-1 transition-all border ${
+                                    isLocked
+                                      ? "opacity-60 cursor-not-allowed " + (card.isFoil ? "bg-fuchsia-950/80 border-amber-600/70 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                                      : card.isFoil
+                                        ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/70 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                                        : "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                                  }`}
+                                >
+                                  {card.isFoil ? (
+                                    <>
+                                      <Sparkles className="w-3 h-3 text-amber-300" />
+                                      <span>Foil</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                      <span>Regular</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
                           </td>
                           <td className="py-2 px-3 font-bold text-slate-100 font-mono text-xs">{card.quantity}</td>
                           <td className="py-2 px-3 text-right font-mono text-xs">

@@ -865,6 +865,11 @@ export default function App() {
         imageUrl: getCardImageUrl(card, 'normal'),
         acquiredPrice: acquiredPrice !== undefined ? acquiredPrice : priceUsd,
         currentPriceUsd: priceUsd,
+        finishes: card.finishes,
+        frame_effects: card.frame_effects,
+        promo_types: card.promo_types,
+        foil: card.foil,
+        nonfoil: card.nonfoil,
         addedAt: Date.now(),
       };
       await DeckService.saveCollectionCard(newColCard);
@@ -1055,62 +1060,185 @@ export default function App() {
 
   // Top-level tab change handler:
   // Update the printing / artwork of a card in the active deck
-  const handleUpdateCardPrinting = (targetCard: ScryfallCard, newPrinting: ScryfallCard) => {
-    if (!activeDeck) return;
+  const handleUpdateCardPrinting = async (targetCard: ScryfallCard, newPrinting: ScryfallCard) => {
     const targetScryfallId = targetCard.id || (targetCard as any).scryfallId;
     const targetDeckCardId = (targetCard as any).deckCardId;
+    const targetCollectionCardId = (targetCard as any).collectionCardId;
+    const targetBinderId = (targetCard as any).binderId || activeBinder?.id;
     const targetName = (targetCard.name || '').trim().toLowerCase();
 
     const newImageUrl = getCardImageUrl(newPrinting, 'large') || getCardImageUrl(newPrinting, 'normal');
     const newBackImageUrl = getCardBackImageUrl(newPrinting);
 
-    let updatedAny = false;
-    const updatedCards = (activeDeck.cards || []).map((c) => {
-      const isMatch = targetDeckCardId
-        ? c.id === targetDeckCardId
-        : (c.scryfallId && targetScryfallId && c.scryfallId === targetScryfallId) ||
-          (c.name.trim().toLowerCase() === targetName);
+    let updatedAnyDeck = false;
+    let updatedAnyBinder = false;
 
-      if (!isMatch) return c;
-      updatedAny = true;
-      return {
-        ...c,
-        scryfallId: newPrinting.id,
-        set: newPrinting.set,
-        set_name: newPrinting.set_name,
-        setName: newPrinting.set_name,
-        collector_number: newPrinting.collector_number,
-        collectorNumber: newPrinting.collector_number,
-        rarity: newPrinting.rarity || c.rarity,
-        imageUrl: newImageUrl || c.imageUrl,
-        backImageUrl: newBackImageUrl || c.backImageUrl,
-        priceUsd: getTcgplayerMarketPrice(newPrinting, false) || c.priceUsd,
-        priceUsdFoil: getTcgplayerMarketPrice(newPrinting, true) || c.priceUsdFoil,
-      };
-    });
+    // 1. Check if card should be updated in active deck
+    const shouldUpdateDeck = (Boolean(targetDeckCardId) || searchContext === 'deck' || activeTab === 'decks') && Boolean(activeDeck);
+    if (shouldUpdateDeck && activeDeck) {
+      const updatedCards = (activeDeck.cards || []).map((c) => {
+        const isMatch = targetDeckCardId
+          ? c.id === targetDeckCardId
+          : (c.scryfallId && targetScryfallId && c.scryfallId === targetScryfallId) ||
+            (c.name.trim().toLowerCase() === targetName);
 
-    if (updatedAny) {
-      let newCommanderArt = activeDeck.commanderArtUrl;
-      let newCommanderId = activeDeck.commanderId;
-      let newCoverCard = activeDeck.coverCardUrl;
+        if (!isMatch) return c;
+        updatedAnyDeck = true;
+        return {
+          ...c,
+          scryfallId: newPrinting.id,
+          set: newPrinting.set,
+          set_name: newPrinting.set_name,
+          setName: newPrinting.set_name,
+          collector_number: newPrinting.collector_number,
+          collectorNumber: newPrinting.collector_number,
+          rarity: newPrinting.rarity || c.rarity,
+          imageUrl: newImageUrl || c.imageUrl,
+          backImageUrl: newBackImageUrl || c.backImageUrl,
+          priceUsd: getTcgplayerMarketPrice(newPrinting, false) || c.priceUsd,
+          priceUsdFoil: getTcgplayerMarketPrice(newPrinting, true) || c.priceUsdFoil,
+        };
+      });
 
-      const cmdrCard = updatedCards.find((c) => c.category === 'commander');
-      if (cmdrCard && (cmdrCard.id === targetDeckCardId || cmdrCard.name.trim().toLowerCase() === targetName)) {
-        newCommanderArt = newImageUrl;
-        newCommanderId = newPrinting.id;
-        newCoverCard = newImageUrl;
+      if (updatedAnyDeck) {
+        let newCommanderArt = activeDeck.commanderArtUrl;
+        let newCommanderId = activeDeck.commanderId;
+        let newCoverCard = activeDeck.coverCardUrl;
+
+        const cmdrCard = updatedCards.find((c) => c.category === 'commander');
+        if (cmdrCard && (cmdrCard.id === targetDeckCardId || cmdrCard.name.trim().toLowerCase() === targetName)) {
+          newCommanderArt = newImageUrl;
+          newCommanderId = newPrinting.id;
+          newCoverCard = newImageUrl;
+        }
+
+        const updatedDeck: Deck = {
+          ...activeDeck,
+          cards: updatedCards,
+          commanderArtUrl: newCommanderArt,
+          commanderId: newCommanderId,
+          coverCardUrl: newCoverCard,
+          updatedAt: Date.now(),
+        };
+        handleUpdateDeck(updatedDeck, true);
+      }
+    }
+
+    // 2. Check if card should be updated in a collection binder
+    const shouldUpdateBinder = Boolean(targetCollectionCardId) || searchContext === 'binder' || activeTab === 'collection' || (!shouldUpdateDeck && Boolean(activeBinder));
+    if (shouldUpdateBinder) {
+      const allBinders = DeckService.getLocalBinders();
+      let targetBinder: Binder | undefined = undefined;
+
+      if (targetCollectionCardId) {
+        targetBinder = allBinders.find((b) => b.cards?.some((c) => c.id === targetCollectionCardId));
+      }
+      if (!targetBinder && targetBinderId) {
+        targetBinder = allBinders.find((b) => b.id === targetBinderId);
+      }
+      if (!targetBinder && activeBinder) {
+        targetBinder = allBinders.find((b) => b.id === activeBinder.id) || activeBinder;
+      }
+      if (!targetBinder && allBinders.length > 0) {
+        targetBinder = allBinders.find((b) =>
+          b.cards?.some(
+            (c) =>
+              (c.scryfallId && targetScryfallId && c.scryfallId === targetScryfallId) ||
+              c.name.trim().toLowerCase() === targetName
+          )
+        ) || allBinders[0];
       }
 
-      const updatedDeck: Deck = {
-        ...activeDeck,
-        cards: updatedCards,
-        commanderArtUrl: newCommanderArt,
-        commanderId: newCommanderId,
-        coverCardUrl: newCoverCard,
-        updatedAt: Date.now(),
-      };
-      handleUpdateDeck(updatedDeck, true);
-      showToast('Updated printing for "' + targetCard.name + '" to ' + (newPrinting.set || '').toUpperCase() + ' #' + newPrinting.collector_number, 'success');
+      if (targetBinder && Array.isArray(targetBinder.cards)) {
+        const cardIndex = targetBinder.cards.findIndex((c) => {
+          if (targetCollectionCardId) return c.id === targetCollectionCardId;
+          if (c.scryfallId && targetScryfallId && c.scryfallId === targetScryfallId) return true;
+          return c.name.trim().toLowerCase() === targetName;
+        });
+
+        if (cardIndex >= 0) {
+          const oldCard = targetBinder.cards[cardIndex];
+          const newPriceUsd = getTcgplayerMarketPrice(newPrinting, oldCard.isFoil);
+
+          // Check if target binder already has another card matching newPrinting with the same foil and condition
+          const existingSamePrintIdx = targetBinder.cards.findIndex(
+            (c, idx) =>
+              idx !== cardIndex &&
+              c.scryfallId === newPrinting.id &&
+              c.isFoil === oldCard.isFoil &&
+              c.condition === oldCard.condition
+          );
+
+          let updatedCards = [...targetBinder.cards];
+
+          if (existingSamePrintIdx >= 0) {
+            // Merge into existing stack
+            updatedCards[existingSamePrintIdx] = {
+              ...updatedCards[existingSamePrintIdx],
+              quantity: updatedCards[existingSamePrintIdx].quantity + oldCard.quantity,
+            };
+            // Remove the old entry
+            updatedCards.splice(cardIndex, 1);
+          } else {
+            // Update the card entry with the new edition info
+            updatedCards[cardIndex] = {
+              ...oldCard,
+              scryfallId: newPrinting.id,
+              name: newPrinting.name,
+              printed_name: newPrinting.printed_name,
+              printedName: newPrinting.printed_name,
+              flavor_name: newPrinting.flavor_name,
+              flavorName: newPrinting.flavor_name,
+              set: newPrinting.set,
+              setName: newPrinting.set_name || newPrinting.set.toUpperCase(),
+              set_name: newPrinting.set_name || newPrinting.set.toUpperCase(),
+              collectorNumber: newPrinting.collector_number,
+              collector_number: newPrinting.collector_number,
+              rarity: newPrinting.rarity || oldCard.rarity,
+              imageUrl: newImageUrl || oldCard.imageUrl,
+              currentPriceUsd: newPriceUsd || oldCard.currentPriceUsd,
+              type_line: newPrinting.type_line || oldCard.type_line,
+              typeLine: newPrinting.type_line || oldCard.typeLine,
+              mana_cost: newPrinting.mana_cost || oldCard.mana_cost,
+              manaCost: newPrinting.mana_cost || oldCard.manaCost,
+              cmc: newPrinting.cmc ?? oldCard.cmc,
+              finishes: newPrinting.finishes,
+              frame_effects: newPrinting.frame_effects,
+              promo_types: newPrinting.promo_types,
+              foil: newPrinting.foil,
+              nonfoil: newPrinting.nonfoil,
+              colors: (newPrinting.colors && newPrinting.colors.length > 0) ? newPrinting.colors : oldCard.colors,
+              color_identity: (newPrinting.color_identity && newPrinting.color_identity.length > 0) ? newPrinting.color_identity : oldCard.color_identity,
+            };
+          }
+
+          const updatedBinder: Binder = {
+            ...targetBinder,
+            cards: updatedCards,
+            cardCount: updatedCards.reduce((acc, c) => acc + c.quantity, 0),
+            updatedAt: Date.now(),
+          };
+
+          await DeckService.saveBinder(updatedBinder);
+          if (activeBinder && activeBinder.id === updatedBinder.id) {
+            setActiveBinder(updatedBinder);
+          }
+          setCollectionCards(DeckService.getLocalCollection());
+          updatedAnyBinder = true;
+        }
+      }
+    }
+
+    if (updatedAnyDeck || updatedAnyBinder) {
+      const destination = (updatedAnyDeck && updatedAnyBinder)
+        ? 'deck and binder'
+        : updatedAnyDeck
+          ? 'deck'
+          : 'binder';
+      showToast(
+        `Updated printing in ${destination} for "${targetCard.name}" to ${(newPrinting.set || '').toUpperCase()} #${newPrinting.collector_number}`,
+        'success'
+      );
     }
   };
 
@@ -1191,7 +1319,10 @@ export default function App() {
                 }
                 setActiveTab('search');
               }}
-              onSelectCard={(c) => setInspectedCard(c)}
+              onSelectCard={(c) => {
+                setSearchContext('deck');
+                setInspectedCard(c);
+              }}
               onCreateNewDeck={handleCreateNewDeckFromExisting}
               onImportAsNewDeck={handleImportAsNewDeck}
               onBatchImportCompleted={handleBatchImportCompleted}

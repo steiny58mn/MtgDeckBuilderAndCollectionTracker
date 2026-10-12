@@ -18,7 +18,7 @@ import { ScryfallCard, Deck, DeckCard, CollectionCard, CardCondition, DeckCatego
 import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError, getCardFromLocalCache, localCardCache } from '../services/api';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
-import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander, getCardEffectiveColors } from '../utils/deckUtils';
+import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander, getCardEffectiveColors, cardCanBeFoil, cardCanBeNonfoil } from '../utils/deckUtils';
 
 interface CardDetailModalProps {
   card: ScryfallCard | null;
@@ -72,6 +72,20 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [localBinderId, setLocalBinderId] = useState<string>(() => activeBinder?.id || (binders && binders[0]?.id) || "binder-main");
 
   useEffect(() => {
+    if (displayCard) {
+      const canFoil = cardCanBeFoil(displayCard);
+      const canNonfoil = cardCanBeNonfoil(displayCard);
+      if (!canNonfoil && canFoil) {
+        setColIsFoil(true);
+        setDeckIsFoil(true);
+      } else if (!canFoil) {
+        setColIsFoil(false);
+        setDeckIsFoil(false);
+      }
+    }
+  }, [displayCard?.id, displayCard?.set, displayCard?.collector_number]);
+
+  useEffect(() => {
     return DeckService.subscribeCollection((cards) => setCollectionCards(cards));
   }, []);
 
@@ -85,12 +99,24 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
   const binderCounts = React.useMemo(() => {
     if (!displayCard) return { total: 0, regular: 0, foil: 0 };
-    const cleanName = (displayCard.name || "").split(" // ")[0].toLowerCase().trim();
-    const matching = collectionCards.filter(
-      (c) =>
-        ((c.binderId || "binder-main") === currentEffectiveBinderId) &&
-        (c.scryfallId === displayCard.id || (c.name || "").split(" // ")[0].toLowerCase().trim() === cleanName)
-    );
+    const curScryId = displayCard.id || (displayCard as any).scryfallId;
+    const curSet = (displayCard.set || "").toLowerCase().trim();
+    const curColNum = (displayCard.collector_number || (displayCard as any).collectorNumber || "").toString().trim().toLowerCase();
+
+    const matching = collectionCards.filter((c) => {
+      if ((c.binderId || "binder-main") !== currentEffectiveBinderId) return false;
+      if (curScryId && c.scryfallId && c.scryfallId === curScryId) return true;
+      const cSet = (c.set || "").toLowerCase().trim();
+      const cNum = (c.collectorNumber || c.collector_number || "").toString().trim().toLowerCase();
+      if (curSet && curColNum && cSet && cNum) {
+        return cSet === curSet && cNum === curColNum;
+      }
+      if (!curScryId && (!curSet || !curColNum)) {
+        const cleanName = (displayCard.name || "").split(" // ")[0].toLowerCase().trim();
+        return (c.name || "").split(" // ")[0].toLowerCase().trim() === cleanName;
+      }
+      return false;
+    });
     const regular = matching.filter((c) => !c.isFoil).reduce((s, c) => s + c.quantity, 0);
     const foil = matching.filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0);
     return { total: regular + foil, regular, foil };
@@ -135,11 +161,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     } as any;
     setDisplayCard(updatedWithIds);
     setShowBackFace(false);
-    if (onUpdateCardPrinting && displayCard) {
-      onUpdateCardPrinting(displayCard, newPrinting);
+    if (onUpdateCardPrinting) {
+      onUpdateCardPrinting(
+        {
+          ...(displayCard || card || {}),
+          collectionCardId: preserveCollectionCardId,
+          binderId: preserveBinderId,
+          deckCardId: preserveDeckCardId,
+        } as ScryfallCard,
+        newPrinting
+      );
     }
     const label = `${(newPrinting.set || '').toUpperCase()} #${newPrinting.collector_number || ''}`;
-    setPrintingToast(`Selected art: ${newPrinting.set_name || label}`);
+    setPrintingToast(`Selected version: ${newPrinting.set_name || label}`);
     setTimeout(() => setPrintingToast(null), 3000);
   };
 
@@ -177,7 +211,13 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
       setIsLoadingFull(true);
 
       const applyFullData = (fullData: ScryfallCard) => {
-        setDisplayCard((prev) => (prev ? { ...prev, ...fullData } : fullData));
+        setDisplayCard((prev) => (prev ? {
+          ...prev,
+          ...fullData,
+          collectionCardId: (prev as any).collectionCardId || (card as any).collectionCardId,
+          binderId: (prev as any).binderId || (card as any).binderId,
+          deckCardId: (prev as any).deckCardId || (card as any).deckCardId,
+        } : fullData));
 
         const exact = cleanName.toLowerCase().trim();
         const front = exact.split(' // ')[0].trim();
@@ -485,7 +525,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               <div className="space-y-3">
                 <div className="p-2.5 rounded-xl bg-violet-950/30 border border-violet-800/40 text-xs text-violet-300 flex items-center justify-between gap-2 flex-wrap">
                   <span>
-                    Select any printing or artwork below to update the card art.
+                    Select any printing or artwork below to update this card in your binder or deck.
                   </span>
                   {Boolean((displayCard as any)?.collectionCardId || (card as any)?.collectionCardId) && onDeleteCollectionCard && (
                     <button
@@ -578,7 +618,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                                   }}
                                   className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-300 hover:text-white bg-violet-900/60 hover:bg-violet-600 px-2.5 py-1 rounded-lg border border-violet-500/40 transition-colors cursor-pointer"
                                 >
-                                  <span>Use This Art</span>
+                                  <span>{searchContext === 'binder' ? 'Use This Edition' : 'Use This Art'}</span>
                                 </button>
                               )}
                             </div>
@@ -682,18 +722,45 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       </div>
 
                       {/* Foil Toggle */}
-                      <button
-                        type="button"
-                        onClick={() => setDeckIsFoil(!deckIsFoil)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
-                          deckIsFoil
-                            ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <Sparkles className="w-3 h-3 text-fuchsia-400" />
-                        <span>Foil</span>
-                      </button>
+                      {(() => {
+                        const canFoil = cardCanBeFoil(displayCard);
+                        const canNonfoil = cardCanBeNonfoil(displayCard);
+                        const isEtched = Boolean(
+                          displayCard?.finishes?.includes('etched') ||
+                          displayCard?.frame_effects?.includes('etched') ||
+                          displayCard?.promo_types?.includes('etched')
+                        );
+                        const foilLabel = isEtched && !displayCard?.foil && !displayCard?.finishes?.includes('foil') ? 'Etched' : 'Foil';
+
+                        return (
+                          <button
+                            type="button"
+                            disabled={!canFoil || (!canNonfoil && deckIsFoil)}
+                            onClick={() => {
+                              if (canFoil && canNonfoil) {
+                                setDeckIsFoil(!deckIsFoil);
+                              }
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                              !canFoil
+                                ? 'bg-slate-900 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                                : deckIsFoil
+                                  ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300' + (!canNonfoil ? ' cursor-default' : ' cursor-pointer')
+                                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer'
+                            }`}
+                            title={
+                              !canFoil
+                                ? 'This version is not available in foil'
+                                : !canNonfoil
+                                  ? `This version is only available in ${foilLabel.toLowerCase()}`
+                                  : 'Toggle Foil finish'
+                            }
+                          >
+                            <Sparkles className={`w-3 h-3 ${deckIsFoil ? 'text-fuchsia-400' : 'text-slate-500'}`} />
+                            <span>{foilLabel}</span>
+                          </button>
+                        );
+                      })()}
 
                       {/* Add Buttons */}
                       <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
@@ -895,18 +962,45 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setColIsFoil(!colIsFoil)}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
-                      colIsFoil
-                        ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3 text-fuchsia-400" />
-                    <span>Foil</span>
-                  </button>
+                  {(() => {
+                    const canFoil = cardCanBeFoil(displayCard);
+                    const canNonfoil = cardCanBeNonfoil(displayCard);
+                    const isEtched = Boolean(
+                      displayCard?.finishes?.includes('etched') ||
+                      displayCard?.frame_effects?.includes('etched') ||
+                      displayCard?.promo_types?.includes('etched')
+                    );
+                    const foilLabel = isEtched && !displayCard?.foil && !displayCard?.finishes?.includes('foil') ? 'Etched' : 'Foil';
+
+                    return (
+                      <button
+                        type="button"
+                        disabled={!canFoil || (!canNonfoil && colIsFoil)}
+                        onClick={() => {
+                          if (canFoil && canNonfoil) {
+                            setColIsFoil(!colIsFoil);
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                          !canFoil
+                            ? 'bg-slate-900 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                            : colIsFoil
+                              ? 'bg-fuchsia-950 border-fuchsia-500/80 text-fuchsia-300' + (!canNonfoil ? ' cursor-default' : ' cursor-pointer')
+                              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer'
+                        }`}
+                        title={
+                          !canFoil
+                            ? 'This version is not available in foil'
+                            : !canNonfoil
+                              ? `This version is only available in ${foilLabel.toLowerCase()}`
+                              : 'Toggle Foil finish'
+                        }
+                      >
+                        <Sparkles className={`w-3 h-3 ${colIsFoil ? 'text-fuchsia-400' : 'text-slate-500'}`} />
+                        <span>{foilLabel}</span>
+                      </button>
+                    );
+                  })()}
 
                   <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
                     <span className="text-xs text-slate-400 mr-1">Qty:</span>

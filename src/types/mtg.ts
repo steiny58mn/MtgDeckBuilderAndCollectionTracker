@@ -87,6 +87,8 @@ export interface ScryfallCard {
   foil?: boolean;
   nonfoil?: boolean;
   finishes?: string[];
+  frame_effects?: string[];
+  promo_types?: string[];
   scryfall_uri?: string;
   purchase_uris?: {
     tcgplayer?: string;
@@ -114,6 +116,11 @@ export interface DeckCard {
   category: DeckCategory;
   quantity: number;
   isFoil?: boolean;
+  foil?: boolean;
+  nonfoil?: boolean;
+  finishes?: string[];
+  frame_effects?: string[];
+  promo_types?: string[];
   mana_cost?: string;
   manaCost?: string;
   cmc: number;
@@ -177,6 +184,11 @@ export interface CollectionCard {
   collector_number?: string;
   quantity: number;
   isFoil: boolean;
+  foil?: boolean;
+  nonfoil?: boolean;
+  finishes?: string[];
+  frame_effects?: string[];
+  promo_types?: string[];
   condition: CardCondition;
   cmc: number;
   mana_cost?: string;

@@ -47,7 +47,9 @@ import {
   sortWUBRG,
   sortCardsByName,
   filterAvailablePartners,
-  canHaveAnyNumberOfCopies
+  canHaveAnyNumberOfCopies,
+  cardCanBeFoil,
+  cardCanBeNonfoil
 } from '../utils/deckUtils';
 
 interface CardSearchViewProps {
@@ -545,8 +547,16 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
       ...prev,
       [key]: { isFoil, count: newTotal },
     }));
+    const isEtched = Boolean(
+      card.finishes?.includes('etched') ||
+      card.frame_effects?.includes('etched') ||
+      card.promo_types?.includes('etched')
+    );
+    const finishLabel = isFoil
+      ? (isEtched && !card.foil && !card.finishes?.includes('foil') ? 'Etched' : 'Foil')
+      : 'Regular';
     setBinderAddToast({
-      message: "Added 1x \"" + card.name + "\" (" + (isFoil ? "Foil" : "Regular") + ") to " + targetName + "! (Now " + newTotal + " in binder)",
+      message: "Added 1x \"" + card.name + "\" (" + finishLabel + ") to " + targetName + "! (Now " + newTotal + " in binder)",
     });
     setTimeout(() => {
       setRecentBinderAdded((prev) => {
@@ -2691,34 +2701,46 @@ const displayedCards = useMemo(() => {
                       )
                     ) : (
                       // Binder context: ONLY Binder button shown!
-                      onQuickAddToCollection && (
+                      onQuickAddToCollection && (() => {
+                        const canFoil = cardCanBeFoil(card);
+                        const canNonfoil = cardCanBeNonfoil(card);
+                        const isEtched = Boolean(
+                          card.finishes?.includes('etched') ||
+                          card.frame_effects?.includes('etched') ||
+                          card.promo_types?.includes('etched')
+                        );
+                        const foilLabel = isEtched && !card.foil && !card.finishes?.includes('foil') ? 'Etched' : 'Foil';
+
+                        return (
                         <div className="flex flex-col gap-1.5">
                           <div className="flex gap-1.5">
-                            <button
-                              onClick={() => handleQuickAddBinderWithFeedback(card, false)}
-                              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-sm ${
-                                recentBinderAdded[card.id + '-reg']
-                                  ? 'bg-emerald-600 text-white ring-1 ring-emerald-400'
-                                  : 'bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-200'
-                              }`}
-                              title={`Add 1 regular copy to ${activeBinder?.name || 'binder'}${binderCopies.normal > 0 ? ` (Currently: ${binderCopies.normal})` : ''}`}
-                            >
-                              {recentBinderAdded[card.id + '-reg'] ? (
-                                <>
-                                  <Check className="w-3 h-3 text-white" />
-                                  <span>Added!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Bookmark className="w-3 h-3 text-emerald-400 group-hover:text-emerald-100" />
-                                  <span>Add</span>
-                                  {binderCopies.normal > 0 && (
-                                    <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({binderCopies.normal})</span>
-                                  )}
-                                </>
-                              )}
-                            </button>
-                            {(card.finishes?.includes('foil') || card.foil) && (
+                            {canNonfoil && (
+                              <button
+                                onClick={() => handleQuickAddBinderWithFeedback(card, false)}
+                                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-sm ${
+                                  recentBinderAdded[card.id + '-reg']
+                                    ? 'bg-emerald-600 text-white ring-1 ring-emerald-400'
+                                    : 'bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-200'
+                                }`}
+                                title={`Add 1 regular copy to ${activeBinder?.name || 'binder'}${binderCopies.normal > 0 ? ` (Currently: ${binderCopies.normal})` : ''}`}
+                              >
+                                {recentBinderAdded[card.id + '-reg'] ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-white" />
+                                    <span>Added!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Bookmark className="w-3 h-3 text-emerald-400 group-hover:text-emerald-100" />
+                                    <span>Add</span>
+                                    {binderCopies.normal > 0 && (
+                                      <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({binderCopies.normal})</span>
+                                    )}
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            {canFoil && (
                               <button
                                 onClick={() => handleQuickAddBinderWithFeedback(card, true)}
                                 className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-sm ${
@@ -2726,7 +2748,7 @@ const displayedCards = useMemo(() => {
                                     ? 'bg-fuchsia-600 text-white ring-1 ring-fuchsia-400'
                                     : 'bg-slate-800 hover:bg-fuchsia-600 hover:text-white text-slate-200'
                                 }`}
-                                title={`Add 1 foil copy to ${activeBinder?.name || 'binder'}${binderCopies.foil > 0 ? ` (Currently: ${binderCopies.foil})` : ''}`}
+                                title={`Add 1 ${foilLabel.toLowerCase()} copy to ${activeBinder?.name || 'binder'}${binderCopies.foil > 0 ? ` (Currently: ${binderCopies.foil})` : ''}`}
                               >
                                 {recentBinderAdded[card.id + '-foil'] ? (
                                   <>
@@ -2736,7 +2758,7 @@ const displayedCards = useMemo(() => {
                                 ) : (
                                   <>
                                     <Sparkles className="w-3 h-3 text-fuchsia-400 group-hover:text-fuchsia-100" />
-                                    <span>Foil</span>
+                                    <span>{foilLabel}</span>
                                     {binderCopies.foil > 0 && (
                                       <span className="text-[10px] font-mono font-semibold opacity-85 shrink-0">({binderCopies.foil})</span>
                                     )}
@@ -2752,7 +2774,8 @@ const displayedCards = useMemo(() => {
                             </div>
                           )}
                         </div>
-                      )
+                        );
+                      })()
                     )}
                   </div>
                 </div>

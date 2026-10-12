@@ -71,7 +71,7 @@ import {
   compareDecks,
   CompareDecks
 } from '../services/deckService';
-import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard } from '../types/mtg';
+import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard, ScryfallCard } from '../types/mtg';
 import {
   getAllCardMatchNames,
   KNOWN_CONSPIRACY_NAMES,
@@ -287,8 +287,9 @@ export function buildCrossDeckUsageMap(decks: Deck[]): Map<string, CrossDeckUsag
 
 export interface CollectionLookup {
   idMap: Map<string, number>;
+  setNumberMap?: Map<string, number>;
   nameMap: Map<string, number>;
-  getQuantity: (card: { name?: string; scryfallId?: string } | string | null | undefined) => number;
+  getQuantity: (card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined) => number;
 }
 
 /**
@@ -306,6 +307,7 @@ export function buildCollectionLookup(
     : (collectionCards || []).filter((c) => (c.binderId || 'binder-main') === targetBinderId);
 
   const idMap = new Map<string, number>();
+  const setNumberMap = new Map<string, number>();
   const nameMap = new Map<string, number>();
 
   filteredCards.forEach((c) => {
@@ -313,6 +315,12 @@ export function buildCollectionLookup(
     const qty = c.quantity || 1;
     if (c.scryfallId) {
       idMap.set(c.scryfallId, (idMap.get(c.scryfallId) || 0) + qty);
+    }
+    const setCode = (c.set || '').toLowerCase().trim();
+    const colNum = (c.collectorNumber || c.collector_number || '').toString().trim().toLowerCase();
+    if (setCode && colNum) {
+      const setKey = `${setCode}:${colNum}`;
+      setNumberMap.set(setKey, (setNumberMap.get(setKey) || 0) + qty);
     }
     const rawName = (c.name || '').toLowerCase().trim();
     if (!rawName) return;
@@ -342,11 +350,24 @@ export function buildCollectionLookup(
     });
   });
 
-  const getQuantity = (card: { name?: string; scryfallId?: string } | string | null | undefined): number => {
+  const getQuantity = (card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined): number => {
     if (!card) return 0;
     if (typeof card === 'object') {
-      if (card.scryfallId && idMap.has(card.scryfallId)) {
-        return idMap.get(card.scryfallId)!;
+      const cardId = card.scryfallId || (card as any).id;
+      if (cardId && idMap.has(cardId)) {
+        return idMap.get(cardId)!;
+      }
+      const setCode = (card.set || '').toLowerCase().trim();
+      const colNum = (card.collectorNumber || card.collector_number || '').toString().trim().toLowerCase();
+      if (setCode && colNum) {
+        const setKey = `${setCode}:${colNum}`;
+        if (setNumberMap.has(setKey)) {
+          return setNumberMap.get(setKey)!;
+        }
+      }
+      // If card specifies a version (scryfallId OR set+collectorNumber), only count that specific version!
+      if (cardId || (setCode && colNum)) {
+        return 0;
       }
     }
     const cardName = typeof card === 'string' ? card : (card.name || '');
@@ -375,7 +396,7 @@ export function buildCollectionLookup(
     return 0;
   };
 
-  return { idMap, nameMap, getQuantity };
+  return { idMap, setNumberMap, nameMap, getQuantity };
 }
 
 export interface DeckCompletionResult {
@@ -2816,4 +2837,129 @@ export function matchesScryfallTextSearch(
     if (!cleanWord) return true;
     return fullText.includes(cleanWord);
   });
+}
+
+/**
+ * Checks whether a card version has a foil finish available.
+ * Traditional foil, etched foil (e.g. Commander Legends / Modern Horizons), and boosterfun etched finishes count as foil.
+ */
+export function cardCanBeFoil(
+  card: {
+    foil?: boolean;
+    nonfoil?: boolean;
+    finishes?: string[];
+    frame_effects?: string[];
+    promo_types?: string[];
+    prices?: { usd_foil?: string | null; usd_etched?: string | null };
+    priceUsdFoil?: number;
+    isFoil?: boolean;
+    scryfallId?: string;
+    id?: string;
+    name?: string;
+  } | null | undefined
+): boolean {
+  if (!card) return false;
+
+  // 1. Explicit foil flag
+  if (card.foil === true) return true;
+
+  // 2. Scryfall finishes array containing 'foil' or 'etched'
+  if (Array.isArray(card.finishes)) {
+    if (card.finishes.includes('foil') || card.finishes.includes('etched')) {
+      return true;
+    }
+  }
+
+  // 3. Frame effects or promo types containing 'etched'
+  if (Array.isArray(card.frame_effects) && card.frame_effects.includes('etched')) {
+    return true;
+  }
+  if (Array.isArray(card.promo_types) && card.promo_types.includes('etched')) {
+    return true;
+  }
+
+  // 4. Prices object has usd_foil or usd_etched market price
+  if (card.prices?.usd_foil || card.prices?.usd_etched) {
+    return true;
+  }
+  if (typeof card.priceUsdFoil === 'number' && card.priceUsdFoil > 0) {
+    return true;
+  }
+
+  // 5. If card explicitly has finishes array and it does not contain foil or etched
+  if (Array.isArray(card.finishes) && card.finishes.length > 0) {
+    return false;
+  }
+
+  // 6. Explicit nonfoil=true and foil=false with no foil prices
+  if (card.nonfoil === true && card.foil === false) {
+    return false;
+  }
+
+  // 7. Check cache lookup fallback if available and card is missing finish details
+  if (cardCacheLookup) {
+    const cardId = (card as any).scryfallId || (card as any).id;
+    const cardName = card.name;
+    const cached = (cardId ? cardCacheLookup(cardId) : null) || (cardName ? cardCacheLookup(cardName) : null);
+    if (cached && cached !== card) {
+      if (cached.foil === true) return true;
+      if (Array.isArray(cached.finishes)) {
+        return cached.finishes.includes('foil') || cached.finishes.includes('etched');
+      }
+      if (Array.isArray(cached.frame_effects) && cached.frame_effects.includes('etched')) return true;
+      if (Array.isArray(cached.promo_types) && cached.promo_types.includes('etched')) return true;
+      if (cached.prices?.usd_foil || cached.prices?.usd_etched) return true;
+      if (cached.nonfoil === true && cached.foil === false) return false;
+    }
+  }
+
+  // 8. If card already has isFoil flag
+  if (card.isFoil) return true;
+
+  return false;
+}
+
+/**
+ * Checks whether a card version has a nonfoil/regular finish available.
+ * Cards that are strictly foil-only or etched-only return false.
+ */
+export function cardCanBeNonfoil(
+  card: {
+    nonfoil?: boolean;
+    foil?: boolean;
+    finishes?: string[];
+    prices?: { usd?: string | null };
+    scryfallId?: string;
+    id?: string;
+    name?: string;
+  } | null | undefined
+): boolean {
+  if (!card) return true;
+
+  // 1. Explicit nonfoil=false from Scryfall
+  if (card.nonfoil === false) return false;
+
+  // 2. Finishes array provided: must contain 'nonfoil'
+  if (Array.isArray(card.finishes) && card.finishes.length > 0) {
+    return card.finishes.includes('nonfoil');
+  }
+
+  // 3. If prices has nonfoil usd
+  if (card.prices?.usd) return true;
+
+  // 4. Check cache lookup fallback if available
+  if (cardCacheLookup) {
+    const cardId = (card as any).scryfallId || (card as any).id;
+    const cardName = card.name;
+    const cached = (cardId ? cardCacheLookup(cardId) : null) || (cardName ? cardCacheLookup(cardName) : null);
+    if (cached && cached !== card) {
+      if (cached.nonfoil === false) return false;
+      if (Array.isArray(cached.finishes) && cached.finishes.length > 0) {
+        return cached.finishes.includes('nonfoil');
+      }
+    }
+  }
+
+  // Default to true
+  return true;
 }
