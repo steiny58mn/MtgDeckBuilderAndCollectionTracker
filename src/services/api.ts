@@ -3,7 +3,7 @@ import { ScryfallCard } from '../types/mtg';
 import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConfig';
 import { GamechangerService } from './gamechangerService';
 import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName, setCardCacheLookup } from '../utils/deckUtils';
-import { filterPaperCardsOnly } from '../utils/cardUtils';
+import { filterPaperCardsOnly, isDigitalOnlyCard } from '../utils/cardUtils';
 import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName, normalizeCardQuotes, stripCardQuotes } from '../utils/cardNameUtils';
 
 export function getFrostpointBaseUrl(): string {
@@ -143,6 +143,9 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     nonfoil: Boolean(c.nonfoil),
     scryfall_uri: c.related_uris?.gatherer || c.related_uris?.edhrec,
     purchase_uris: c.purchase_uris,
+    digital: Boolean(c.digital === true || c.digital === 'true'),
+    games: Array.isArray(c.games) ? c.games : undefined,
+    set_type: c.set_type || c.setType || undefined,
   };
 }
 
@@ -239,6 +242,10 @@ if (typeof window !== 'undefined') {
         for (const c of parsed) {
           if (c && c.name) {
             const normalized = normalizeFrostpointCard(c);
+            if (isDigitalOnlyCard(normalized) || normalized.digital) {
+              if (normalized.id) cardByIdCache.set(normalized.id.toLowerCase(), normalized);
+              continue;
+            }
             const exact = normalized.name.toLowerCase().trim();
             localCardCache.set(exact, normalized);
             const front = exact.split(/\s*\/\/\s*/)[0].trim();
@@ -264,8 +271,8 @@ if (typeof window !== 'undefined') {
 function persistLocalCards() {
   if (typeof window === 'undefined') return;
   try {
-    // Keep most recent 1200 cards in localStorage
-    const sample = Array.from(new Set(localCardCache.values())).slice(0, 1200);
+    // Keep most recent 1200 paper cards in localStorage
+    const sample = Array.from(new Set(localCardCache.values())).filter((c) => !isDigitalOnlyCard(c) && !c.digital).slice(0, 1200);
     localStorage.setItem(LOCAL_CARD_CACHE_KEY, JSON.stringify(sample));
   } catch {}
 }
@@ -413,7 +420,7 @@ export async function searchCards(options: SearchOptions): Promise<SearchResult>
     if (res.ok) {
       const json = await res.json();
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-        let normalized = json.data.map(normalizeFrostpointCard);
+        let normalized = filterPaperCardsOnly(json.data.map(normalizeFrostpointCard));
         if (unique !== 'prints') {
           const seenNames = new Set<string>();
           normalized = normalized.filter((card) => {
@@ -875,6 +882,9 @@ export async function fetchBatchCardsCollection(
     if (setLower && collNum) {
       cardMap.set(`${setLower}|${collNum}`, normalized);
     }
+    if (isDigitalOnlyCard(normalized) || normalized.digital) {
+      return;
+    }
     if (setLower && exactLower) {
       cardMap.set(`${exactLower}|${setLower}`, normalized);
     }
@@ -950,8 +960,15 @@ export async function fetchBatchCardsCollection(
       const cleanFront = canonical.split(/\s*\/\/\s*/)[0].trim();
       const cleanName = cleanFront || canonical || rawName;
 
+      if (cleanId) {
+        return { id: cleanId };
+      }
+      if (cleanSet && collNum) {
+        const obj: any = { set: cleanSet, collector_number: collNum };
+        if (cleanName) obj.name = cleanName;
+        return obj;
+      }
       const itemObj: any = {};
-      if (cleanId) itemObj.id = cleanId;
       if (cleanName) itemObj.name = cleanName;
       if (cleanSet) itemObj.set = cleanSet;
       if (collNum) itemObj.collector_number = collNum;
@@ -998,22 +1015,44 @@ export async function fetchBatchCardsCollection(
     const stripQuotes = stripCardQuotes(exact).toLowerCase();
     const stripQuotesFront = stripCardQuotes(front).toLowerCase();
 
-    const isResolved = (rawId && cardMap.has(rawId)) ||
-      (setCode && collNum && cardMap.has(`${setCode}|${collNum}`)) ||
-      (setCode && exact && cardMap.has(`${exact}|${setCode}`)) ||
-      (setCode && front && cardMap.has(`${front}|${setCode}`)) ||
-      (setCode && canonicalFront && cardMap.has(`${canonicalFront}|${setCode}`)) ||
-      (setCode && stripQuotesFront && cardMap.has(`${stripQuotesFront}|${setCode}`)) ||
-      cardMap.has(exact) ||
-      cardMap.has(front) ||
-      cardMap.has(canonical) ||
-      cardMap.has(canonicalFront) ||
-      cardMap.has(stripQuotes) ||
-      cardMap.has(stripQuotesFront);
+    const isResolved = rawId
+      ? Boolean(cardMap.has(rawId) || cardByIdCache.has(rawId))
+      : Boolean(
+          (setCode && collNum && cardMap.has(`${setCode}|${collNum}`)) ||
+          (setCode && exact && cardMap.has(`${exact}|${setCode}`)) ||
+          (setCode && front && cardMap.has(`${front}|${setCode}`)) ||
+          (setCode && canonicalFront && cardMap.has(`${canonicalFront}|${setCode}`)) ||
+          (setCode && stripQuotesFront && cardMap.has(`${stripQuotesFront}|${setCode}`)) ||
+          cardMap.has(exact) ||
+          cardMap.has(front) ||
+          cardMap.has(canonical) ||
+          cardMap.has(canonicalFront) ||
+          cardMap.has(stripQuotes) ||
+          cardMap.has(stripQuotesFront)
+        );
 
     if (!isResolved) {
       unresolvedItems.push(item);
     }
+  }
+
+  // 2b. Direct backend fetch for any unresolved IDs (bypassing Scryfall CORS entirely)
+  const unresolvedWithId = unresolvedItems.filter((it) => {
+    const rawId = (it.id && uuidRegex.test(it.id)) ? it.id.toLowerCase() : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId.toLowerCase() : '';
+    return Boolean(rawId && !cardMap.has(rawId) && !cardByIdCache.has(rawId));
+  });
+
+  if (unresolvedWithId.length > 0) {
+    await Promise.all(unresolvedWithId.map(async (it) => {
+      const idToFetch = (it.id && uuidRegex.test(it.id)) ? it.id : it.scryfallId;
+      if (!idToFetch) return;
+      try {
+        const fetched = await getCardById(idToFetch);
+        if (fetched) {
+          registerCard(fetched);
+        }
+      } catch {}
+    }));
   }
 
   // 3. Fallback to Scryfall for unresolved items with strict rate-limiting (100ms) and retry resilience

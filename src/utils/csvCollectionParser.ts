@@ -17,7 +17,9 @@ export interface ParsedCsvCard {
 export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   if (!csvText || !csvText.trim()) return [];
 
-  const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // Remove potential UTF-8 BOM
+  const cleanedCsv = csvText.replace(/^\uFEFF/, '');
+  const lines = cleanedCsv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) return [];
 
   // Parse CSV line taking quotes into account
@@ -53,9 +55,18 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
     colIndexMap.set(clean, idx);
   });
 
-  // Identify column indices
+  // Identify column indices with exhaustive aliases
   const nameIdx = colIndexMap.get('oraclename') ?? colIndexMap.get('cardname') ?? colIndexMap.get('name') ?? 0;
-  const scryfallIdx = colIndexMap.get('idscryfall') ?? colIndexMap.get('scryfallid') ?? colIndexMap.get('scryfall') ?? colIndexMap.get('id') ?? -1;
+  const scryfallIdx = colIndexMap.get('idscryfall')
+    ?? colIndexMap.get('scryfallid')
+    ?? colIndexMap.get('scryfallcardid')
+    ?? colIndexMap.get('cardid')
+    ?? colIndexMap.get('scryfall')
+    ?? colIndexMap.get('scryfalluuid')
+    ?? colIndexMap.get('carduuid')
+    ?? colIndexMap.get('uuid')
+    ?? colIndexMap.get('id')
+    ?? -1;
   const setCodeIdx = colIndexMap.get('setcode') ?? colIndexMap.get('set') ?? colIndexMap.get('editioncode') ?? colIndexMap.get('edition') ?? -1;
   const setNameIdx = colIndexMap.get('setname') ?? colIndexMap.get('editionname') ?? colIndexMap.get('expansion') ?? -1;
   const collectorIdx = colIndexMap.get('collectornumber') ?? colIndexMap.get('cardnumber') ?? colIndexMap.get('number') ?? colIndexMap.get('cn') ?? -1;
@@ -73,7 +84,22 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
     if (cols.length === 0 || !cols[nameIdx]) continue;
 
     const name = cols[nameIdx];
-    const rawScryfallId = scryfallIdx >= 0 ? cols[scryfallIdx]?.trim() : undefined;
+    let rawScryfallId = scryfallIdx >= 0 ? cols[scryfallIdx]?.trim() : undefined;
+    if (rawScryfallId) {
+      rawScryfallId = rawScryfallId.replace(/^["']|["']$/g, '').trim();
+    }
+
+    // Fallback: If designated column is not a valid UUID, search all columns in this row for a valid UUID
+    if (!rawScryfallId || !uuidRegex.test(rawScryfallId)) {
+      const foundCol = cols.find((val) => {
+        const cleanVal = (val || '').replace(/^["']|["']$/g, '').trim();
+        return uuidRegex.test(cleanVal);
+      });
+      if (foundCol) {
+        rawScryfallId = foundCol.replace(/^["']|["']$/g, '').trim();
+      }
+    }
+
     const scryfallId = (rawScryfallId && uuidRegex.test(rawScryfallId)) ? rawScryfallId.toLowerCase() : undefined;
 
     const set = setCodeIdx >= 0 ? cols[setCodeIdx]?.trim().toLowerCase() : undefined;
@@ -143,12 +169,13 @@ export function convertParsedCardsToCollectionCards(
     const rarity = (item.rarity as any) || cachedById?.rarity || cachedByName?.rarity || (isBasicLandName(item.name) ? 'common' : 'common');
     const oracleText = cached?.oracle_text || '';
 
-    // NEVER overwrite or borrow an arbitrary edition's set, collector number, or scryfall ID from generic name cache!
+    // If an exact Scryfall ID was matched in cache, use its authoritative edition attributes.
+    // NEVER borrow an arbitrary edition's set, collector number, or scryfall ID from generic name cache!
     const isExactCached = Boolean(cachedById);
-    const effectiveSet = (item.set || (isExactCached ? cachedById?.set : '') || '').toLowerCase();
-    const effectiveSetName = item.setName || (isExactCached ? cachedById?.set_name : '') || (item.set ? item.set.toUpperCase() : '');
-    const effectiveCollectorNumber = item.collectorNumber || (isExactCached ? cachedById?.collector_number : '') || '';
-    const effectiveScryfallId = item.scryfallId || (isExactCached ? cachedById?.id : '') || '';
+    const effectiveSet = (isExactCached ? (cachedById?.set || '').toLowerCase() : (item.set || '').toLowerCase());
+    const effectiveSetName = (isExactCached ? (cachedById?.set_name || cachedById?.set || '') : (item.setName || (item.set ? item.set.toUpperCase() : '')));
+    const effectiveCollectorNumber = isExactCached ? String(cachedById?.collector_number || '') : (item.collectorNumber || '');
+    const effectiveScryfallId = item.scryfallId || (isExactCached ? (cachedById?.id || '') : '');
     const imageUrl = (effectiveScryfallId && uuidRegex.test(effectiveScryfallId))
       ? `https://api.scryfall.com/cards/${effectiveScryfallId}?format=image&version=large`
       : (isExactCached ? (cachedById?.image_uris?.large || cachedById?.image_uris?.normal || '') : '');
@@ -158,7 +185,7 @@ export function convertParsedCardsToCollectionCards(
       cards.push({
         id: `card-${now}-${index}-reg-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
-        scryfallId: item.scryfallId || cached?.id || '',
+        scryfallId: effectiveScryfallId,
         imageUrl,
         name: item.name,
         set: effectiveSet,
@@ -192,7 +219,7 @@ export function convertParsedCardsToCollectionCards(
       cards.push({
         id: `card-${now}-${index}-foil-${Math.random().toString(36).substr(2, 5)}`,
         binderId,
-        scryfallId: item.scryfallId || cached?.id || '',
+        scryfallId: effectiveScryfallId,
         imageUrl,
         name: item.name,
         set: effectiveSet,

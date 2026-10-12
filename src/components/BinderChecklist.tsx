@@ -794,7 +794,7 @@ export const BinderChecklist: React.FC<BinderChecklistProps> = ({
         </div>
 
         {/* Tab Filters & Sort dropdown */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 text-xs">
+        <div className="flex flex-wrap items-center gap-2 pb-1 sm:pb-0 text-xs">
           {/* Sort Selector */}
           <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 shrink-0">
             <ArrowUpDown className="w-3 h-3 text-slate-400" />

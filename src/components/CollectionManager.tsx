@@ -1122,7 +1122,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       )}
 
       {/* Category Navigation Bar */}
-      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 text-xs max-w-full">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pb-1 text-xs max-w-full">
         {/* Category Grid Navigation Option */}
         <button
           type="button"
@@ -1143,7 +1143,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
           </span>
         </button>
 
-        <span className="text-slate-700">|</span>
+        <span className="text-slate-700 hidden sm:inline select-none">|</span>
 
         {/* All Cards Tab */}
         <button

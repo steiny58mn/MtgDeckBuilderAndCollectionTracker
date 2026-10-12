@@ -63,6 +63,9 @@ export interface ScryfallCard {
   set: string;
   set_name: string;
   collector_number: string;
+  digital?: boolean;
+  games?: string[];
+  set_type?: string;
   image_uris?: {
     small?: string;
     normal?: string;

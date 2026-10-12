@@ -8,13 +8,16 @@ const DIGITAL_ONLY_SET_CODES = new Set([
   'pz1', 'pz2', 'td0', 'td2', 'anb', 'ana', 'xana', 'oana',
   'pw21', 'pw22', 'pw23', 'pw24',
   'ye22', 'ye23', 'ye24', 'ybro', 'yone', 'ywoe', 'ylci', 'ymkm', 'yotj', 'yblb', 'ydsk', 'yfdn',
-  'rmh1', 'psdg', 'hjps', 'pnat', 'phead'
+  'rmh1', 'psdg', 'hjps', 'pnat', 'phead',
+  'akr', 'klr', 'sir', 'sis', 'ea1', 'ea2', 'ea3', 'hbg', 'j21', 'prm',
+  'ha1', 'ha2', 'ha3', 'ha4', 'ha5', 'ha6', 'ha7',
+  'arena', 'mtgo', 'ydft', 'y22', 'y23', 'y24', 'y25'
 ]);
 
 /**
  * Keywords in set names that indicate digital/online-only sets.
  */
-const DIGITAL_SET_NAME_REGEX = /\b(magic online|mtgo|vintage masters|tempest remastered|masters edition|alchemy|vanguard|treasure chest|digital promo)\b/i;
+const DIGITAL_SET_NAME_REGEX = /\b(magic online|mtgo|vintage masters|tempest remastered|masters edition|alchemy|vanguard|treasure chest|digital promo|amonkhet remastered|kaladesh remastered|shadows over innistrad remastered|historic anthology|explorer anthology)\b/i;
 
 /**
  * Returns true if a Scryfall card or printing is digital-only / Magic Online / Arena exclusive.
@@ -23,7 +26,9 @@ export function isDigitalOnlyCard(card: any): boolean {
   if (!card) return false;
 
   // 1. Scryfall digital boolean flag
-  if (card.digital === true) return true;
+  if (card.digital === true || card.digital === 'true' || card.card_faces?.[0]?.digital === true) {
+    return true;
+  }
 
   // 2. Available games array check (must include 'paper' to be physical)
   if (Array.isArray(card.games) && card.games.length > 0) {
@@ -31,19 +36,19 @@ export function isDigitalOnlyCard(card: any): boolean {
   }
 
   // 3. Set type check
-  const setType = (card.set_type || '').toLowerCase();
+  const setType = (card.set_type || card.setType || '').toLowerCase();
   if (setType === 'online' || setType === 'vanguard' || setType === 'alchemy' || setType === 'treasure_chest') {
     return true;
   }
 
   // 4. Set code check
-  const setCode = (card.set || '').toLowerCase().trim();
+  const setCode = (card.set || card.set_code || card.setCode || '').toLowerCase().trim();
   if (DIGITAL_ONLY_SET_CODES.has(setCode)) {
     return true;
   }
 
   // 5. Set name check
-  const setName = (card.set_name || '').toLowerCase();
+  const setName = (card.set_name || card.setName || '').toLowerCase();
   if (DIGITAL_SET_NAME_REGEX.test(setName)) {
     return true;
   }

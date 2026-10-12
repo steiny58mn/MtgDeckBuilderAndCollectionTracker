@@ -869,6 +869,13 @@ export default function App() {
       };
       await DeckService.saveCollectionCard(newColCard);
     }
+
+    const targetBinderLabel = targetBinder?.name || "Binder";
+    const totalInBinder = (existing ? existing.quantity + quantity : quantity);
+    showToast(
+      `Added ${quantity}x "${card.name}" (${isFoil ? "Foil" : "Regular"}) to ${targetBinderLabel}! (Total in binder: ${totalInBinder})`,
+      "success"
+    );
   };
 
   const handleUpdateCardInBinder = async (

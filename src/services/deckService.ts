@@ -142,7 +142,12 @@ export async function getTursoStatus(): Promise<TursoStatusResponse | null> {
  */
 export function normalizeCard(card: any): DeckCard {
   if (!card || typeof card !== 'object') return card;
-  const cached = getCardFromLocalCache(card.name || card.scryfallId || card.id);
+  const rawId = card.scryfallId || card.ScryfallId || card.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const validUuid = (rawId && uuidRegex.test(rawId)) ? rawId.toLowerCase() : undefined;
+  const cachedById = validUuid ? cardByIdCache.get(validUuid) : null;
+  const cachedByName = getCardFromLocalCache(card.name);
+  const cached = cachedById || cachedByName;
   const isBasic = isBasicLandName(card.name);
   const rawType = card.type_line || card.typeLine || card.TypeLine || '';
   const isConspiracy = isConspiracyCardName(card.name);
@@ -155,8 +160,8 @@ export function normalizeCard(card: any): DeckCard {
     typeLine = 'Conspiracy';
   }
   const manaCost = card.mana_cost || card.manaCost || card.ManaCost || cached?.mana_cost || cached?.card_faces?.[0]?.mana_cost || '';
-  const setName = card.set_name || card.setName || card.SetName || cached?.set_name || '';
-  const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || cached?.collector_number || '';
+  const setName = card.set_name || card.setName || card.SetName || (cachedById ? cachedById.set_name : '') || '';
+  const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || (cachedById ? cachedById.collector_number : '') || '';
   const rawColorIdentity = card.color_identity || card.colorIdentity || card.ColorIdentity || cached?.color_identity || [];
   const rawColors = card.colors || card.Colors || cached?.colors || cached?.card_faces?.[0]?.colors || [];
   const effectiveCols = getCardEffectiveColors(card.name ? { ...card, type_line: typeLine, mana_cost: manaCost, colors: rawColors, color_identity: rawColorIdentity } : card);
@@ -170,13 +175,13 @@ export function normalizeCard(card: any): DeckCard {
   return {
     ...card,
     id: card.id || card.Id || card.cardId || card.CardId || `c-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-    scryfallId: card.scryfallId || card.ScryfallId || cached?.id || '',
+    scryfallId: card.scryfallId || card.ScryfallId || (cachedById ? cachedById.id : '') || '',
     name: card.name || card.Name || '',
     printed_name: card.printed_name || card.printedName || card.PrintedName || undefined,
     printedName: card.printedName || card.printed_name || card.PrintedName || undefined,
     flavor_name: card.flavor_name || card.flavorName || card.FlavorName || undefined,
     flavorName: card.flavorName || card.flavor_name || card.FlavorName || undefined,
-    set: card.set || card.Set || cached?.set || '',
+    set: (card.set || card.Set || (cachedById ? cachedById.set : '') || '').toLowerCase(),
     set_name: setName,
     setName,
     collector_number: collectorNumber,
@@ -397,15 +402,17 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
         || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
         || (setCode && stripQuotesFront ? scryfallMap.get(`${stripQuotesFront}|${setCode}`) : null)
-        || scryfallMap.get(exact)
-        || scryfallMap.get(front)
-        || scryfallMap.get(canonical)
-        || scryfallMap.get(canonicalFront)
-        || scryfallMap.get(stripQuotes)
-        || scryfallMap.get(stripQuotesFront)
-        || (scryfallId ? null : getCardFromLocalCache(c.name))
-        || (scryfallId ? null : getCardFromLocalCache(canonical))
-        || (scryfallId ? null : getCardFromLocalCache(stripQuotes));
+        || (!scryfallId && !setCode ? (
+            scryfallMap.get(exact)
+            || scryfallMap.get(front)
+            || scryfallMap.get(canonical)
+            || scryfallMap.get(canonicalFront)
+            || scryfallMap.get(stripQuotes)
+            || scryfallMap.get(stripQuotesFront)
+            || getCardFromLocalCache(c.name)
+            || getCardFromLocalCache(canonical)
+            || getCardFromLocalCache(stripQuotes)
+           ) : null);
       if (matched) {
         const isConspiracy = isConspiracyCardName(c.name);
         const knownType = getKnownCardType(c.name);
@@ -562,15 +569,17 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
           || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
           || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
           || (setCode && stripQuotesFront ? scryfallMap.get(`${stripQuotesFront}|${setCode}`) : null)
-          || scryfallMap.get(exact)
-          || scryfallMap.get(front)
-          || scryfallMap.get(canonical)
-          || scryfallMap.get(canonicalFront)
-          || scryfallMap.get(stripQuotes)
-          || scryfallMap.get(stripQuotesFront)
-          || (scryfallId ? null : getCardFromLocalCache(c.name))
-          || (scryfallId ? null : getCardFromLocalCache(canonical))
-          || (scryfallId ? null : getCardFromLocalCache(stripQuotes));
+          || (!scryfallId && !setCode ? (
+              scryfallMap.get(exact)
+              || scryfallMap.get(front)
+              || scryfallMap.get(canonical)
+              || scryfallMap.get(canonicalFront)
+              || scryfallMap.get(stripQuotes)
+              || scryfallMap.get(stripQuotesFront)
+              || getCardFromLocalCache(c.name)
+              || getCardFromLocalCache(canonical)
+              || getCardFromLocalCache(stripQuotes)
+             ) : null);
         if (matched) {
           const isConspiracy = isConspiracyCardName(c.name);
           const knownType = getKnownCardType(c.name);

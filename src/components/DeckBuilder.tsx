@@ -2392,7 +2392,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
 
           {/* Bottom Row: Badges, MTGNexus URL, Notice Dropdown on Left; Condensed Iteration & Format on Right */}
           {!isEditingTitle && (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80 flex-wrap">
               {/* Left Side: Badges + MTGNexus URL + Notice Dropdown */}
               <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
                 <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-xs font-bold text-emerald-400" title="Total deck market value">

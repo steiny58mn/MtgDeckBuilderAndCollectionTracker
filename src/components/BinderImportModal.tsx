@@ -129,15 +129,20 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
 
         const canonical = getCanonicalCardName(c.name || '');
         const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+        // STRICT: If scryfallId is present, match ONLY by that ID!
+        // If setCode is present, match ONLY by set/collector_number!
+        // Only if neither is provided, fall back to generic card name matching.
         const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
           || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
           || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
-          || scryfallMap.get(exact)
-          || scryfallMap.get(front)
-          || scryfallMap.get(canonical.toLowerCase())
-          || scryfallMap.get(canonicalFront.toLowerCase())
-          || (scryfallId ? null : getCardFromLocalCache(c.name))
-          || (scryfallId ? null : getCardFromLocalCache(canonical));
+          || (!scryfallId && !setCode ? (
+              scryfallMap.get(exact)
+              || scryfallMap.get(front)
+              || scryfallMap.get(canonical.toLowerCase())
+              || scryfallMap.get(canonicalFront.toLowerCase())
+              || getCardFromLocalCache(c.name)
+              || getCardFromLocalCache(canonical)
+             ) : null);
 
         if (matched) {
           const rawType = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
@@ -167,21 +172,19 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
              matched.set.toLowerCase() === setCode && String(matched.collector_number).toLowerCase() === collNum)
           );
 
-          // If the card already has an edition attribute (set, setName, collectorNumber, scryfallId), NEVER overwrite it!
-          const set = c.set || (isExactPrintingMatch ? (matched.set || '').toLowerCase() : '');
-          const setName = c.setName || (isExactPrintingMatch ? (matched.set_name || matched.set || '') : '');
-          const collectorNumber = c.collectorNumber || (isExactPrintingMatch ? (matched.collector_number || '') : '');
-          const finalScryfallId = c.scryfallId || (isExactPrintingMatch ? (matched.id || '') : '');
+          // If exact printing match was found (via Scryfall ID or set+number), authoritative edition metadata takes precedence!
+          const set = isExactPrintingMatch ? (matched.set || c.set || '').toLowerCase() : (c.set || (matched.set || '').toLowerCase());
+          const setName = isExactPrintingMatch ? (matched.set_name || c.setName || matched.set || '') : (c.setName || matched.set_name || matched.set || '');
+          const collectorNumber = isExactPrintingMatch ? (matched.collector_number || c.collectorNumber || '') : (c.collectorNumber || matched.collector_number || '');
+          const finalScryfallId = isExactPrintingMatch ? (matched.id || c.scryfallId || '') : (c.scryfallId || matched.id || '');
 
           let imageUrl = c.imageUrl;
-          if (!imageUrl) {
-            if (isExactPrintingMatch && (matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal)) {
-              imageUrl = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal;
-            } else if (finalScryfallId) {
-              imageUrl = `https://api.scryfall.com/cards/${finalScryfallId}?format=image&version=normal`;
-            } else if (!c.set && (matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal)) {
-              imageUrl = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal;
-            }
+          if (isExactPrintingMatch && (matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal)) {
+            imageUrl = matched.image_uris?.normal || matched.image_uris?.large || matched.card_faces?.[0]?.image_uris?.normal;
+          } else if (!imageUrl && finalScryfallId) {
+            imageUrl = `https://api.scryfall.com/cards/${finalScryfallId}?format=image&version=normal`;
+          } else if (!imageUrl && (matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal)) {
+            imageUrl = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal;
           }
 
           return {
