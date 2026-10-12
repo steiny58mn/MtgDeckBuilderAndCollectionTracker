@@ -48,6 +48,28 @@ export const KNOWN_CONSPIRACY_NAMES: Set<string> = new Set([
 ]);
 
 /**
+ * Normalizes different styles of quotes (straight, curly, smart, backticks) into standard ASCII quotes.
+ */
+export function normalizeCardQuotes(name?: string): string {
+  if (!name || typeof name !== 'string') return '';
+  return name
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035`]/g, "'")
+    .trim();
+}
+
+/**
+ * Strips all quotes (straight, curly, smart, backticks, apostrophes) and collapses whitespace.
+ */
+export function stripCardQuotes(name?: string): string {
+  if (!name || typeof name !== 'string') return '';
+  return name
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036\u2018\u2019\u201A\u201B\u2032\u2035`'"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Authoritative check if a card name corresponds to an official MTG Conspiracy.
  * Tolerates quotes, brackets, set codes, split card naming, and whitespace.
  */
@@ -55,8 +77,8 @@ export function isConspiracyCardName(name?: string): boolean {
   if (!name || typeof name !== 'string') return false;
   const raw = name.toLowerCase().trim();
   const front = raw.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-  const stripQuotesRaw = raw.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
-  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  const stripQuotesRaw = stripCardQuotes(raw).toLowerCase();
+  const stripQuotesFront = stripCardQuotes(front).toLowerCase();
   return (
     KNOWN_CONSPIRACY_NAMES.has(front) ||
     KNOWN_CONSPIRACY_NAMES.has(raw) ||
@@ -70,6 +92,46 @@ export function isConspiracyCardName(name?: string): boolean {
  * where backend Scryfall/Turso databases lack or lose the top-level type line.
  */
 export const KNOWN_CARD_TYPES: Record<string, string> = {
+  // Paper MTG cards with quotes in names
+  'kongming, "sleeping dragon"': 'Legendary Creature — Human Advisor',
+  'kongming "sleeping dragon"': 'Legendary Creature — Human Advisor',
+  'kongming, sleeping dragon': 'Legendary Creature — Human Advisor',
+  'kongming sleeping dragon': 'Legendary Creature — Human Advisor',
+  'miles "tails" prower': 'Legendary Creature — Fox Artificer',
+  'miles tails prower': 'Legendary Creature — Fox Artificer',
+  'mile "tails" power': 'Legendary Creature — Fox Artificer',
+  'mile tails power': 'Legendary Creature — Fox Artificer',
+  'miles "tails" power': 'Legendary Creature — Fox Artificer',
+  'miles tails power': 'Legendary Creature — Fox Artificer',
+  'mile "tails" prower': 'Legendary Creature — Fox Artificer',
+  'mile tails prower': 'Legendary Creature — Fox Artificer',
+  '"rumors of my death . . ."': 'Enchantment',
+  'rumors of my death . . .': 'Enchantment',
+  '"rumors of my death..."': 'Enchantment',
+  'rumors of my death...': 'Enchantment',
+  'rumors of my death': 'Enchantment',
+  '"ach! hans, run!"': 'Enchantment',
+  'ach! hans, run!': 'Enchantment',
+  'ach! hans, run': 'Enchantment',
+  '"lifetime" pass holder': 'Creature — Zombie Guest',
+  'lifetime pass holder': 'Creature — Zombie Guest',
+  'meet and greet "sisay"': 'Legendary Creature — Elf Performer',
+  'meet and greet sisay': 'Legendary Creature — Elf Performer',
+  'pang tong, "young phoenix"': 'Legendary Creature — Human Advisor',
+  'pang tong "young phoenix"': 'Legendary Creature — Human Advisor',
+  'pang tong, young phoenix': 'Legendary Creature — Human Advisor',
+  'pang tong young phoenix': 'Legendary Creature — Human Advisor',
+  '"brims" barone, midway mobster': 'Legendary Creature — Human Rogue',
+  'brims barone, midway mobster': 'Legendary Creature — Human Rogue',
+  'brims barone midway mobster': 'Legendary Creature — Human Rogue',
+  'henzie "toolbox" torre': 'Legendary Creature — Devil Rogue',
+  'henzie toolbox torre': 'Legendary Creature — Devil Rogue',
+  'henzie "toolbox" torre // henzie "toolbox" torre': 'Legendary Creature — Devil Rogue',
+  'henzie toolbox torre // henzie toolbox torre': 'Legendary Creature — Devil Rogue',
+  'bounty: rissa "blades" lee // wanted!': 'Bounty',
+  'bounty: rissa blades lee // wanted!': 'Bounty',
+  'bounty: rissa "blades" lee': 'Bounty',
+  'bounty: rissa blades lee': 'Bounty',
   // Commander 2018 / Secret Lair Reversible / Promo dual-named cards
   'estrid, the masked': 'Legendary Planeswalker — Estrid',
   'tuvasa the sunlit': 'Legendary Creature — Merfolk Shaman',
@@ -142,14 +204,25 @@ export function getKnownCardType(name?: string): string | undefined {
   if (isConspiracyCardName(name)) return 'Conspiracy';
   const raw = name.toLowerCase().trim();
   const front = raw.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
-  const stripQuotesRaw = raw.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  const normQuotesFront = normalizeCardQuotes(front).toLowerCase();
+  const normQuotesRaw = normalizeCardQuotes(raw).toLowerCase();
+  const stripQuotesFront = stripCardQuotes(front).toLowerCase();
+  const stripQuotesRaw = stripCardQuotes(raw).toLowerCase();
+
+  const canonical = getCanonicalCardName(name).toLowerCase().trim();
+  const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+  const canonicalStrip = stripCardQuotes(canonical).toLowerCase();
 
   return (
     KNOWN_CARD_TYPES[front] ||
     KNOWN_CARD_TYPES[stripQuotesFront] ||
+    KNOWN_CARD_TYPES[normQuotesFront] ||
     KNOWN_CARD_TYPES[raw] ||
-    KNOWN_CARD_TYPES[stripQuotesRaw]
+    KNOWN_CARD_TYPES[stripQuotesRaw] ||
+    KNOWN_CARD_TYPES[normQuotesRaw] ||
+    KNOWN_CARD_TYPES[canonical] ||
+    KNOWN_CARD_TYPES[canonicalFront] ||
+    KNOWN_CARD_TYPES[canonicalStrip]
   );
 }
 
@@ -161,6 +234,10 @@ export const CANONICAL_CARD_NAME_ALIASES: Record<string, string> = {
   // Sonic Secret Lair / Miles Prower typo variations
   'mile "tails" power': 'Miles "Tails" Prower',
   'mile tails power': 'Miles "Tails" Prower',
+  'miles "tails" power': 'Miles "Tails" Prower',
+  'miles tails power': 'Miles "Tails" Prower',
+  'mile "tails" prower': 'Miles "Tails" Prower',
+  'mile tails prower': 'Miles "Tails" Prower',
   'miles "tails" prower': 'Miles "Tails" Prower',
   'miles tails prower': 'Miles "Tails" Prower',
   'miles \'tails\' prower': 'Miles "Tails" Prower',
@@ -182,6 +259,49 @@ export const CANONICAL_CARD_NAME_ALIASES: Record<string, string> = {
   'rumors of my death': '"Rumors of My Death . . ."',
   '\'rumors of my death...\'': '"Rumors of My Death . . ."',
   '\'rumors of my death . . .\'': '"Rumors of My Death . . ."',
+
+  // "Ach! Hans, Run!"
+  '"ach! hans, run!"': '"Ach! Hans, Run!"',
+  'ach! hans, run!': '"Ach! Hans, Run!"',
+  'ach! hans, run': '"Ach! Hans, Run!"',
+  '\'ach! hans, run!\'': '"Ach! Hans, Run!"',
+
+  // Henzie "Toolbox" Torre
+  'henzie "toolbox" torre': 'Henzie "Toolbox" Torre',
+  'henzie toolbox torre': 'Henzie "Toolbox" Torre',
+  'henzie \'toolbox\' torre': 'Henzie "Toolbox" Torre',
+  'henzie "toolbox" torre // henzie "toolbox" torre': 'Henzie "Toolbox" Torre',
+  'henzie toolbox torre // henzie toolbox torre': 'Henzie "Toolbox" Torre',
+
+  // "Brims" Barone, Midway Mobster
+  '"brims" barone, midway mobster': '"Brims" Barone, Midway Mobster',
+  'brims barone, midway mobster': '"Brims" Barone, Midway Mobster',
+  'brims barone midway mobster': '"Brims" Barone, Midway Mobster',
+  '\'brims\' barone, midway mobster': '"Brims" Barone, Midway Mobster',
+
+  // Meet and Greet "Sisay"
+  'meet and greet "sisay"': 'Meet and Greet "Sisay"',
+  'meet and greet sisay': 'Meet and Greet "Sisay"',
+  'meet and greet \'sisay\'': 'Meet and Greet "Sisay"',
+
+  // "Lifetime" Pass Holder
+  '"lifetime" pass holder': '"Lifetime" Pass Holder',
+  'lifetime pass holder': '"Lifetime" Pass Holder',
+  '\'lifetime\' pass holder': '"Lifetime" Pass Holder',
+
+  // Pang Tong, "Young Phoenix"
+  'pang tong, "young phoenix"': 'Pang Tong, "Young Phoenix"',
+  'pang tong "young phoenix"': 'Pang Tong, "Young Phoenix"',
+  'pang tong, young phoenix': 'Pang Tong, "Young Phoenix"',
+  'pang tong young phoenix': 'Pang Tong, "Young Phoenix"',
+  'pang tong, \'young phoenix\'': 'Pang Tong, "Young Phoenix"',
+  'pang tong \'young phoenix\'': 'Pang Tong, "Young Phoenix"',
+
+  // Bounty: Rissa "Blades" Lee // Wanted!
+  'bounty: rissa "blades" lee // wanted!': 'Bounty: Rissa "Blades" Lee // Wanted!',
+  'bounty: rissa blades lee // wanted!': 'Bounty: Rissa "Blades" Lee // Wanted!',
+  'bounty: rissa "blades" lee': 'Bounty: Rissa "Blades" Lee // Wanted!',
+  'bounty: rissa blades lee': 'Bounty: Rissa "Blades" Lee // Wanted!',
 
   // Reversible double-faced cards (Secret Lair / Special Promos where both faces are the same)
   'estrid, the masked // estrid, the masked': 'Estrid, the Masked',
@@ -208,13 +328,37 @@ export function getCanonicalCardName(name: string): string {
     return CANONICAL_CARD_NAME_ALIASES[lower];
   }
 
-  // 2. Quote-normalized match (strip straight and smart quotes)
-  const stripQuotes = lower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  // 2. Normalize smart/curly quotes to ASCII quotes
+  const asciiQuotes = normalizeCardQuotes(lower).toLowerCase();
+  if (CANONICAL_CARD_NAME_ALIASES[asciiQuotes]) {
+    return CANONICAL_CARD_NAME_ALIASES[asciiQuotes];
+  }
+
+  // 3. Ellipsis normalized
+  if (asciiQuotes.includes('...')) {
+    const spacedDots = asciiQuotes.replace(/\.{3,}/g, '. . .');
+    if (CANONICAL_CARD_NAME_ALIASES[spacedDots]) {
+      return CANONICAL_CARD_NAME_ALIASES[spacedDots];
+    }
+  }
+
+  // 4. Strip quotes entirely
+  const stripQuotes = stripCardQuotes(lower).toLowerCase();
   if (CANONICAL_CARD_NAME_ALIASES[stripQuotes]) {
     return CANONICAL_CARD_NAME_ALIASES[stripQuotes];
   }
 
-  // 3. Reversible double-faced cards where both faces have the same name:
+  // 5. Comma before quote normalization: e.g. Kongming "Sleeping Dragon" <-> Kongming, "Sleeping Dragon"
+  const commaQuote = asciiQuotes.replace(/,\s*"/g, ' "');
+  if (CANONICAL_CARD_NAME_ALIASES[commaQuote]) {
+    return CANONICAL_CARD_NAME_ALIASES[commaQuote];
+  }
+  const addCommaQuote = asciiQuotes.replace(/([a-zA-Z0-9])\s*"/g, '$1, "');
+  if (CANONICAL_CARD_NAME_ALIASES[addCommaQuote]) {
+    return CANONICAL_CARD_NAME_ALIASES[addCommaQuote];
+  }
+
+  // 6. Reversible double-faced cards where both faces have the same name:
   // e.g. "Jetmir, Nexus Of Revels // Jetmir, Nexus Of Revels" -> "Jetmir, Nexus of Revels"
   if (trimmed.includes('//')) {
     const parts = trimmed.split(/\s*\/\/\s*/);
@@ -492,25 +636,36 @@ export function getAllCardMatchNames(card: any): string[] {
     if (cleanFront) result.add(cleanFront);
 
     // Normalized quotes
-    const normQuotes = lower.replace(/['’`"]/g, "'");
-    result.add(normQuotes);
+    const normQuotes = normalizeCardQuotes(lower).toLowerCase();
+    if (normQuotes) result.add(normQuotes);
 
-    const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
-    if (cleanFrontNoQuotes) result.add(cleanFrontNoQuotes);
+    const normQuotesFront = normalizeCardQuotes(cleanFront).toLowerCase();
+    if (normQuotesFront) result.add(normQuotesFront);
+
+    // Single-quote normalization
+    const singleQuotes = lower.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035`"]/g, "'");
+    result.add(singleQuotes);
 
     // Stripped quotes altogether
-    const stripQuotes = lower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+    const stripQuotes = stripCardQuotes(lower).toLowerCase();
     if (stripQuotes) result.add(stripQuotes);
 
-    const cleanFrontStripQuotes = cleanFront.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+    const cleanFrontStripQuotes = stripCardQuotes(cleanFront).toLowerCase();
     if (cleanFrontStripQuotes) result.add(cleanFrontStripQuotes);
 
+    // Comma variations with quotes:
+    // e.g. "kongming, \"sleeping dragon\"" <-> "kongming \"sleeping dragon\""
+    if (lower.includes('"')) {
+      result.add(lower.replace(/,\s*"/g, ' "'));
+      result.add(lower.replace(/([a-zA-Z0-9])\s*"/g, '$1, "'));
+    }
+
     // Check canonical alias
-    const canonical = CANONICAL_CARD_NAME_ALIASES[lower] || CANONICAL_CARD_NAME_ALIASES[stripQuotes];
-    if (canonical) {
+    const canonical = getCanonicalCardName(lower);
+    if (canonical && canonical.toLowerCase() !== lower) {
       const canLower = canonical.toLowerCase();
       result.add(canLower);
-      const canStrip = canLower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+      const canStrip = stripCardQuotes(canLower).toLowerCase();
       if (canStrip) result.add(canStrip);
     }
 

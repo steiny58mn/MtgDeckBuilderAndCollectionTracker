@@ -4,7 +4,7 @@ import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConf
 import { GamechangerService } from './gamechangerService';
 import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName, setCardCacheLookup } from '../utils/deckUtils';
 import { filterPaperCardsOnly } from '../utils/cardUtils';
-import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
+import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName, normalizeCardQuotes, stripCardQuotes } from '../utils/cardNameUtils';
 
 export function getFrostpointBaseUrl(): string {
   const url = getApiBaseUrl();
@@ -208,14 +208,18 @@ export function getCardFromLocalCache(nameOrId: string): ScryfallCard | undefine
   const front = trimmed.split(/\s*\/\/\s*/)[0].trim();
   const canonical = getCanonicalCardName(nameOrId).toLowerCase().trim();
   const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
-  const stripQuotes = trimmed.replace(/['"“”‘’`]/g, '').trim();
-  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').trim();
+  const stripQuotes = stripCardQuotes(trimmed).toLowerCase();
+  const stripQuotesFront = stripCardQuotes(front).toLowerCase();
+  const normQuotes = normalizeCardQuotes(trimmed).toLowerCase();
+  const normQuotesFront = normalizeCardQuotes(front).toLowerCase();
 
   return (
     localCardCache.get(trimmed) ||
     localCardCache.get(front) ||
     localCardCache.get(canonical) ||
     localCardCache.get(canonicalFront) ||
+    localCardCache.get(normQuotes) ||
+    localCardCache.get(normQuotesFront) ||
     localCardCache.get(stripQuotes) ||
     localCardCache.get(stripQuotesFront) ||
     cardByIdCache.get(trimmed)
@@ -243,6 +247,10 @@ if (typeof window !== 'undefined') {
             const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
             if (canonical) localCardCache.set(canonical, normalized);
             if (canonicalFront) localCardCache.set(canonicalFront, normalized);
+            const sqExact = stripCardQuotes(exact).toLowerCase();
+            const sqFront = stripCardQuotes(front).toLowerCase();
+            if (sqExact) localCardCache.set(sqExact, normalized);
+            if (sqFront) localCardCache.set(sqFront, normalized);
             if (normalized.id) cardByIdCache.set(normalized.id, normalized);
           }
         }
@@ -808,10 +816,21 @@ export async function fetchBatchCardsCollection(
     const rawId = (item.id && uuidRegex.test(item.id)) ? item.id.toLowerCase() : (item.scryfallId && uuidRegex.test(item.scryfallId)) ? item.scryfallId.toLowerCase() : '';
     const exact = (item.name || '').toLowerCase().trim();
     const front = exact.split(' // ')[0].trim();
+    const canonical = getCanonicalCardName(item.name || '').toLowerCase().trim();
+    const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+    const stripQuotes = stripCardQuotes(exact).toLowerCase();
+    const stripQuotesFront = stripCardQuotes(front).toLowerCase();
     const setCode = (item.set || '').toLowerCase().trim();
 
     const cachedById = rawId ? cardByIdCache.get(rawId) : null;
-    const cachedByName = (!rawId && !setCode) ? (localCardCache.get(exact) || localCardCache.get(front)) : null;
+    const cachedByName = (!rawId && !setCode) ? (
+      localCardCache.get(exact) ||
+      localCardCache.get(front) ||
+      localCardCache.get(canonical) ||
+      localCardCache.get(canonicalFront) ||
+      localCardCache.get(stripQuotes) ||
+      localCardCache.get(stripQuotesFront)
+    ) : null;
     const cached = cachedById || cachedByName;
 
     if (cached) {
@@ -862,6 +881,9 @@ export async function fetchBatchCardsCollection(
     if (setLower && frontName) {
       cardMap.set(`${frontName}|${setLower}`, normalized);
     }
+    if (setLower && canonicalFront) {
+      cardMap.set(`${canonicalFront}|${setLower}`, normalized);
+    }
     cardMap.set(exactLower, normalized);
     cardMap.set(frontName, normalized);
     cardMap.set(canonicalName, normalized);
@@ -871,9 +893,9 @@ export async function fetchBatchCardsCollection(
     localCardCache.set(canonicalName, normalized);
     if (canonicalFront) localCardCache.set(canonicalFront, normalized);
 
-    // Also register quote-stripped variations
-    const stripQuotesExact = exactLower.replace(/['"“”‘’`]/g, '').trim();
-    const stripQuotesFront = frontName.replace(/['"“”‘’`]/g, '').trim();
+    // Also register quote-stripped & quote-variation keys
+    const stripQuotesExact = stripCardQuotes(exactLower).toLowerCase();
+    const stripQuotesFront = stripCardQuotes(frontName).toLowerCase();
     if (stripQuotesExact) {
       cardMap.set(stripQuotesExact, normalized);
       localCardCache.set(stripQuotesExact, normalized);
@@ -882,18 +904,36 @@ export async function fetchBatchCardsCollection(
       cardMap.set(stripQuotesFront, normalized);
       localCardCache.set(stripQuotesFront, normalized);
     }
+    const normQuotesExact = normalizeCardQuotes(exactLower).toLowerCase();
+    if (normQuotesExact && normQuotesExact !== exactLower) {
+      cardMap.set(normQuotesExact, normalized);
+      localCardCache.set(normQuotesExact, normalized);
+    }
+    const commaQuoteNorm = exactLower.replace(/,\s*"/g, ' "');
+    if (commaQuoteNorm && commaQuoteNorm !== exactLower) {
+      cardMap.set(commaQuoteNorm, normalized);
+      localCardCache.set(commaQuoteNorm, normalized);
+    }
+    const addCommaQuote = exactLower.replace(/([a-zA-Z0-9])\s*"/g, '$1, "');
+    if (addCommaQuote && addCommaQuote !== exactLower) {
+      cardMap.set(addCommaQuote, normalized);
+      localCardCache.set(addCommaQuote, normalized);
+    }
   };
 
   const isPopulatedCard = (c: any) => {
     if (!c) return false;
-    const hasValidType = (c.type_line && c.type_line.toLowerCase() !== 'no card type found' && c.type_line.toLowerCase() !== 'card') ||
-      (c.type && c.type.toLowerCase() !== 'no card type found' && c.type.toLowerCase() !== 'card') ||
-      (c.card_faces?.[0]?.type_line && c.card_faces[0].type_line.toLowerCase() !== 'no card type found' && c.card_faces[0].type_line.toLowerCase() !== 'card');
+    const rawType = (c.type_line || c.type || c.card_faces?.[0]?.type_line || '').trim();
+    const hasValidType = Boolean(rawType) && rawType.toLowerCase() !== 'no card type found' && rawType.toLowerCase() !== 'card';
     const isConspiracy = isConspiracyCardName(c.name);
     const hasKnown = Boolean(getKnownCardType(c.name));
-    return Boolean(
-      hasValidType || isConspiracy || hasKnown || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large))
+    const hasMeaningfulData = Boolean(
+      (c.mana_cost && c.mana_cost.trim() !== '') ||
+      (c.oracle_text && c.oracle_text.trim() !== '') ||
+      (c.image_uris && (c.image_uris.normal || c.image_uris.large)) ||
+      (c.image_url && typeof c.image_url === 'string' && c.image_url.trim() !== '')
     );
+    return Boolean((hasValidType || isConspiracy || hasKnown) && (hasMeaningfulData || hasValidType || isConspiracy || hasKnown));
   };
 
   // 1. Primary resolution: Use FrostpointApi /deckbuilder/cards/lookup for bulk resolution
@@ -905,7 +945,10 @@ export async function fetchBatchCardsCollection(
       const cleanId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : undefined;
       const cleanSet = (it.set || '').trim().toLowerCase();
       const collNum = String(it.collectorNumber || it.collector_number || '').trim();
-      const cleanName = (it.name || '').trim();
+      const rawName = (it.name || '').trim();
+      const canonical = getCanonicalCardName(rawName);
+      const cleanFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+      const cleanName = cleanFront || canonical || rawName;
 
       const itemObj: any = {};
       if (cleanId) itemObj.id = cleanId;
@@ -950,11 +993,23 @@ export async function fetchBatchCardsCollection(
     const setCode = (item.set || '').toLowerCase().trim();
     const collNum = String(item.collectorNumber || item.collector_number || '').trim();
 
+    const canonical = getCanonicalCardName(item.name || '').toLowerCase().trim();
+    const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+    const stripQuotes = stripCardQuotes(exact).toLowerCase();
+    const stripQuotesFront = stripCardQuotes(front).toLowerCase();
+
     const isResolved = (rawId && cardMap.has(rawId)) ||
       (setCode && collNum && cardMap.has(`${setCode}|${collNum}`)) ||
       (setCode && exact && cardMap.has(`${exact}|${setCode}`)) ||
+      (setCode && front && cardMap.has(`${front}|${setCode}`)) ||
+      (setCode && canonicalFront && cardMap.has(`${canonicalFront}|${setCode}`)) ||
+      (setCode && stripQuotesFront && cardMap.has(`${stripQuotesFront}|${setCode}`)) ||
       cardMap.has(exact) ||
-      cardMap.has(front);
+      cardMap.has(front) ||
+      cardMap.has(canonical) ||
+      cardMap.has(canonicalFront) ||
+      cardMap.has(stripQuotes) ||
+      cardMap.has(stripQuotesFront);
 
     if (!isResolved) {
       unresolvedItems.push(item);

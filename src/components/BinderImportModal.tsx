@@ -6,7 +6,7 @@ import { parseCollectionCsv, convertParsedCardsToCollectionCards } from '../util
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { fetchBatchCardsCollection, getCardFromLocalCache, cardByIdCache } from '../services/api';
 import { getCardEffectiveColors, isCardGamechanger, isInvalidCardType, getCardFrontTypeLine } from '../utils/deckUtils';
-import { isConspiracyCardName, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
+import { isConspiracyCardName, getKnownCardType, getCanonicalCardName, stripCardQuotes, normalizeCardQuotes } from '../utils/cardNameUtils';
 
 interface BinderImportModalProps {
   isOpen: boolean;

@@ -21,7 +21,7 @@ import {
   isCardLand,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
-import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
+import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName, normalizeCardQuotes, stripCardQuotes } from '../utils/cardNameUtils';
 import { isInvalidCardType } from '../utils/deckUtils';
 
 // ============================================================================
@@ -273,6 +273,8 @@ export function normalizeBinderCard(card: any): CollectionCard {
   const cachedByName = getCardFromLocalCache(card.name);
   const cached = cachedById || cachedByName;
   const isBasic = isBasicLandName(card.name);
+  const isConspiracy = isConspiracyCardName(card.name);
+  const knownType = getKnownCardType(card.name);
 
   // Preserve card's specific version / edition strictly - NEVER overwrite set/collectorNumber from generic name cache!
   const set = (card.set || card.Set || (cachedById ? cachedById.set : '') || '').toLowerCase();
@@ -280,7 +282,17 @@ export function normalizeBinderCard(card: any): CollectionCard {
   const collectorNumber = card.collectorNumber || card.collector_number || card.CollectorNumber || (cachedById ? cachedById.collector_number : '') || '';
   const scryfallId = card.scryfallId || card.ScryfallId || (cachedById ? cachedById.id : '') || '';
 
-  const typeLine = card.type_line || card.typeLine || card.TypeLine || cached?.type_line || cached?.card_faces?.[0]?.type_line || (isBasic ? 'Basic Land' : '');
+  const rawType = card.type_line || card.typeLine || card.TypeLine || '';
+  let typeLine = !isInvalidCardType(rawType)
+    ? rawType
+    : (!isInvalidCardType(cached?.type_line)
+      ? cached?.type_line
+      : (!isInvalidCardType(cached?.card_faces?.[0]?.type_line)
+        ? cached?.card_faces?.[0]?.type_line
+        : (knownType || (isBasic ? 'Basic Land' : ''))));
+  if (isConspiracy) {
+    typeLine = 'Conspiracy';
+  }
   const manaCost = card.mana_cost || card.manaCost || card.ManaCost || cached?.mana_cost || cached?.card_faces?.[0]?.mana_cost || '';
   const rawColorIdentity = card.colorIdentity || card.color_identity || card.ColorIdentity || cached?.color_identity || [];
   const rawColors = card.colors || card.Colors || cached?.colors || cached?.card_faces?.[0]?.colors || [];
@@ -359,7 +371,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
     if (validCards.length === 0) return deck;
 
     const cardsToFetch = validCards.map((c) => ({
-      name: c.name,
+      name: getCanonicalCardName(c.name) || c.name,
       set: c.set,
       id: c.scryfallId,
       scryfallId: c.scryfallId,
@@ -376,18 +388,24 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
       const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
       const setCode = (c.set || '').toLowerCase().trim();
       const collNum = String(c.collectorNumber || c.collector_number || '').trim();
+      const stripQuotes = stripCardQuotes(exact).toLowerCase();
+      const stripQuotesFront = stripCardQuotes(front).toLowerCase();
 
       const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
         || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
         || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
         || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
         || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
+        || (setCode && stripQuotesFront ? scryfallMap.get(`${stripQuotesFront}|${setCode}`) : null)
         || scryfallMap.get(exact)
         || scryfallMap.get(front)
         || scryfallMap.get(canonical)
         || scryfallMap.get(canonicalFront)
+        || scryfallMap.get(stripQuotes)
+        || scryfallMap.get(stripQuotesFront)
         || (scryfallId ? null : getCardFromLocalCache(c.name))
-        || (scryfallId ? null : getCardFromLocalCache(canonical));
+        || (scryfallId ? null : getCardFromLocalCache(canonical))
+        || (scryfallId ? null : getCardFromLocalCache(stripQuotes));
       if (matched) {
         const isConspiracy = isConspiracyCardName(c.name);
         const knownType = getKnownCardType(c.name);
@@ -515,7 +533,7 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
   try {
     const validCards = cardsNeedingEnrichment.filter((c) => Boolean(c.name));
     const cardsToFetch = validCards.map((c) => ({
-      name: c.name,
+      name: getCanonicalCardName(c.name) || c.name,
       set: c.set,
       id: c.scryfallId,
       scryfallId: c.scryfallId,
@@ -535,18 +553,24 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
         const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
         const setCode = (c.set || '').toLowerCase().trim();
         const collNum = String(c.collectorNumber || c.collector_number || '').trim();
+        const stripQuotes = stripCardQuotes(exact).toLowerCase();
+        const stripQuotesFront = stripCardQuotes(front).toLowerCase();
 
         const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
           || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
           || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
           || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
           || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
+          || (setCode && stripQuotesFront ? scryfallMap.get(`${stripQuotesFront}|${setCode}`) : null)
           || scryfallMap.get(exact)
           || scryfallMap.get(front)
           || scryfallMap.get(canonical)
           || scryfallMap.get(canonicalFront)
+          || scryfallMap.get(stripQuotes)
+          || scryfallMap.get(stripQuotesFront)
           || (scryfallId ? null : getCardFromLocalCache(c.name))
-          || (scryfallId ? null : getCardFromLocalCache(canonical));
+          || (scryfallId ? null : getCardFromLocalCache(canonical))
+          || (scryfallId ? null : getCardFromLocalCache(stripQuotes));
         if (matched) {
           const isConspiracy = isConspiracyCardName(c.name);
           const knownType = getKnownCardType(c.name);
