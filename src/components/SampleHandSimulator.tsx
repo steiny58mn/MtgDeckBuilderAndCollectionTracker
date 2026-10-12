@@ -13,6 +13,7 @@ import {
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { Deck, DeckCard, ScryfallCard } from '../types/mtg';
+import { isCardLand } from '../utils/deckUtils';
 
 function combinations(n: number, k: number): number {
   if (k < 0 || k > n) return 0;
@@ -70,13 +71,8 @@ export const SampleHandSimulator: React.FC<SampleHandSimulatorProps> = ({
   // Hypergeometric probabilities for opening 7 cards
   const allMainCards = buildFlatMainboard();
   const totalDeckSize = allMainCards.length;
-  const totalLandsCount = allMainCards.filter((c) =>
-    (c.type_line || (c as any).typeLine || '').toLowerCase().includes('land')
-  ).length;
-  const earlyPlaysCount = allMainCards.filter((c) => {
-    const isLand = (c.type_line || (c as any).typeLine || '').toLowerCase().includes('land');
-    return !isLand && (c.cmc || 0) <= 2;
-  }).length;
+  const totalLandsCount = allMainCards.filter((c) => isCardLand(c)).length;
+  const earlyPlaysCount = allMainCards.filter((c) => !isCardLand(c) && (c.cmc || 0) <= 2).length;
 
   const probIdealLands = totalDeckSize >= 7
     ? (
@@ -143,8 +139,7 @@ export const SampleHandSimulator: React.FC<SampleHandSimulatorProps> = ({
 
   const handlePlayToBattlefield = (card: DeckCard, e: React.MouseEvent) => {
     e.stopPropagation();
-    const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-    const isLand = typeLine.includes('land');
+    const isLand = isCardLand(card);
     if (isLand) {
       setLandPlayedThisTurn(true);
     }
@@ -179,13 +174,8 @@ export const SampleHandSimulator: React.FC<SampleHandSimulatorProps> = ({
   // Heuristic opening hand advice
   const handAdvice = useMemo(() => {
     if (hand.length === 0) return null;
-    const lands = hand.filter((c) =>
-      (c.type_line || (c as any).typeLine || '').toLowerCase().includes('land')
-    );
-    const earlyPlays = hand.filter((c) => {
-      const isLand = (c.type_line || (c as any).typeLine || '').toLowerCase().includes('land');
-      return !isLand && (c.cmc || 0) <= 2;
-    });
+    const lands = hand.filter((c) => isCardLand(c));
+    const earlyPlays = hand.filter((c) => !isCardLand(c) && (c.cmc || 0) <= 2);
 
     if (lands.length >= 3 && lands.length <= 4 && earlyPlays.length >= 1) {
       return {

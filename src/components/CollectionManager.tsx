@@ -43,7 +43,7 @@ import { getCardNames } from '../utils/cardNameUtils';
 import { DeckService } from '../services/deckService';
 import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
-import { getCardColorCategoryRank, getCardEffectiveColors } from '../utils/deckUtils';
+import { getCardColorCategoryRank, getCardEffectiveColors, getCardFrontTypeLine } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
 import { BinderImportModal } from './BinderImportModal';
 import { BinderChecklist } from './BinderChecklist';
@@ -564,7 +564,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     };
 
     for (const c of sortedCards) {
-      const t = c.type_line?.toLowerCase() || '';
+      const t = getCardFrontTypeLine(c);
       if (t.includes('creature')) groups['Creatures'].push(c);
       else if (t.includes('instant') || t.includes('sorcery')) groups['Instants & Sorceries'].push(c);
       else if (t.includes('artifact') || t.includes('enchantment')) groups['Artifacts & Enchantments'].push(c);

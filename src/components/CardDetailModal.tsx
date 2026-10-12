@@ -131,9 +131,14 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     setShowPrintings(false);
     setPrintingToast(null);
 
-    const cardId = card.id || (card as any).scryfallId;
+    const scryId = (card as any).scryfallId || (card as any).scryfall_id;
     const cleanName = (card.name || '').trim();
-    const query = (cardId && !cardId.startsWith('c-') && !cardId.startsWith('bc-')) ? cardId : cleanName;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const query = (scryId && uuidRegex.test(scryId))
+      ? scryId
+      : (card.id && uuidRegex.test(card.id) && !(card as any).binderId && !(card as any).collectionCardId)
+        ? card.id
+        : cleanName;
 
     const lacksDetails = !card.type_line ||
       (!card.colors || card.colors.length === 0 && !card.mana_cost) ||
@@ -216,7 +221,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         applyFullData(cached);
         setIsLoadingFull(false);
       } else {
-        getCardById(query)
+        getCardById(query, cleanName)
           .then((fullData) => {
             if (fullData) {
               applyFullData(fullData);

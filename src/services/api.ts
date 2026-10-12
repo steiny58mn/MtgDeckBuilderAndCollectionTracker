@@ -447,28 +447,56 @@ export async function getAutocomplete(query: string): Promise<string[]> {
   return localMatches;
 }
 
-export async function getCardById(id: string): Promise<ScryfallCard | null> {
+const notFoundCardIds = new Set<string>();
+
+export async function getCardById(id: string, fallbackName?: string): Promise<ScryfallCard | null> {
   const trimmed = (id || '').trim();
-  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
 
-  const cached = cardByIdCache.get(trimmed.toLowerCase());
-  if (cached) return cached;
+  if (trimmed && !notFoundCardIds.has(lower)) {
+    const cached = cardByIdCache.get(lower);
+    if (cached) return cached;
 
-  try {
-    const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(trimmed)}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) {
-        const norm = normalizeFrostpointCard(json.data);
-        cardByIdCache.set(trimmed.toLowerCase(), norm);
-        if (norm.name) {
-          localCardCache.set(norm.name.toLowerCase().trim(), norm);
+    try {
+      const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(trimmed)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const norm = normalizeFrostpointCard(json.data);
+          cardByIdCache.set(lower, norm);
+          if (norm.name) {
+            localCardCache.set(norm.name.toLowerCase().trim(), norm);
+          }
+          return norm;
         }
-        return norm;
+      } else if (res.status === 404) {
+        notFoundCardIds.add(lower);
       }
+    } catch (e) {
+      // Silently catch single card errors to prevent unhandled rejections
     }
-  } catch (e) {
-    console.warn('[CardService] Single card error:', e);
+  }
+
+  // If ID was not found or failed, try fallback name if provided
+  if (fallbackName && fallbackName.trim()) {
+    const cleanName = fallbackName.trim().toLowerCase();
+    const cachedByName = localCardCache.get(cleanName);
+    if (cachedByName) return cachedByName;
+
+    try {
+      const res = await apiFetch(`/deckbuilder/cards/${encodeURIComponent(fallbackName.trim())}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const norm = normalizeFrostpointCard(json.data);
+          localCardCache.set(cleanName, norm);
+          if (norm.id) {
+            cardByIdCache.set(norm.id.toLowerCase(), norm);
+          }
+          return norm;
+        }
+      }
+    } catch {}
   }
 
   return null;
@@ -649,19 +677,34 @@ export async function fetchBatchCardPrices(scryfallIds: string[]): Promise<Map<s
     }
   }
 
-  // 2. Fetch missing cards from API
+  // 2. Fetch missing cards from API in batches using /deckbuilder/cards/lookup
   if (missingIds.length > 0) {
-    for (const id of missingIds.slice(0, 15)) {
+    const chunkSize = 100;
+    for (let i = 0; i < missingIds.length; i += chunkSize) {
+      const chunk = missingIds.slice(i, i + chunkSize);
       try {
-        const card = await getCardById(id);
-        if (card) {
-          const usd = card.prices?.usd ? parseFloat(card.prices.usd) : undefined;
-          const usdFoil = card.prices?.usd_foil ? parseFloat(card.prices.usd_foil) : undefined;
-          const eur = card.prices?.eur ? parseFloat(card.prices.eur) : undefined;
-          priceMap.set(id, { usd, usdFoil, eur });
+        const res = await apiFetch('/deckbuilder/cards/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(chunk.map((id) => ({ id }))),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            for (const raw of json.data) {
+              if (raw && raw.id) {
+                const norm = normalizeFrostpointCard(raw);
+                cardByIdCache.set(raw.id.toLowerCase(), norm);
+                const usd = norm.prices?.usd ? parseFloat(norm.prices.usd) : undefined;
+                const usdFoil = norm.prices?.usd_foil ? parseFloat(norm.prices.usd_foil) : undefined;
+                const eur = norm.prices?.eur ? parseFloat(norm.prices.eur) : undefined;
+                priceMap.set(raw.id, { usd, usdFoil, eur });
+              }
+            }
+          }
         }
-      } catch (e) {
-        // ignore
+      } catch (err) {
+        // Silently handle error
       }
     }
   }
@@ -683,7 +726,8 @@ export interface BatchCardFetchItem {
  * Uses Scryfall collection endpoint for exact printings/editions, and Frostpointlabs for generic lookups.
  */
 export async function fetchBatchCardsCollection(
-  cardsToFetch: BatchCardFetchItem[]
+  cardsToFetch: BatchCardFetchItem[],
+  onProgress?: (completed: number, total: number) => void
 ): Promise<Map<string, ScryfallCard>> {
   const cardMap = new Map<string, ScryfallCard>();
   if (cardsToFetch.length === 0) return cardMap;
@@ -734,6 +778,10 @@ export async function fetchBatchCardsCollection(
     }
   }
 
+  const totalCount = uniqueItems.length;
+  let resolvedCount = uniqueItems.length - itemsToFetch.length;
+  if (onProgress) onProgress(resolvedCount, totalCount);
+
   if (itemsToFetch.length === 0) {
     return cardMap;
   }
@@ -764,25 +812,86 @@ export async function fetchBatchCardsCollection(
     localCardCache.set(frontName, normalized);
   };
 
-  // Split into specific printing requests vs. generic name-only requests
-  const scryfallDirectItems: BatchCardFetchItem[] = [];
-  const genericNameItems: BatchCardFetchItem[] = [];
+  const isPopulatedCard = (c: any) => Boolean(
+    c && (c.type_line || c.type || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large)))
+  );
 
-  for (const it of itemsToFetch) {
-    const rawId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : '';
-    const setCode = (it.set || '').trim();
-    if (rawId || setCode) {
-      scryfallDirectItems.push(it);
-    } else {
-      genericNameItems.push(it);
+  // 1. Primary resolution: Use FrostpointApi /deckbuilder/cards/lookup for bulk resolution
+  // This avoids Scryfall CORS / Cloudflare rate limits and resolves against the 109k+ cards in Turso DB.
+  const fpChunkSize = 75;
+  for (let i = 0; i < itemsToFetch.length; i += fpChunkSize) {
+    const chunk = itemsToFetch.slice(i, i + fpChunkSize);
+    const lookupPayload = chunk.map((it) => {
+      const cleanId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : undefined;
+      const cleanSet = (it.set || '').trim().toLowerCase();
+      const collNum = String(it.collectorNumber || it.collector_number || '').trim();
+      const cleanName = (it.name || '').trim();
+
+      const itemObj: any = {};
+      if (cleanId) itemObj.id = cleanId;
+      if (cleanName) itemObj.name = cleanName;
+      if (cleanSet) itemObj.set = cleanSet;
+      if (collNum) itemObj.collector_number = collNum;
+      return itemObj;
+    });
+
+    try {
+      const res = await apiFetch('/deckbuilder/cards/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(lookupPayload),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data)) {
+          GamechangerService.registerCardsFromLookup(json.data);
+          for (const raw of json.data) {
+            if (isPopulatedCard(raw)) {
+              registerCard(raw);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[CardService] Frostpoint lookup chunk error:', err);
+    }
+
+    resolvedCount = Math.min(totalCount, resolvedCount + chunk.length);
+    if (onProgress) onProgress(resolvedCount, totalCount);
+  }
+
+  // 2. Identify any items still unresolved in cardMap
+  const unresolvedItems: BatchCardFetchItem[] = [];
+  for (const item of itemsToFetch) {
+    const rawId = (item.id && uuidRegex.test(item.id)) ? item.id.toLowerCase() : (item.scryfallId && uuidRegex.test(item.scryfallId)) ? item.scryfallId.toLowerCase() : '';
+    const exact = (item.name || '').toLowerCase().trim();
+    const front = exact.split(' // ')[0].trim();
+    const setCode = (item.set || '').toLowerCase().trim();
+    const collNum = String(item.collectorNumber || item.collector_number || '').trim();
+
+    const isResolved = (rawId && cardMap.has(rawId)) ||
+      (setCode && collNum && cardMap.has(`${setCode}|${collNum}`)) ||
+      (setCode && exact && cardMap.has(`${exact}|${setCode}`)) ||
+      cardMap.has(exact) ||
+      cardMap.has(front);
+
+    if (!isResolved) {
+      unresolvedItems.push(item);
     }
   }
 
-  // 1. Resolve specific printings directly via Scryfall collection endpoint
-  if (scryfallDirectItems.length > 0) {
+  // 3. Fallback to Scryfall for unresolved items with strict rate-limiting (100ms) and retry resilience
+  if (unresolvedItems.length > 0) {
     const scryChunkSize = 75;
-    for (let i = 0; i < scryfallDirectItems.length; i += scryChunkSize) {
-      const scryChunk = scryfallDirectItems.slice(i, i + scryChunkSize);
+    for (let i = 0; i < unresolvedItems.length; i += scryChunkSize) {
+      const scryChunk = unresolvedItems.slice(i, i + scryChunkSize);
+
+      // Throttling: Respect Scryfall's 50-100ms delay policy to prevent Cloudflare 429 & CORS blocks
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
       try {
         const identifiers = scryChunk.map((it) => {
           const cleanId = (it.id && uuidRegex.test(it.id)) ? it.id : (it.scryfallId && uuidRegex.test(it.scryfallId)) ? it.scryfallId : undefined;
@@ -801,15 +910,24 @@ export async function fetchBatchCardsCollection(
           return { name: cleanName };
         });
 
-        const sRes = await fetch('https://api.scryfall.com/cards/collection', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ identifiers }),
-        });
+        const fetchScryfallBatch = async () => {
+          return fetch('https://api.scryfall.com/cards/collection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ identifiers }),
+          });
+        };
 
-        if (sRes.ok) {
-          const sJson = await sRes.json();
-          if (sJson.data && Array.isArray(sJson.data)) {
+        let sRes = await fetchScryfallBatch().catch(() => null);
+        if (sRes && sRes.status === 429) {
+          // Rate limited, wait 600ms and retry once
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          sRes = await fetchScryfallBatch().catch(() => null);
+        }
+
+        if (sRes && sRes.ok) {
+          const sJson = await sRes.json().catch(() => null);
+          if (sJson && sJson.data && Array.isArray(sJson.data)) {
             GamechangerService.registerCardsFromLookup(sJson.data);
             for (const raw of sJson.data) {
               registerCard(raw);
@@ -817,11 +935,12 @@ export async function fetchBatchCardsCollection(
           }
 
           // If some items were not found with set or id, retry them by name
-          if (sJson.not_found && Array.isArray(sJson.not_found) && sJson.not_found.length > 0) {
+          if (sJson && sJson.not_found && Array.isArray(sJson.not_found) && sJson.not_found.length > 0) {
             const retryItems = sJson.not_found
               .filter((nf) => nf && nf.name)
               .map((nf) => ({ name: nf.name }));
             if (retryItems.length > 0) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
               try {
                 const retryRes = await fetch('https://api.scryfall.com/cards/collection', {
                   method: 'POST',
@@ -829,8 +948,8 @@ export async function fetchBatchCardsCollection(
                   body: JSON.stringify({ identifiers: retryItems }),
                 });
                 if (retryRes.ok) {
-                  const retryJson = await retryRes.json();
-                  if (retryJson.data && Array.isArray(retryJson.data)) {
+                  const retryJson = await retryRes.json().catch(() => null);
+                  if (retryJson && retryJson.data && Array.isArray(retryJson.data)) {
                     GamechangerService.registerCardsFromLookup(retryJson.data);
                     for (const raw of retryJson.data) {
                       registerCard(raw);
@@ -842,74 +961,7 @@ export async function fetchBatchCardsCollection(
           }
         }
       } catch (err) {
-        console.warn('[CardService] Scryfall batch direct resolution error:', err);
-      }
-    }
-  }
-
-  // 2. Resolve generic name-only requests via Frostpoint lookup
-  if (genericNameItems.length > 0) {
-    const chunkSize = 50;
-    const chunks: Array<BatchCardFetchItem[]> = [];
-    for (let i = 0; i < genericNameItems.length; i += chunkSize) {
-      chunks.push(genericNameItems.slice(i, i + chunkSize));
-    }
-
-    const missingFromFrostpoint: BatchCardFetchItem[] = [];
-
-    for (const chunk of chunks) {
-      try {
-        const names = chunk.map((c) => c.name);
-        const res = await apiFetch('/deckbuilder/cards/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(names),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && Array.isArray(json.data)) {
-            GamechangerService.registerCardsFromLookup(json.data);
-            for (const raw of json.data) {
-              registerCard(raw);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[CardService] Frostpoint lookup error:', err);
-      }
-
-      for (const item of chunk) {
-        const exact = item.name.toLowerCase().trim();
-        const front = exact.split(' // ')[0].trim();
-        if (!cardMap.has(exact) && !cardMap.has(front)) {
-          missingFromFrostpoint.push(item);
-        }
-      }
-    }
-
-    // Resolve any remaining missing names via Scryfall
-    if (missingFromFrostpoint.length > 0) {
-      const scryChunkSize = 75;
-      for (let i = 0; i < missingFromFrostpoint.length; i += scryChunkSize) {
-        const scryChunk = missingFromFrostpoint.slice(i, i + scryChunkSize);
-        try {
-          const identifiers = scryChunk.map((it) => ({ name: it.name.trim() }));
-          const sRes = await fetch('https://api.scryfall.com/cards/collection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ identifiers }),
-          });
-          if (sRes.ok) {
-            const sJson = await sRes.json();
-            if (sJson.data && Array.isArray(sJson.data)) {
-              GamechangerService.registerCardsFromLookup(sJson.data);
-              for (const raw of sJson.data) {
-                registerCard(raw);
-              }
-            }
-          }
-        } catch {}
+        // Silently handle Scryfall batch network / CORS errors so collection imports continue uninterrupted
       }
     }
   }

@@ -8,7 +8,7 @@ export function detectCardManaProduction(card: DeckCard, commanderColors: string
   const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
   const oracleText = (card.oracle_text || (card as any).oracleText || '').toLowerCase();
 
-  const isLand = typeLine.includes('land');
+  const isLand = isCardLand(card);
   const isManaProducer = isLand || oracleText.includes('add ') || oracleText.includes('{t}: add');
   if (!isManaProducer) return [];
 
@@ -526,7 +526,7 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
     const shouldIncludeInAnalysis = scope === 'all' || (card.category === 'main' || card.category === 'commander');
 
     if (shouldIncludeInAnalysis) {
-      const isLand = (card.type_line || (card as any).typeLine || '').toLowerCase().includes('land');
+      const isLand = isCardLand(card);
       if (!isLand) {
         const roundedCmc = Math.min(7, Math.max(0, Math.floor(card.cmc || 0)));
         curveMap[roundedCmc] = (curveMap[roundedCmc] || 0) + qty;
@@ -762,9 +762,55 @@ export function sortWUBRG(colors: string[]): string[] {
 }
 
 /**
+ * Safely extracts the front face type line for a card (lowercase).
+ * For double-faced cards (e.g. "Arguel's Blood Fast // Temple of Aclazotz"),
+ * ONLY the front face type is considered (e.g. "legendary enchantment").
+ */
+export function getCardFrontTypeLine(card?: {
+  name?: string;
+  type_line?: string;
+  typeLine?: string;
+  card_faces?: Array<{ type_line?: string }>;
+} | null): string {
+  if (!card) return '';
+  if (Array.isArray(card.card_faces) && card.card_faces.length > 0 && card.card_faces[0]?.type_line) {
+    return card.card_faces[0].type_line.toLowerCase().trim();
+  }
+  const raw = (card.type_line || (card as any).typeLine || '').toLowerCase().trim();
+  if (raw.includes(' // ')) {
+    return raw.split(' // ')[0].trim();
+  }
+  if (raw.includes('//')) {
+    return raw.split('//')[0].trim();
+  }
+  return raw;
+}
+
+/**
+ * Determines whether a card is considered a Land.
+ * For dual-faced cards (MDFCs, Transform cards), ONLY the front face is considered.
+ * For example:
+ * - Arguel's Blood Fast // Temple of Aclazotz: Front is Enchantment -> NOT a land.
+ * - Thaumatic Compass // Spires of Orazca: Front is Artifact -> NOT a land.
+ * - Westvale Abbey // Ormendahl, Profane Prince: Front is Land -> IS a land.
+ */
+export function isCardLand(card?: {
+  name?: string;
+  type_line?: string;
+  typeLine?: string;
+  card_faces?: Array<{ type_line?: string }>;
+} | null): boolean {
+  if (!card) return false;
+  if (card.name && isBasicLandName(card.name)) return true;
+  const frontType = getCardFrontTypeLine(card);
+  return frontType.includes('land');
+}
+
+/**
  * Extracts the effective gameplay color(s) of a card.
  * Correctly accounts for double-sided cards (Transform, MDFC, Flip, Split, Adventures)
- * whose front face has colors even if top-level Scryfall colors array is empty or undefined.
+ * whose front face determines its color in hands, decks, and binders.
+ * For dual-faced cards, ONLY the front face is considered.
  */
 export function getCardEffectiveColors(card: {
   name?: string;
@@ -772,17 +818,13 @@ export function getCardEffectiveColors(card: {
   card_faces?: Array<{ colors?: string[]; mana_cost?: string; type_line?: string; color_indicator?: string[] }>;
   mana_cost?: string;
   type_line?: string;
+  typeLine?: string;
   color_identity?: string[];
   oracle_text?: string;
 }): string[] {
   if (!card) return [];
 
-  // 1. Explicit top-level colors array if non-empty
-  if (Array.isArray(card.colors) && card.colors.length > 0) {
-    return sortWUBRG(card.colors);
-  }
-
-  // 2. Front face of double-faced cards (MDFCs, Transform, etc.)
+  // 1. Dual-faced cards: strictly check front face first
   if (Array.isArray(card.card_faces) && card.card_faces.length > 0) {
     const front = card.card_faces[0];
     if (Array.isArray(front.colors) && front.colors.length > 0) {
@@ -797,20 +839,35 @@ export function getCardEffectiveColors(card: {
         return sortWUBRG(Array.from(new Set(pips.map((p) => p.toUpperCase()))));
       }
     }
+    const frontType = (front.type_line || '').toLowerCase();
+    const isFrontLand = frontType.includes('land') || (card.name && isBasicLandName(card.name));
+    const isFrontArtifact = frontType.includes('artifact');
+    if (isFrontLand || isFrontArtifact) {
+      return [];
+    }
   }
 
-  // 3. Parse mana_cost on top level if present
-  if (card.mana_cost) {
-    const pips = card.mana_cost.match(/[WUBRG]/gi);
+  // 2. Explicit top-level colors array if non-empty
+  if (Array.isArray(card.colors) && card.colors.length > 0) {
+    return sortWUBRG(card.colors);
+  }
+
+  // 3. Parse mana_cost on top level (only front face if dual-faced // format)
+  let manaCostToParse = card.mana_cost || '';
+  if (manaCostToParse.includes('//')) {
+    manaCostToParse = manaCostToParse.split('//')[0];
+  }
+  if (manaCostToParse) {
+    const pips = manaCostToParse.match(/[WUBRG]/gi);
     if (pips && pips.length > 0) {
       return sortWUBRG(Array.from(new Set(pips.map((p) => p.toUpperCase()))));
     }
   }
 
-  // 4. If card has color_identity and is NOT a land or artifact (or has double-face // in name)
-  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  const isLand = typeLine.includes('land') || (card.name && isBasicLandName(card.name));
-  const isArtifact = typeLine.includes('artifact');
+  // 4. If card has color_identity and front face is NOT a land or artifact
+  const frontType = getCardFrontTypeLine(card);
+  const isLand = isCardLand(card);
+  const isArtifact = frontType.includes('artifact');
   if (!isLand && !isArtifact && Array.isArray(card.color_identity) && card.color_identity.length > 0) {
     return sortWUBRG(card.color_identity);
   }
@@ -831,17 +888,19 @@ export function getCardEffectiveColors(card: {
 /**
  * Categorizes a card into standard MTG color grouping for piles and sorts:
  * 'W' | 'U' | 'B' | 'R' | 'G' | 'multi' | 'colorless' | 'land'
+ *
+ * For dual-faced cards, ONLY the front face is considered.
  */
 export function getCardColorGroup(card: {
   name?: string;
   colors?: string[];
-  card_faces?: Array<{ colors?: string[]; mana_cost?: string; type_line?: string }>;
+  card_faces?: Array<{ colors?: string[]; mana_cost?: string; type_line?: string; color_indicator?: string[] }>;
   mana_cost?: string;
   type_line?: string;
+  typeLine?: string;
   color_identity?: string[];
 }): 'W' | 'U' | 'B' | 'R' | 'G' | 'multi' | 'colorless' | 'land' {
-  const typeLine = (card.type_line || (card as any).typeLine || '').toLowerCase();
-  if (typeLine.includes('land') || (card.name && isBasicLandName(card.name))) {
+  if (isCardLand(card)) {
     return 'land';
   }
 
@@ -859,10 +918,6 @@ export function getCardColorGroup(card: {
   return 'multi';
 }
 
-/**
- * Returns a numerical sort rank for color sorting in standard MTG order:
- * W (1) -> U (2) -> B (3) -> R (4) -> G (5) -> Multi (6) -> Colorless (7) -> Land (8)
- */
 export function getCardColorCategoryRank(card: {
   name?: string;
   colors?: string[];
@@ -1511,9 +1566,9 @@ export function canCardsPartnerTogether(
  * Lands are always assigned the lowest priority (highest number) so they appear at the bottom.
  */
 export function getCardCategorySortOrder(card: { type_line?: string }): number {
-  const t = (card.type_line || (card as any).typeLine || '').toLowerCase();
+  const t = getCardFrontTypeLine(card);
   // Lands must be at the bottom of the sort
-  if (t.includes('land')) return 99;
+  if (t.includes('land') || isBasicLandName((card as any).name)) return 99;
   if (t.includes('creature') || t.includes('summon')) return 1;
   if (t.includes('planeswalker')) return 2;
   if (t.includes('battle')) return 3;
@@ -1845,7 +1900,7 @@ export function adjustDeckListBBCode(
 
     const getCat = (c?: DeckCard): string => {
       if (!c) return 'Other';
-      const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
+      const type = getCardFrontTypeLine(c);
       if (type.includes('land')) return 'Land';
       if (type.includes('creature')) return 'Creature';
       if (type.includes('planeswalker')) return 'Planeswalker';
@@ -1954,10 +2009,9 @@ export function generateDeckPickListLocal(deck: Deck): string {
   const grouped = {};
 
   const getColorGroup = (c) => {
-    const colors = c.colors || [];
+    const colors = getCardEffectiveColors(c);
     if (colors.length === 0) {
-      const type = (c.type_line || (c as any).typeLine || '').toLowerCase();
-      if (type.includes('land')) return 'Colorless (Lands)';
+      if (isCardLand(c)) return 'Colorless (Lands)';
       return 'Colorless (Non-Lands)';
     }
     if (colors.length > 1) return 'Multicolor';
@@ -2460,7 +2514,7 @@ export function calculateCommanderSaltAndPower(deck: Deck): DeckPowerAndSaltResu
     // Tutors
     if (
       ['demonic tutor', 'vampiric tutor', 'mystical tutor', 'worldly tutor', 'enlightened tutor', 'gamble', 'imperial seal'].includes(lowerName) ||
-      (oracle.includes('search your library') && !typeLine.includes('land') && (c.cmc || 0) <= 3 && !oracle.includes('basic land'))
+      (oracle.includes('search your library') && !isCardLand(c) && (c.cmc || 0) <= 3 && !oracle.includes('basic land'))
     ) {
       tutorCount += c.quantity || 1;
     }

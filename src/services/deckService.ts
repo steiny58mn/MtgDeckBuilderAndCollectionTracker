@@ -18,6 +18,7 @@ import {
   isCardGamechanger,
   getCardEffectiveColors,
   isBasicLandName,
+  isCardLand,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
 
@@ -327,7 +328,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   const needsEnrichment = deck.cards.some((c) => {
     const hasType = Boolean((c.type_line || c.typeLine || '').trim());
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
-    const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+    const isLand = isCardLand(c);
     return !hasType || (!hasColorOrMana && !isLand);
   });
 
@@ -462,7 +463,7 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
   const cardsNeedingEnrichment = allCards.filter((c) => {
     const hasType = Boolean((c.type_line || c.typeLine || '').trim());
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
-    const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+    const isLand = isCardLand(c);
     const hasSet = Boolean((c.set || '').trim());
     return !hasType || (!hasColorOrMana && !isLand) || !hasSet;
   });

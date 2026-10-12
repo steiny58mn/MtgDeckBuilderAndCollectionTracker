@@ -64,6 +64,8 @@ import {
   getCardColorCategoryRank,
   compareCardsByColor,
   getCardColorGroup,
+  getCardFrontTypeLine,
+  isCardLand,
   detectGamechangers,
   isCardGamechanger,
   sortWUBRG,
@@ -700,7 +702,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const missingCount = deck.cards.filter((c) => {
       const hasType = Boolean((c.type_line || c.typeLine || '').trim());
       const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
-      const isLand = (c.type_line || c.typeLine || '').toLowerCase().includes('land') || isBasicLandName(c.name);
+      const isLand = isCardLand(c);
       return !hasType || (!hasColorOrMana && !isLand);
     }).length;
 
@@ -1818,11 +1820,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     };
 
     cards.forEach((c) => {
-      let t = (c.type_line || c.typeLine || '').toLowerCase();
+      let t = getCardFrontTypeLine(c);
       if (!t && c.name) {
         const cached = getCardFromLocalCache(c.name);
-        if (cached && (cached.type_line || (cached as any).typeLine)) {
-          t = (cached.type_line || (cached as any).typeLine || '').toLowerCase();
+        if (cached) {
+          t = getCardFrontTypeLine(cached);
         }
       }
       if (!t && c.name && isBasicLandName(c.name)) {
@@ -4055,24 +4057,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       catOrder.forEach((k) => catMap.set(k, []));
 
       cards.forEach((c) => {
-        let t = (c.type_line || c.typeLine || '').toLowerCase();
+        let t = getCardFrontTypeLine(c);
         if (!t && c.name) {
           const cached = getCardFromLocalCache(c.name);
-          if (cached && (cached.type_line || (cached as any).typeLine)) {
-            t = (cached.type_line || (cached as any).typeLine || '').toLowerCase();
+          if (cached) {
+            t = getCardFrontTypeLine(cached);
           }
         }
         if (!t && c.name && isBasicLandName(c.name)) {
           t = 'basic land';
         }
-        if (t.includes('creature')) catMap.get('Creatures')!.push(c);
+        if (t.includes('creature') || t.includes('summon')) catMap.get('Creatures')!.push(c);
         else if (t.includes('planeswalker')) catMap.get('Planeswalkers')!.push(c);
+        else if (t.includes('battle')) catMap.get('Battles')!.push(c);
         else if (t.includes('instant')) catMap.get('Instants')!.push(c);
         else if (t.includes('sorcery')) catMap.get('Sorceries')!.push(c);
+        else if (t.includes('land')) catMap.get('Lands')!.push(c);
         else if (t.includes('artifact')) catMap.get('Artifacts')!.push(c);
         else if (t.includes('enchantment')) catMap.get('Enchantments')!.push(c);
-        else if (t.includes('battle')) catMap.get('Battles')!.push(c);
-        else if (t.includes('land')) catMap.get('Lands')!.push(c);
         else catMap.get('Other')!.push(c);
       });
 

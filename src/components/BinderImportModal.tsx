@@ -107,7 +107,7 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
       setStatusMessage(`Adding ${parsed.length} card entries to binder...`);
       const newCollectionCards = convertParsedCardsToCollectionCards(parsed, targetBinderId);
 
-      setStatusMessage(`Resolving exact printings & metadata from Scryfall (${newCollectionCards.length} cards)...`);
+      setStatusMessage(`Resolving printings & metadata (${newCollectionCards.length} cards)...`);
       const cardsToFetch = newCollectionCards.map((c) => ({
         name: c.name,
         set: c.set,
@@ -115,7 +115,9 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
         scryfallId: c.scryfallId,
         collectorNumber: c.collectorNumber,
       }));
-      const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
+      const scryfallMap = await fetchBatchCardsCollection(cardsToFetch, (done, total) => {
+        setStatusMessage(`Resolving printings & metadata (${done}/${total} cards)...`);
+      });
 
       const enrichedCollectionCards = newCollectionCards.map((c) => {
         const scryfallId = (c.scryfallId || '').toLowerCase().trim();
