@@ -36,7 +36,10 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
-  ExternalLink
+  ExternalLink,
+  Flame,
+  ShieldAlert,
+  Scroll
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
 import { getCardNames } from '../utils/cardNameUtils';
@@ -154,7 +157,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRarity, setSelectedRarity] = useState<string>('all');
-  const [selectedCondition, setSelectedCondition] = useState<string>('all');
   const [selectedSet, setSelectedSet] = useState<string>('all');
   const [selectedColor, setSelectedColor] = useState<string>('all');
   const [onlyFoil, setOnlyFoil] = useState(false);
@@ -460,7 +462,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   // Reset displayLimit whenever filters or sort criteria change
   useEffect(() => {
     setDisplayLimit(INITIAL_PAGE_SIZE);
-  }, [selectedBinderFilter, deferredSearchQuery, selectedRarity, selectedCondition, selectedSet, selectedColor, onlyFoil, sortBy, selectedCategoryTab]);
+  }, [selectedBinderFilter, deferredSearchQuery, selectedRarity, selectedSet, selectedColor, onlyFoil, sortBy, selectedCategoryTab]);
 
   // Fast filtered cards (memoized using pre-indexed search strings)
   const filteredCards = useMemo(() => {
@@ -475,7 +477,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       }
 
       if (selectedRarity !== 'all' && item.rarity !== selectedRarity) return false;
-      if (selectedCondition !== 'all' && item.condition !== selectedCondition) return false;
       if (selectedSet !== 'all' && item.setName !== selectedSet && item.set !== selectedSet) return false;
       if (selectedColor !== 'all' && idx) {
         if (selectedColor === 'colorless') {
@@ -488,7 +489,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
 
       return true;
     });
-  }, [binderFilteredCollection, cardSearchIndexMap, deferredSearchQuery, selectedRarity, selectedCondition, selectedSet, selectedColor, onlyFoil]);
+  }, [binderFilteredCollection, cardSearchIndexMap, deferredSearchQuery, selectedRarity, selectedSet, selectedColor, onlyFoil]);
 
 
 
@@ -556,20 +557,28 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
   const groupedCategories = useMemo(() => {
     const groups: Record<string, CollectionCard[]> = {
       'Creatures': [],
-      'Instants & Sorceries': [],
-      'Artifacts & Enchantments': [],
       'Planeswalkers': [],
+      'Battles': [],
+      'Instants': [],
+      'Sorceries': [],
+      'Artifacts': [],
+      'Enchantments': [],
+      'Conspiracies': [],
       'Lands': [],
       'Other': [],
     };
 
     for (const c of sortedCards) {
       const t = getCardFrontTypeLine(c);
-      if (t.includes('creature')) groups['Creatures'].push(c);
-      else if (t.includes('instant') || t.includes('sorcery')) groups['Instants & Sorceries'].push(c);
-      else if (t.includes('artifact') || t.includes('enchantment')) groups['Artifacts & Enchantments'].push(c);
+      if (t.includes('creature') || t.includes('summon')) groups['Creatures'].push(c);
       else if (t.includes('planeswalker')) groups['Planeswalkers'].push(c);
+      else if (t.includes('battle')) groups['Battles'].push(c);
+      else if (t.includes('instant')) groups['Instants'].push(c);
+      else if (t.includes('sorcery')) groups['Sorceries'].push(c);
       else if (t.includes('land')) groups['Lands'].push(c);
+      else if (t.includes('artifact')) groups['Artifacts'].push(c);
+      else if (t.includes('enchantment')) groups['Enchantments'].push(c);
+      else if (t.includes('conspiracy')) groups['Conspiracies'].push(c);
       else groups['Other'].push(c);
     }
 
@@ -581,50 +590,82 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     {
       name: 'Creatures',
       icon: <Swords className="w-4 h-4 text-emerald-400" />,
-      cards: groupedCategories['Creatures'],
-      totalQty: groupedCategories['Creatures'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Creatures'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Creatures'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
-    },
-    {
-      name: 'Instants & Sorceries',
-      icon: <Zap className="w-4 h-4 text-sky-400" />,
-      cards: groupedCategories['Instants & Sorceries'],
-      totalQty: groupedCategories['Instants & Sorceries'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Instants & Sorceries'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Instants & Sorceries'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
-    },
-    {
-      name: 'Artifacts & Enchantments',
-      icon: <Shield className="w-4 h-4 text-violet-400" />,
-      cards: groupedCategories['Artifacts & Enchantments'],
-      totalQty: groupedCategories['Artifacts & Enchantments'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Artifacts & Enchantments'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Artifacts & Enchantments'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+      cards: groupedCategories['Creatures'] || [],
+      totalQty: (groupedCategories['Creatures'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Creatures'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Creatures'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
     },
     {
       name: 'Planeswalkers',
       icon: <Sparkles className="w-4 h-4 text-violet-400" />,
-      cards: groupedCategories['Planeswalkers'],
-      totalQty: groupedCategories['Planeswalkers'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Planeswalkers'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Planeswalkers'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+      cards: groupedCategories['Planeswalkers'] || [],
+      totalQty: (groupedCategories['Planeswalkers'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Planeswalkers'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Planeswalkers'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Battles',
+      icon: <ShieldAlert className="w-4 h-4 text-rose-400" />,
+      cards: groupedCategories['Battles'] || [],
+      totalQty: (groupedCategories['Battles'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Battles'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Battles'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Instants',
+      icon: <Zap className="w-4 h-4 text-sky-400" />,
+      cards: groupedCategories['Instants'] || [],
+      totalQty: (groupedCategories['Instants'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Instants'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Instants'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Sorceries',
+      icon: <Flame className="w-4 h-4 text-amber-400" />,
+      cards: groupedCategories['Sorceries'] || [],
+      totalQty: (groupedCategories['Sorceries'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Sorceries'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Sorceries'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Artifacts',
+      icon: <Shield className="w-4 h-4 text-cyan-400" />,
+      cards: groupedCategories['Artifacts'] || [],
+      totalQty: (groupedCategories['Artifacts'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Artifacts'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Artifacts'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Enchantments',
+      icon: <Bookmark className="w-4 h-4 text-purple-400" />,
+      cards: groupedCategories['Enchantments'] || [],
+      totalQty: (groupedCategories['Enchantments'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Enchantments'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Enchantments'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+    },
+    {
+      name: 'Conspiracies',
+      icon: <Scroll className="w-4 h-4 text-orange-400" />,
+      cards: groupedCategories['Conspiracies'] || [],
+      totalQty: (groupedCategories['Conspiracies'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Conspiracies'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Conspiracies'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
     },
     {
       name: 'Lands',
       icon: <Mountain className="w-4 h-4 text-fuchsia-600" />,
-      cards: groupedCategories['Lands'],
-      totalQty: groupedCategories['Lands'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Lands'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Lands'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+      cards: groupedCategories['Lands'] || [],
+      totalQty: (groupedCategories['Lands'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Lands'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Lands'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
     },
     {
       name: 'Other',
       icon: <BookOpen className="w-4 h-4 text-slate-400" />,
-      cards: groupedCategories['Other'],
-      totalQty: groupedCategories['Other'].reduce((s, c) => s + c.quantity, 0),
-      totalValue: groupedCategories['Other'].reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
-      totalFoils: groupedCategories['Other'].filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
+      cards: groupedCategories['Other'] || [],
+      totalQty: (groupedCategories['Other'] || []).reduce((s, c) => s + c.quantity, 0),
+      totalValue: (groupedCategories['Other'] || []).reduce((s, c) => s + ((cardPriceMap.get(c.id)?.price || 0) * c.quantity), 0),
+      totalFoils: (groupedCategories['Other'] || []).filter((c) => c.isFoil).reduce((s, c) => s + c.quantity, 0),
     },
   ], [groupedCategories, cardPriceMap]);
 
@@ -672,11 +713,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     });
   }, [startTransition]);
 
-  const updateCondition = useCallback((val: string) => {
-    startTransition(() => {
-      setSelectedCondition(val);
-    });
-  }, [startTransition]);
 
   const updateSet = useCallback((val: string) => {
     startTransition(() => {
@@ -1192,19 +1228,7 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
               <option value="common">Common</option>
             </select>
 
-            {/* Condition */}
-            <select
-              value={selectedCondition}
-              onChange={(e) => updateCondition(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2 sm:px-2.5 py-1.5 text-slate-300 focus:outline-none shrink-0"
-            >
-              <option value="all">All Conditions</option>
-              <option value="NM">Near Mint (NM)</option>
-              <option value="LP">Lightly Played (LP)</option>
-              <option value="MP">Moderately Played (MP)</option>
-              <option value="HP">Heavily Played (HP)</option>
-              <option value="DMG">Damaged (DMG)</option>
-            </select>
+            
 
             {/* Foil Toggle */}
             <label className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 cursor-pointer shrink-0">
@@ -1249,25 +1273,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
 
             {/* Sort */}
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 max-w-full">
-              <button
-                type="button"
-                onClick={() => updateSortBy(sortBy === 'name' ? 'name-desc' : 'name')}
-                className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                  sortBy === 'name' || sortBy === 'name-desc'
-                    ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 shadow-sm'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                }`}
-                title="Sort cards alphabetically (toggles A-Z / Z-A)"
-              >
-                <span className="text-[11px] whitespace-nowrap">Sort: A-Z</span>
-                {sortBy === 'name' ? (
-                  <ArrowDown className="w-3.5 h-3.5 text-emerald-400" />
-                ) : sortBy === 'name-desc' ? (
-                  <ArrowUp className="w-3.5 h-3.5 text-emerald-400" />
-                ) : (
-                  <ArrowDown className="w-3.5 h-3.5 text-slate-500" />
-                )}
-              </button>
               <select
                 value={sortBy}
                 onChange={(e) => updateSortBy(e.target.value as any)}
@@ -1510,9 +1515,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                         </>
                                       )}
                                     </button>
-                                    <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-400">
-                                      {card.condition}
-                                    </span>
                                   </div>
                                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                                     {(() => {
@@ -1686,10 +1688,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                           {priceInfo.isMedian && (
                             <span className="text-[9px] font-normal text-amber-300" title="Median price used">(med)</span>
                           )}
-                        </div>
-
-                        <div className="absolute bottom-1.5 right-1.5 bg-slate-900/90 border border-slate-700 rounded-md px-1 py-0.5 text-[9px] font-mono text-slate-300">
-                          {card.condition}
                         </div>
                       </div>
 
@@ -1876,7 +1874,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                       </th>
                       <th className="py-2.5 px-3">Set</th>
                       <th className="py-2.5 px-3">Finish</th>
-                      <th className="py-2.5 px-3">Condition</th>
                       <th className="py-2.5 px-3">Qty</th>
                       <th 
                         className="py-2.5 px-3 text-right cursor-pointer select-none hover:text-emerald-300 transition-colors"
@@ -1988,7 +1985,6 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                               )}
                             </button>
                           </td>
-                          <td className="py-2 px-3 font-mono text-slate-300 font-semibold text-xs">{card.condition}</td>
                           <td className="py-2 px-3 font-bold text-slate-100 font-mono text-xs">{card.quantity}</td>
                           <td className="py-2 px-3 text-right font-mono text-xs">
                             <div className="flex items-center justify-end gap-1.5">

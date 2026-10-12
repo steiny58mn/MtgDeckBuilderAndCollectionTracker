@@ -854,18 +854,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     <span>Foil</span>
                   </button>
 
-                  <select
-                    value={colCondition}
-                    onChange={(e) => setColCondition(e.target.value as CardCondition)}
-                    className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
-                  >
-                    <option value="NM">Near Mint (NM)</option>
-                    <option value="LP">Lightly Played (LP)</option>
-                    <option value="MP">Moderately Played (MP)</option>
-                    <option value="HP">Heavily Played (HP)</option>
-                    <option value="DMG">Damaged (DMG)</option>
-                  </select>
-
                   <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
                     <span className="text-xs text-slate-400 mr-1">Qty:</span>
                     <input

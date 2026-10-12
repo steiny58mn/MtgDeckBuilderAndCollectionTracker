@@ -48,7 +48,8 @@ import {
   Upload,
   ExternalLink,
   Camera,
-  Printer
+  Printer,
+  Scroll
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { getCardNames, getAllCardMatchNames } from '../utils/cardNameUtils';
@@ -1810,11 +1811,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const groups: Record<string, DeckCard[]> = {
       'Creatures': [],
       'Planeswalkers': [],
+      'Battles': [],
       'Instants': [],
       'Sorceries': [],
       'Artifacts': [],
       'Enchantments': [],
-      'Battles': [],
+      'Conspiracies': [],
       'Lands': [],
       'Other': [],
     };
@@ -1839,6 +1841,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       else if (t.includes('land')) groups['Lands'].push(c);
       else if (t.includes('artifact')) groups['Artifacts'].push(c);
       else if (t.includes('enchantment')) groups['Enchantments'].push(c);
+      else if (t.includes('conspiracy')) groups['Conspiracies'].push(c);
       else groups['Other'].push(c);
     });
 
@@ -1910,6 +1913,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           cards: groupedMain['Battles'],
           totalQty: groupedMain['Battles'].reduce((s, c) => s + c.quantity, 0),
           totalPrice: groupedMain['Battles'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
+        }]
+      : []),
+    ...((groupedMain['Conspiracies'] || []).length > 0
+      ? [{
+          id: 'conspiracies',
+          title: 'Conspiracies',
+          icon: <Scroll className="w-4 h-4 text-orange-400" />,
+          cards: groupedMain['Conspiracies'],
+          totalQty: groupedMain['Conspiracies'].reduce((s, c) => s + c.quantity, 0),
+          totalPrice: groupedMain['Conspiracies'].reduce((s, c) => s + ((c.isFoil && c.priceUsdFoil ? c.priceUsdFoil : c.priceUsd || 0) * c.quantity), 0),
         }]
       : []),
     {
@@ -4044,11 +4057,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       const catOrder = [
         'Creatures',
         'Planeswalkers',
+        'Battles',
         'Instants',
         'Sorceries',
         'Artifacts',
         'Enchantments',
-        'Battles',
+        'Conspiracies',
         'Lands',
         'Other',
       ];
@@ -4075,6 +4089,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         else if (t.includes('land')) catMap.get('Lands')!.push(c);
         else if (t.includes('artifact')) catMap.get('Artifacts')!.push(c);
         else if (t.includes('enchantment')) catMap.get('Enchantments')!.push(c);
+        else if (t.includes('conspiracy')) catMap.get('Conspiracies')!.push(c);
         else catMap.get('Other')!.push(c);
       });
 

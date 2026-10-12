@@ -1576,7 +1576,8 @@ export function getCardCategorySortOrder(card: { type_line?: string }): number {
   if (t.includes('sorcery')) return 5;
   if (t.includes('artifact')) return 6;
   if (t.includes('enchantment')) return 7;
-  return 8; // other
+  if (t.includes('conspiracy')) return 8;
+  return 9; // other
 }
 
 /**
@@ -1894,6 +1895,7 @@ export function adjustDeckListBBCode(
       'Artifact',
       'Enchantment',
       'Battle',
+      'Conspiracy',
       'Land',
       'Other',
     ];
@@ -1909,6 +1911,7 @@ export function adjustDeckListBBCode(
       if (type.includes('artifact')) return 'Artifact';
       if (type.includes('enchantment')) return 'Enchantment';
       if (type.includes('battle')) return 'Battle';
+      if (type.includes('conspiracy')) return 'Conspiracy';
       return 'Other';
     };
 
