@@ -701,7 +701,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   useEffect(() => {
     if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return;
     const missingCount = deck.cards.filter((c) => {
-      const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+      const rawType = (c.type_line || c.typeLine || '').trim();
+      const hasType = Boolean(rawType) && rawType.toLowerCase() !== 'no card type found';
       const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
       const isLand = isCardLand(c);
       return !hasType || (!hasColorOrMana && !isLand);
@@ -4673,7 +4674,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
               {(() => {
-                const displayType = card.type_line || card.typeLine || getCardFromLocalCache(card.name)?.type_line || (isBasicLandName(card.name) ? 'Basic Land' : '');
+                const rawType = (card.type_line || card.typeLine || '').trim();
+                const isInvalid = !rawType || rawType.toLowerCase() === 'no card type found';
+                const frontT = getCardFrontTypeLine(card);
+                const displayType = (!isInvalid ? rawType : (frontT ? (frontT.charAt(0).toUpperCase() + frontT.slice(1)) : (isBasicLandName(card.name) ? 'Basic Land' : '')));
                 return displayType ? (
                   <span className="truncate max-w-[140px] sm:max-w-none">{displayType}</span>
                 ) : null;

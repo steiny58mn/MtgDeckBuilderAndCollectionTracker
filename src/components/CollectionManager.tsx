@@ -1936,11 +1936,18 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
                                     >
                                       {names.actualName}
                                     </span>
-                                    {card.type_line && (
-                                      <span className="text-[11px] text-slate-500 hidden md:inline truncate">
-                                        · {card.type_line.split('—')[0].trim()}
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const frontT = getCardFrontTypeLine(card);
+                                      const rawType = (card.type_line || '').trim();
+                                      const displayType = (rawType && rawType.toLowerCase() !== 'no card type found')
+                                        ? rawType.split('—')[0].trim()
+                                        : (frontT ? (frontT.charAt(0).toUpperCase() + frontT.slice(1)).split('—')[0].trim() : '');
+                                      return displayType ? (
+                                        <span className="text-[11px] text-slate-500 hidden md:inline truncate">
+                                          · {displayType}
+                                        </span>
+                                      ) : null;
+                                    })()}
                                   </div>
                                   {names.hasAlternateName && names.subtitle && (
                                     <span

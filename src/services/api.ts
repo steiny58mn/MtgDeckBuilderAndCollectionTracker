@@ -4,6 +4,7 @@ import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConf
 import { GamechangerService } from './gamechangerService';
 import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName } from '../utils/deckUtils';
 import { filterPaperCardsOnly } from '../utils/cardUtils';
+import { KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from '../utils/cardNameUtils';
 
 export function getFrostpointBaseUrl(): string {
   const url = getApiBaseUrl();
@@ -24,6 +25,16 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     colors = c.colors.split('').filter((ch: string) => /[WUBRG]/i.test(ch));
   } else if (Array.isArray(c.card_faces?.[0]?.colors) && c.card_faces[0].colors.length > 0) {
     colors = c.card_faces[0].colors;
+  }
+  // If still empty or undefined, check front face mana cost or top level mana cost pips
+  if (!colors || colors.length === 0) {
+    const costForColors = c.card_faces?.[0]?.mana_cost || c.mana_cost || '';
+    if (costForColors) {
+      const pips = costForColors.match(/[WUBRG]/gi);
+      if (pips && pips.length > 0) {
+        colors = Array.from(new Set(pips.map((p) => p.toUpperCase())));
+      }
+    }
   }
 
   // Normalization for color_identity:
@@ -73,14 +84,30 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
     c.gameChanger === true
   );
 
+  const rawType = (c.type_line || c.type || c.typeLine || '').trim();
+  const isTypeInvalid = !rawType || rawType.toLowerCase() === 'no card type found';
+  const faceType = (c.card_faces?.[0]?.type_line || c.card_faces?.[0]?.type || '').trim();
+  const isFaceTypeValid = faceType && faceType.toLowerCase() !== 'no card type found';
+
+  let type_line = !isTypeInvalid ? rawType : (isFaceTypeValid ? faceType : '');
+
+  // Authoritative check for Conspiracies (all 25 MTG conspiracy cards)
+  const cNameLower = (c.name || '').toLowerCase().trim();
+  const cFrontNameLower = cNameLower.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+  if (KNOWN_CONSPIRACY_NAMES.has(cFrontNameLower) || KNOWN_CONSPIRACY_NAMES.has(cNameLower)) {
+    type_line = 'Conspiracy';
+  }
+
+  const mana_cost = c.mana_cost || c.card_faces?.[0]?.mana_cost || '';
+
   return {
     id: c.scryfall_id || c.id,
     name: c.name,
     layout: c.layout || 'normal',
     oracle_id: c.oracle_id,
-    mana_cost: c.mana_cost || c.card_faces?.[0]?.mana_cost || '',
+    mana_cost,
     cmc,
-    type_line: c.type_line || c.type || c.typeLine || c.card_faces?.[0]?.type_line || '',
+    type_line,
     oracle_text: c.oracle_text || c.card_faces?.[0]?.oracle_text || '',
     power: c.power,
     toughness: c.toughness,
@@ -175,8 +202,21 @@ export const cardByIdCache = new Map<string, ScryfallCard>();
 export function getCardFromLocalCache(nameOrId: string): ScryfallCard | undefined {
   if (!nameOrId || typeof nameOrId !== 'string') return undefined;
   const trimmed = nameOrId.trim().toLowerCase();
-  const front = trimmed.split(' // ')[0].trim();
-  return localCardCache.get(trimmed) || localCardCache.get(front) || cardByIdCache.get(trimmed);
+  const front = trimmed.split(/\s*\/\/\s*/)[0].trim();
+  const canonical = getCanonicalCardName(nameOrId).toLowerCase().trim();
+  const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+  const stripQuotes = trimmed.replace(/['"“”‘’`]/g, '').trim();
+  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').trim();
+
+  return (
+    localCardCache.get(trimmed) ||
+    localCardCache.get(front) ||
+    localCardCache.get(canonical) ||
+    localCardCache.get(canonicalFront) ||
+    localCardCache.get(stripQuotes) ||
+    localCardCache.get(stripQuotesFront) ||
+    cardByIdCache.get(trimmed)
+  );
 }
 
 // Initialize persistent card cache from localStorage
@@ -791,7 +831,9 @@ export async function fetchBatchCardsCollection(
     if (!raw || !raw.name) return;
     const normalized = normalizeFrostpointCard(raw);
     const exactLower = normalized.name.toLowerCase().trim();
-    const frontName = exactLower.split(' // ')[0].trim();
+    const frontName = exactLower.split(/\s*\/\/\s*/)[0].trim();
+    const canonicalName = getCanonicalCardName(normalized.name).toLowerCase().trim();
+    const canonicalFront = canonicalName.split(/\s*\/\/\s*/)[0].trim();
     const setLower = (normalized.set || '').toLowerCase().trim();
     const collNum = String(normalized.collector_number || '').trim();
 
@@ -806,15 +848,42 @@ export async function fetchBatchCardsCollection(
     if (setLower && exactLower) {
       cardMap.set(`${exactLower}|${setLower}`, normalized);
     }
+    if (setLower && frontName) {
+      cardMap.set(`${frontName}|${setLower}`, normalized);
+    }
     cardMap.set(exactLower, normalized);
     cardMap.set(frontName, normalized);
+    cardMap.set(canonicalName, normalized);
+    if (canonicalFront) cardMap.set(canonicalFront, normalized);
     localCardCache.set(exactLower, normalized);
     localCardCache.set(frontName, normalized);
+    localCardCache.set(canonicalName, normalized);
+    if (canonicalFront) localCardCache.set(canonicalFront, normalized);
+
+    // Also register quote-stripped variations
+    const stripQuotesExact = exactLower.replace(/['"“”‘’`]/g, '').trim();
+    const stripQuotesFront = frontName.replace(/['"“”‘’`]/g, '').trim();
+    if (stripQuotesExact) {
+      cardMap.set(stripQuotesExact, normalized);
+      localCardCache.set(stripQuotesExact, normalized);
+    }
+    if (stripQuotesFront) {
+      cardMap.set(stripQuotesFront, normalized);
+      localCardCache.set(stripQuotesFront, normalized);
+    }
   };
 
-  const isPopulatedCard = (c: any) => Boolean(
-    c && (c.type_line || c.type || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large)))
-  );
+  const isPopulatedCard = (c: any) => {
+    if (!c) return false;
+    const hasValidType = (c.type_line && c.type_line !== 'No Card Type Found') ||
+      (c.type && c.type !== 'No Card Type Found') ||
+      (c.card_faces?.[0]?.type_line && c.card_faces[0].type_line !== 'No Card Type Found');
+    const nameLower = (c.name || '').toLowerCase().trim();
+    const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(nameLower) || KNOWN_CONSPIRACY_NAMES.has(nameLower.split(/\s*\/\/\s*/)[0].trim());
+    return Boolean(
+      hasValidType || isConspiracy || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large))
+    );
+  };
 
   // 1. Primary resolution: Use FrostpointApi /deckbuilder/cards/lookup for bulk resolution
   // This avoids Scryfall CORS / Cloudflare rate limits and resolves against the 109k+ cards in Turso DB.
@@ -903,11 +972,14 @@ export async function fetchBatchCardsCollection(
           if (cleanSet && collNum) {
             return { set: cleanSet, collector_number: collNum };
           }
-          const cleanName = (it.name || '').trim();
-          if (cleanSet && cleanName) {
-            return { name: cleanName, set: cleanSet };
+          const rawName = (it.name || '').trim();
+          const canonical = getCanonicalCardName(rawName);
+          const cleanFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+          const queryName = cleanFront || canonical || rawName;
+          if (cleanSet && queryName) {
+            return { name: queryName, set: cleanSet };
           }
-          return { name: cleanName };
+          return { name: queryName };
         });
 
         const fetchScryfallBatch = async () => {

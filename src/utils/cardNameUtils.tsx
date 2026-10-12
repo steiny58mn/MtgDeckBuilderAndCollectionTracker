@@ -16,6 +16,112 @@ export interface CardNames {
 }
 
 /**
+ * All 25 official Magic: The Gathering cards printed with the card type "Conspiracy"
+ * (CNS and CN2 sets). Lowercase set for O(1) membership check.
+ */
+export const KNOWN_CONSPIRACY_NAMES: Set<string> = new Set([
+  "adriana's valor",
+  "advantageous proclamation",
+  "assemble the rank and vile",
+  "backup plan",
+  "brago's favor",
+  "double stroke",
+  "echoing boon",
+  "emissary's ploy",
+  "hired heist",
+  "hold the perimeter",
+  "hymn of the wilds",
+  "immediate action",
+  "incendiary dissent",
+  "iterative analysis",
+  "muzzio's preparations",
+  "natural unity",
+  "power play",
+  "secret summoning",
+  "secrets of paradise",
+  "sentinel dispatch",
+  "sovereign's realm",
+  "summoner's bond",
+  "unexpected potential",
+  "weight advantage",
+  "worldknit",
+]);
+
+/**
+ * Canonical dictionary of card name aliases, correcting common quotation marks,
+ * punctuation variations, ellipses, typos, and reversible double-faced cards.
+ */
+export const CANONICAL_CARD_NAME_ALIASES: Record<string, string> = {
+  // Sonic Secret Lair / Miles Prower typo variations
+  'mile "tails" power': 'Miles "Tails" Prower',
+  'mile tails power': 'Miles "Tails" Prower',
+  'miles "tails" prower': 'Miles "Tails" Prower',
+  'miles tails prower': 'Miles "Tails" Prower',
+  'miles \'tails\' prower': 'Miles "Tails" Prower',
+  'mile \'tails\' power': 'Miles "Tails" Prower',
+
+  // Kongming, "Sleeping Dragon" punctuation & quote variations
+  'kongming "sleeping dragon"': 'Kongming, "Sleeping Dragon"',
+  'kongming sleeping dragon': 'Kongming, "Sleeping Dragon"',
+  'kongming, "sleeping dragon"': 'Kongming, "Sleeping Dragon"',
+  'kongming, sleeping dragon': 'Kongming, "Sleeping Dragon"',
+  'kongming \'sleeping dragon\'': 'Kongming, "Sleeping Dragon"',
+  'kongming, \'sleeping dragon\'': 'Kongming, "Sleeping Dragon"',
+
+  // "Rumors of My Death . . ." quote and dot spacing variations
+  '"rumors of my death..."': '"Rumors of My Death . . ."',
+  '"rumors of my death . . ."': '"Rumors of My Death . . ."',
+  'rumors of my death...': '"Rumors of My Death . . ."',
+  'rumors of my death . . .': '"Rumors of My Death . . ."',
+  'rumors of my death': '"Rumors of My Death . . ."',
+  '\'rumors of my death...\'': '"Rumors of My Death . . ."',
+  '\'rumors of my death . . .\'': '"Rumors of My Death . . ."',
+
+  // Reversible double-faced cards (Secret Lair / Special Promos where both faces are the same)
+  'jetmir, nexus of revels // jetmir, nexus of revels': 'Jetmir, Nexus of Revels',
+  'jetmir, nexus of revels': 'Jetmir, Nexus of Revels',
+  "jinnie fay, jetmir's second // jinnie fay, jetmir's second": "Jinnie Fay, Jetmir's Second",
+  "jinnie fay, jetmir's second": "Jinnie Fay, Jetmir's Second",
+};
+
+/**
+ * Resolves a card name to its canonical MTG name, accounting for quotes,
+ * typos, ellipses, and reversible double-faced cards where both faces are identical.
+ */
+export function getCanonicalCardName(name: string): string {
+  if (!name || typeof name !== 'string') return '';
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. Direct alias match
+  if (CANONICAL_CARD_NAME_ALIASES[lower]) {
+    return CANONICAL_CARD_NAME_ALIASES[lower];
+  }
+
+  // 2. Quote-normalized match (strip straight and smart quotes)
+  const stripQuotes = lower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  if (CANONICAL_CARD_NAME_ALIASES[stripQuotes]) {
+    return CANONICAL_CARD_NAME_ALIASES[stripQuotes];
+  }
+
+  // 3. Reversible double-faced cards where both faces have the same name:
+  // e.g. "Jetmir, Nexus Of Revels // Jetmir, Nexus Of Revels" -> "Jetmir, Nexus of Revels"
+  if (trimmed.includes('//')) {
+    const parts = trimmed.split(/\s*\/\/\s*/);
+    if (parts.length === 2 && parts[0].trim().toLowerCase() === parts[1].trim().toLowerCase()) {
+      const front = parts[0].trim();
+      const frontLower = front.toLowerCase();
+      if (CANONICAL_CARD_NAME_ALIASES[frontLower]) {
+        return CANONICAL_CARD_NAME_ALIASES[frontLower];
+      }
+      return front;
+    }
+  }
+
+  return trimmed;
+}
+
+/**
  * Canonical dictionary of known Universes Beyond, Secret Lair, Godzilla, and Dracula crossover pairs.
  * Maps: unofficial name (lowercase) -> official Oracle name (canonical title).
  */
@@ -186,7 +292,6 @@ export function getCardNames(card: any): CardNames {
   ).trim();
 
   if (explicitAlt && explicitAlt.toLowerCase() !== rawName.toLowerCase()) {
-    // If card.name is the Oracle name and explicitAlt is the printed/flavor name:
     return {
       actualName: explicitAlt,
       displayName: explicitAlt,
@@ -198,6 +303,17 @@ export function getCardNames(card: any): CardNames {
   }
 
   const rawLower = rawName.toLowerCase();
+
+  // Check canonical alias / reversible card
+  const canonical = getCanonicalCardName(rawName);
+  if (canonical && canonical.toLowerCase() !== rawLower) {
+    return {
+      actualName: canonical,
+      displayName: canonical,
+      oracleName: canonical,
+      hasAlternateName: false,
+    };
+  }
 
   // Check if rawName is a known unofficial/crossover name (e.g. "Xenk, Paladin Unbroken")
   if (UNOFFICIAL_TO_ORACLE[rawLower]) {
@@ -261,7 +377,7 @@ export function getAllCardMatchNames(card: any): string[] {
     if (!lower) return;
     result.add(lower);
 
-    // Front face of split/DFC
+    // Front face of split/DFC/reversible
     const cleanFront = lower.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
     if (cleanFront) result.add(cleanFront);
 
@@ -271,6 +387,30 @@ export function getAllCardMatchNames(card: any): string[] {
 
     const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
     if (cleanFrontNoQuotes) result.add(cleanFrontNoQuotes);
+
+    // Stripped quotes altogether
+    const stripQuotes = lower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+    if (stripQuotes) result.add(stripQuotes);
+
+    const cleanFrontStripQuotes = cleanFront.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+    if (cleanFrontStripQuotes) result.add(cleanFrontStripQuotes);
+
+    // Check canonical alias
+    const canonical = CANONICAL_CARD_NAME_ALIASES[lower] || CANONICAL_CARD_NAME_ALIASES[stripQuotes];
+    if (canonical) {
+      const canLower = canonical.toLowerCase();
+      result.add(canLower);
+      const canStrip = canLower.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+      if (canStrip) result.add(canStrip);
+    }
+
+    // Dot variations: e.g. "rumors of my death..." <-> "rumors of my death . . ."
+    if (lower.includes('...')) {
+      result.add(lower.replace(/\.{3,}/g, '. . .'));
+    }
+    if (lower.includes('. . .')) {
+      result.add(lower.replace(/\.\s*\.\s*\./g, '...'));
+    }
   };
 
   addVariants(names.actualName);

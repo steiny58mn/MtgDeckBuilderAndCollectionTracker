@@ -21,6 +21,7 @@ import {
   isCardLand,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
+import { KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from '../utils/cardNameUtils';
 
 // ============================================================================
 // Types & Interfaces
@@ -142,7 +143,17 @@ export function normalizeCard(card: any): DeckCard {
   if (!card || typeof card !== 'object') return card;
   const cached = getCardFromLocalCache(card.name || card.scryfallId || card.id);
   const isBasic = isBasicLandName(card.name);
-  const typeLine = card.type_line || card.typeLine || card.TypeLine || cached?.type_line || cached?.card_faces?.[0]?.type_line || (isBasic ? 'Basic Land' : '');
+  const isInvalidType = (t?: string) => !t || t.trim().toLowerCase() === 'no card type found';
+  const rawType = card.type_line || card.typeLine || card.TypeLine || '';
+  const cleanFront = (card.name || '').toLowerCase().trim().split(/\s*\/\/\s*/)[0].trim();
+  const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cleanFront) || KNOWN_CONSPIRACY_NAMES.has((card.name || '').toLowerCase().trim());
+
+  let typeLine = !isInvalidType(rawType)
+    ? rawType
+    : (!isInvalidType(cached?.type_line) ? cached.type_line : (!isInvalidType(cached?.card_faces?.[0]?.type_line) ? cached.card_faces[0].type_line : (isBasic ? 'Basic Land' : '')));
+  if (isConspiracy) {
+    typeLine = 'Conspiracy';
+  }
   const manaCost = card.mana_cost || card.manaCost || card.ManaCost || cached?.mana_cost || cached?.card_faces?.[0]?.mana_cost || '';
   const setName = card.set_name || card.setName || card.SetName || cached?.set_name || '';
   const collectorNumber = card.collector_number || card.collectorNumber || card.CollectorNumber || cached?.collector_number || '';
@@ -248,6 +259,8 @@ export function normalizeDeck(deck: any): Deck {
   };
 }
 
+export const isInvalidType = (t?: string): boolean => !t || t.trim().toLowerCase() === 'no card type found';
+
 /**
  * Normalizes a collection / binder card from remote C# API or local state.
  */
@@ -325,10 +338,16 @@ export function normalizeBinderCard(card: any): CollectionCard {
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
 
+  const isInvalidType = (t?: string) => !t || t.trim().toLowerCase() === 'no card type found';
+
   const needsEnrichment = deck.cards.some((c) => {
-    const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+    const rawType = c.type_line || c.typeLine || '';
+    const hasType = Boolean(rawType.trim()) && !isInvalidType(rawType);
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
     const isLand = isCardLand(c);
+    const cClean = (c.name || '').toLowerCase().trim();
+    const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+    if (isConspiracy && rawType.toLowerCase() !== 'conspiracy') return true;
     return !hasType || (!hasColorOrMana && !isLand);
   });
 
@@ -353,18 +372,33 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
     const updatedCards = deck.cards.map((c) => {
       const scryfallId = (c.scryfallId || '').toLowerCase().trim();
       const exact = (c.name || '').toLowerCase().trim();
-      const front = exact.split(' // ')[0].trim();
+      const front = exact.split(/\s*\/\/\s*/)[0].trim();
+      const canonical = getCanonicalCardName(c.name || '').toLowerCase().trim();
+      const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
       const setCode = (c.set || '').toLowerCase().trim();
       const collNum = String(c.collectorNumber || c.collector_number || '').trim();
 
       const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
         || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
         || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
+        || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
+        || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
         || scryfallMap.get(exact)
         || scryfallMap.get(front)
-        || (scryfallId ? null : getCardFromLocalCache(c.name));
+        || scryfallMap.get(canonical)
+        || scryfallMap.get(canonicalFront)
+        || (scryfallId ? null : getCardFromLocalCache(c.name))
+        || (scryfallId ? null : getCardFromLocalCache(canonical));
       if (matched) {
-        const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || c.typeLine || '';
+        const cClean = (c.name || '').toLowerCase().trim();
+        const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+        let typeLine = (!isInvalidType(matched.type_line) ? matched.type_line : '') ||
+          (!isInvalidType(matched.card_faces?.[0]?.type_line) ? matched.card_faces[0].type_line : '') ||
+          (!isInvalidType(c.type_line) ? c.type_line : '') ||
+          (!isInvalidType(c.typeLine) ? c.typeLine : '');
+        if (isConspiracy) {
+          typeLine = 'Conspiracy';
+        }
         const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || c.manaCost || '';
         const img = matched.image_uris?.normal || matched.card_faces?.[0]?.image_uris?.normal || c.imageUrl;
         const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
@@ -377,7 +411,7 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
           : (c.color_identity || []);
         const isGc = isCardGamechanger(matched);
 
-        const typeMismatch = (!c.type_line || !c.typeLine) && Boolean(typeLine);
+        const typeMismatch = (isInvalidType(c.type_line) || isInvalidType(c.typeLine) || (isConspiracy && c.type_line?.toLowerCase() !== 'conspiracy')) && !isInvalidType(typeLine);
         const colorMismatch = (!c.colors || c.colors.length === 0) && colors.length > 0;
         const manaMismatch = (!c.mana_cost || !c.manaCost) && Boolean(manaCost);
         const gcMismatch = isCardGamechanger(c) !== isGc;
@@ -461,10 +495,14 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
 
   const allCards = bindersToEnrich.flatMap((b) => b.cards || []);
   const cardsNeedingEnrichment = allCards.filter((c) => {
-    const hasType = Boolean((c.type_line || c.typeLine || '').trim());
+    const rawType = c.type_line || c.typeLine || '';
+    const hasType = Boolean(rawType.trim()) && !isInvalidType(rawType);
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
     const isLand = isCardLand(c);
     const hasSet = Boolean((c.set || '').trim());
+    const cClean = (c.name || '').toLowerCase().trim();
+    const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+    if (isConspiracy && rawType.toLowerCase() !== 'conspiracy') return true;
     return !hasType || (!hasColorOrMana && !isLand) || !hasSet;
   });
 
@@ -490,18 +528,33 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
       const updatedCards = (binder.cards || []).map((c) => {
         const scryfallId = (c.scryfallId || '').toLowerCase().trim();
         const exact = (c.name || '').toLowerCase().trim();
-        const front = exact.split(' // ')[0].trim();
+        const front = exact.split(/\s*\/\/\s*/)[0].trim();
+        const canonical = getCanonicalCardName(c.name || '').toLowerCase().trim();
+        const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
         const setCode = (c.set || '').toLowerCase().trim();
         const collNum = String(c.collectorNumber || c.collector_number || '').trim();
 
         const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
           || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
           || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
+          || (setCode && front ? scryfallMap.get(`${front}|${setCode}`) : null)
+          || (setCode && canonicalFront ? scryfallMap.get(`${canonicalFront}|${setCode}`) : null)
           || scryfallMap.get(exact)
           || scryfallMap.get(front)
-          || (scryfallId ? null : getCardFromLocalCache(c.name));
+          || scryfallMap.get(canonical)
+          || scryfallMap.get(canonicalFront)
+          || (scryfallId ? null : getCardFromLocalCache(c.name))
+          || (scryfallId ? null : getCardFromLocalCache(canonical));
         if (matched) {
-          const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || c.typeLine || '';
+          const cClean = (c.name || '').toLowerCase().trim();
+          const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+          let typeLine = (!isInvalidType(matched.type_line) ? matched.type_line : '') ||
+            (!isInvalidType(matched.card_faces?.[0]?.type_line) ? matched.card_faces[0].type_line : '') ||
+            (!isInvalidType(c.type_line) ? c.type_line : '') ||
+            (!isInvalidType(c.typeLine) ? c.typeLine : '');
+          if (isConspiracy) {
+            typeLine = 'Conspiracy';
+          }
           const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || c.manaCost || '';
           const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
             ? matched.colors
@@ -513,7 +566,7 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
             : (c.color_identity || []);
           const isGc = isCardGamechanger(matched);
 
-          const typeMismatch = (!c.type_line || !c.typeLine) && Boolean(typeLine);
+          const typeMismatch = (isInvalidType(c.type_line) || isInvalidType(c.typeLine) || (isConspiracy && c.type_line?.toLowerCase() !== 'conspiracy')) && !isInvalidType(typeLine);
           const colorMismatch = (!c.colors || c.colors.length === 0) && colors.length > 0;
           const manaMismatch = (!c.mana_cost || !c.manaCost) && Boolean(manaCost);
           const oracleMismatch = !c.oracle_text && Boolean(matched.oracle_text || matched.card_faces?.[0]?.oracle_text);

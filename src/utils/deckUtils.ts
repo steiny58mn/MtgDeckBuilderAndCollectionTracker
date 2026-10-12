@@ -72,7 +72,7 @@ import {
   CompareDecks
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard } from '../types/mtg';
-import { getAllCardMatchNames } from './cardNameUtils';
+import { getAllCardMatchNames, KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from './cardNameUtils';
 
 /**
  * Standard basic land card names for fallback matching (11 canonical MTG basic lands and variants):
@@ -773,17 +773,43 @@ export function getCardFrontTypeLine(card?: {
   card_faces?: Array<{ type_line?: string }>;
 } | null): string {
   if (!card) return '';
+
+  const rawName = (card.name || '').trim().toLowerCase();
+  const frontName = rawName.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+
+  // 1. Authoritative check for Conspiracies (all 25 MTG conspiracy cards)
+  if (KNOWN_CONSPIRACY_NAMES.has(frontName) || KNOWN_CONSPIRACY_NAMES.has(rawName)) {
+    return 'conspiracy';
+  }
+
+  // 2. Front face of card_faces (ignore "no card type found")
   if (Array.isArray(card.card_faces) && card.card_faces.length > 0 && card.card_faces[0]?.type_line) {
-    return card.card_faces[0].type_line.toLowerCase().trim();
+    const faceType = card.card_faces[0].type_line.toLowerCase().trim();
+    if (faceType && faceType !== 'no card type found') {
+      return faceType;
+    }
   }
-  const raw = (card.type_line || (card as any).typeLine || '').toLowerCase().trim();
+
+  // 3. Card top-level type line (ignore "no card type found")
+  let raw = (card.type_line || (card as any).typeLine || (card as any).type || '').toLowerCase().trim();
+  if (raw === 'no card type found') {
+    raw = '';
+  }
   if (raw.includes(' // ')) {
-    return raw.split(' // ')[0].trim();
+    raw = raw.split(' // ')[0].trim();
+  } else if (raw.includes('//')) {
+    raw = raw.split('//')[0].trim();
   }
-  if (raw.includes('//')) {
-    return raw.split('//')[0].trim();
+  if (raw && raw !== 'no card type found') {
+    return raw;
   }
-  return raw;
+
+  // 4. Basic land check
+  if (card.name && isBasicLandName(card.name)) {
+    return 'basic land';
+  }
+
+  return '';
 }
 
 /**
