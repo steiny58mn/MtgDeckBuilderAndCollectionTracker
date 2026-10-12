@@ -5,7 +5,8 @@ import { DeckService } from '../services/deckService';
 import { parseCollectionCsv, convertParsedCardsToCollectionCards } from '../utils/csvCollectionParser';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { fetchBatchCardsCollection, getCardFromLocalCache, cardByIdCache } from '../services/api';
-import { getCardEffectiveColors, isCardGamechanger } from '../utils/deckUtils';
+import { getCardEffectiveColors, isCardGamechanger, isInvalidCardType, getCardFrontTypeLine } from '../utils/deckUtils';
+import { isConspiracyCardName, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
 
 interface BinderImportModalProps {
   isOpen: boolean;
@@ -126,15 +127,24 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
         const setCode = (c.set || '').toLowerCase().trim();
         const collNum = String(c.collectorNumber || '').trim();
 
+        const canonical = getCanonicalCardName(c.name || '');
+        const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
         const matched = (scryfallId ? (scryfallMap.get(scryfallId) || cardByIdCache.get(scryfallId)) : null)
           || (setCode && collNum ? scryfallMap.get(`${setCode}|${collNum}`) : null)
           || (setCode && exact ? scryfallMap.get(`${exact}|${setCode}`) : null)
           || scryfallMap.get(exact)
           || scryfallMap.get(front)
-          || (scryfallId ? null : getCardFromLocalCache(c.name));
+          || scryfallMap.get(canonical.toLowerCase())
+          || scryfallMap.get(canonicalFront.toLowerCase())
+          || (scryfallId ? null : getCardFromLocalCache(c.name))
+          || (scryfallId ? null : getCardFromLocalCache(canonical));
 
         if (matched) {
-          const typeLine = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
+          const rawType = matched.type_line || matched.card_faces?.[0]?.type_line || c.type_line || '';
+          const isConspiracy = isConspiracyCardName(c.name);
+          const knownType = getKnownCardType(c.name);
+          const isTypeValid = rawType && !isInvalidCardType(rawType);
+          const typeLine = isConspiracy ? 'Conspiracy' : (isTypeValid ? rawType : (knownType || getCardFrontTypeLine({ name: c.name }) || rawType));
           const manaCost = matched.mana_cost || matched.card_faces?.[0]?.mana_cost || c.mana_cost || '';
           const colors = (Array.isArray(matched.colors) && matched.colors.length > 0)
             ? matched.colors
@@ -202,6 +212,16 @@ export const BinderImportModal: React.FC<BinderImportModalProps> = ({
             currentPriceUsd: price > 0 ? price : (c.currentPriceUsd || 0),
             medianPriceUsd: price > 0 ? price : (c.medianPriceUsd || 0),
           };
+        }
+        const isConspiracy = isConspiracyCardName(c.name);
+        const knownType = getKnownCardType(c.name);
+        const curType = c.type_line || c.typeLine || '';
+        const isTypeValid = curType && !isInvalidCardType(curType);
+        if (isConspiracy) {
+          return { ...c, type_line: 'Conspiracy', typeLine: 'Conspiracy' };
+        } else if (!isTypeValid && (knownType || getCardFrontTypeLine({ name: c.name }))) {
+          const resolvedType = knownType || getCardFrontTypeLine({ name: c.name });
+          return { ...c, type_line: resolvedType, typeLine: resolvedType };
         }
         return c;
       });

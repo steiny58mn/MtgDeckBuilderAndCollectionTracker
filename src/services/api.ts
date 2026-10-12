@@ -2,9 +2,9 @@ import type React from 'react';
 import { ScryfallCard } from '../types/mtg';
 import { getApiBaseUrl, apiFetch, DEFAULT_PROD_API_URL } from '../config/apiConfig';
 import { GamechangerService } from './gamechangerService';
-import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName } from '../utils/deckUtils';
+import { getPartnerApiQuery, getCardPartnerInfo, getCandidatePartnerNames, filterAvailablePartners, sortCardsByName, setCardCacheLookup } from '../utils/deckUtils';
 import { filterPaperCardsOnly } from '../utils/cardUtils';
-import { KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from '../utils/cardNameUtils';
+import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
 
 export function getFrostpointBaseUrl(): string {
   const url = getApiBaseUrl();
@@ -85,17 +85,20 @@ export function normalizeFrostpointCard(c: any): ScryfallCard {
   );
 
   const rawType = (c.type_line || c.type || c.typeLine || '').trim();
-  const isTypeInvalid = !rawType || rawType.toLowerCase() === 'no card type found';
+  const isTypeInvalid = !rawType || rawType.toLowerCase() === 'no card type found' || rawType.toLowerCase() === 'card';
   const faceType = (c.card_faces?.[0]?.type_line || c.card_faces?.[0]?.type || '').trim();
-  const isFaceTypeValid = faceType && faceType.toLowerCase() !== 'no card type found';
+  const isFaceTypeValid = faceType && faceType.toLowerCase() !== 'no card type found' && faceType.toLowerCase() !== 'card';
 
   let type_line = !isTypeInvalid ? rawType : (isFaceTypeValid ? faceType : '');
 
   // Authoritative check for Conspiracies (all 25 MTG conspiracy cards)
-  const cNameLower = (c.name || '').toLowerCase().trim();
-  const cFrontNameLower = cNameLower.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-  if (KNOWN_CONSPIRACY_NAMES.has(cFrontNameLower) || KNOWN_CONSPIRACY_NAMES.has(cNameLower)) {
+  if (isConspiracyCardName(c.name)) {
     type_line = 'Conspiracy';
+  } else if (!type_line || isTypeInvalid) {
+    const known = getKnownCardType(c.name);
+    if (known) {
+      type_line = known;
+    }
   }
 
   const mana_cost = c.mana_cost || c.card_faces?.[0]?.mana_cost || '';
@@ -219,6 +222,9 @@ export function getCardFromLocalCache(nameOrId: string): ScryfallCard | undefine
   );
 }
 
+// Wire up global lookup in deckUtils so getCardFrontTypeLine can seamlessly access localCardCache
+setCardCacheLookup(getCardFromLocalCache);
+
 // Initialize persistent card cache from localStorage
 if (typeof window !== 'undefined') {
   try {
@@ -228,11 +234,16 @@ if (typeof window !== 'undefined') {
       if (Array.isArray(parsed)) {
         for (const c of parsed) {
           if (c && c.name) {
-            const exact = c.name.toLowerCase().trim();
-            localCardCache.set(exact, c);
-            const front = exact.split(' // ')[0].trim();
-            localCardCache.set(front, c);
-            if (c.id) cardByIdCache.set(c.id, c);
+            const normalized = normalizeFrostpointCard(c);
+            const exact = normalized.name.toLowerCase().trim();
+            localCardCache.set(exact, normalized);
+            const front = exact.split(/\s*\/\/\s*/)[0].trim();
+            localCardCache.set(front, normalized);
+            const canonical = getCanonicalCardName(normalized.name).toLowerCase().trim();
+            const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+            if (canonical) localCardCache.set(canonical, normalized);
+            if (canonicalFront) localCardCache.set(canonicalFront, normalized);
+            if (normalized.id) cardByIdCache.set(normalized.id, normalized);
           }
         }
       }
@@ -875,13 +886,13 @@ export async function fetchBatchCardsCollection(
 
   const isPopulatedCard = (c: any) => {
     if (!c) return false;
-    const hasValidType = (c.type_line && c.type_line !== 'No Card Type Found') ||
-      (c.type && c.type !== 'No Card Type Found') ||
-      (c.card_faces?.[0]?.type_line && c.card_faces[0].type_line !== 'No Card Type Found');
-    const nameLower = (c.name || '').toLowerCase().trim();
-    const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(nameLower) || KNOWN_CONSPIRACY_NAMES.has(nameLower.split(/\s*\/\/\s*/)[0].trim());
+    const hasValidType = (c.type_line && c.type_line.toLowerCase() !== 'no card type found' && c.type_line.toLowerCase() !== 'card') ||
+      (c.type && c.type.toLowerCase() !== 'no card type found' && c.type.toLowerCase() !== 'card') ||
+      (c.card_faces?.[0]?.type_line && c.card_faces[0].type_line.toLowerCase() !== 'no card type found' && c.card_faces[0].type_line.toLowerCase() !== 'card');
+    const isConspiracy = isConspiracyCardName(c.name);
+    const hasKnown = Boolean(getKnownCardType(c.name));
     return Boolean(
-      hasValidType || isConspiracy || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large))
+      hasValidType || isConspiracy || hasKnown || c.mana_cost || c.oracle_text || (c.image_uris && (c.image_uris.normal || c.image_uris.large))
     );
   };
 

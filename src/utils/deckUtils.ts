@@ -72,7 +72,25 @@ import {
   CompareDecks
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard } from '../types/mtg';
-import { getAllCardMatchNames, KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from './cardNameUtils';
+import {
+  getAllCardMatchNames,
+  KNOWN_CONSPIRACY_NAMES,
+  isConspiracyCardName,
+  KNOWN_CARD_TYPES,
+  getKnownCardType,
+  getCanonicalCardName
+} from './cardNameUtils';
+
+var cardCacheLookup: ((nameOrId: string) => any) | null = null;
+export function setCardCacheLookup(fn: (nameOrId: string) => any) {
+  cardCacheLookup = fn;
+}
+
+export function isInvalidCardType(t?: string): boolean {
+  if (!t || typeof t !== 'string') return true;
+  const lower = t.trim().toLowerCase();
+  return !lower || lower === 'no card type found' || lower === 'card';
+}
 
 /**
  * Standard basic land card names for fallback matching (11 canonical MTG basic lands and variants):
@@ -500,11 +518,13 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
   const colorPips = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
   const typeBreakdown: Record<string, number> = {
     Creature: 0,
+    Planeswalker: 0,
+    Battle: 0,
     Instant: 0,
     Sorcery: 0,
     Artifact: 0,
     Enchantment: 0,
-    Planeswalker: 0,
+    Conspiracy: 0,
     Land: 0,
     Other: 0,
   };
@@ -548,14 +568,16 @@ export function calculateDeckStats(deck: Deck, scope: 'main' | 'all' = 'main'): 
       }
 
       // Parse broad card types
-      const t = card.type_line || (card as any).typeLine || '';
-      if (t.includes('Creature')) typeBreakdown.Creature += qty;
-      else if (t.includes('Instant')) typeBreakdown.Instant += qty;
-      else if (t.includes('Sorcery')) typeBreakdown.Sorcery += qty;
-      else if (t.includes('Planeswalker')) typeBreakdown.Planeswalker += qty;
-      else if (t.includes('Artifact')) typeBreakdown.Artifact += qty;
-      else if (t.includes('Enchantment')) typeBreakdown.Enchantment += qty;
-      else if (t.includes('Land')) typeBreakdown.Land += qty;
+      const t = getCardFrontTypeLine(card);
+      if (t.includes('creature') || t.includes('summon')) typeBreakdown.Creature += qty;
+      else if (t.includes('planeswalker')) typeBreakdown.Planeswalker += qty;
+      else if (t.includes('battle')) typeBreakdown.Battle += qty;
+      else if (t.includes('instant')) typeBreakdown.Instant += qty;
+      else if (t.includes('sorcery')) typeBreakdown.Sorcery += qty;
+      else if (t.includes('artifact')) typeBreakdown.Artifact += qty;
+      else if (t.includes('enchantment')) typeBreakdown.Enchantment += qty;
+      else if (t.includes('conspiracy')) typeBreakdown.Conspiracy += qty;
+      else if (t.includes('land')) typeBreakdown.Land += qty;
       else typeBreakdown.Other += qty;
     }
 
@@ -770,29 +792,39 @@ export function getCardFrontTypeLine(card?: {
   name?: string;
   type_line?: string;
   typeLine?: string;
-  card_faces?: Array<{ type_line?: string }>;
+  type?: string;
+  card_faces?: Array<{ type_line?: string; type?: string }>;
 } | null): string {
   if (!card) return '';
 
-  const rawName = (card.name || '').trim().toLowerCase();
-  const frontName = rawName.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+  const cardName = card.name || (card as any).card_name || (card as any).cardName || '';
 
   // 1. Authoritative check for Conspiracies (all 25 MTG conspiracy cards)
-  if (KNOWN_CONSPIRACY_NAMES.has(frontName) || KNOWN_CONSPIRACY_NAMES.has(rawName)) {
+  if (isConspiracyCardName(cardName)) {
     return 'conspiracy';
   }
 
-  // 2. Front face of card_faces (ignore "no card type found")
-  if (Array.isArray(card.card_faces) && card.card_faces.length > 0 && card.card_faces[0]?.type_line) {
-    const faceType = card.card_faces[0].type_line.toLowerCase().trim();
-    if (faceType && faceType !== 'no card type found') {
+  if (cardName.toLowerCase().startsWith('invasion of ')) {
+    return 'battle — siege';
+  }
+
+  // 2. Authoritative check for known reversible cards / special printings
+  const knownType = getKnownCardType(cardName);
+  if (knownType) {
+    return knownType.toLowerCase().trim();
+  }
+
+  // 3. Front face of card_faces (ignore invalid types)
+  if (Array.isArray(card.card_faces) && card.card_faces.length > 0) {
+    const faceType = (card.card_faces[0]?.type_line || (card.card_faces[0] as any)?.type || '').toLowerCase().trim();
+    if (!isInvalidCardType(faceType)) {
       return faceType;
     }
   }
 
-  // 3. Card top-level type line (ignore "no card type found")
+  // 4. Card top-level type line (ignore invalid types)
   let raw = (card.type_line || (card as any).typeLine || (card as any).type || '').toLowerCase().trim();
-  if (raw === 'no card type found') {
+  if (isInvalidCardType(raw)) {
     raw = '';
   }
   if (raw.includes(' // ')) {
@@ -800,13 +832,32 @@ export function getCardFrontTypeLine(card?: {
   } else if (raw.includes('//')) {
     raw = raw.split('//')[0].trim();
   }
-  if (raw && raw !== 'no card type found') {
+  if (raw && !isInvalidCardType(raw)) {
     return raw;
   }
 
-  // 4. Basic land check
-  if (card.name && isBasicLandName(card.name)) {
+  // 5. Basic land check
+  if (cardName && isBasicLandName(cardName)) {
     return 'basic land';
+  }
+
+  // 6. Check cache lookup fallback if available
+  if (cardCacheLookup && cardName) {
+    const canonical = getCanonicalCardName(cardName);
+    const cleanFront = cardName.split(/\s*\/\/\s*/)[0].trim();
+    const cached = cardCacheLookup(cardName) || (cleanFront ? cardCacheLookup(cleanFront) : null) || (canonical ? cardCacheLookup(canonical) : null);
+    if (cached && cached !== card) {
+      if (Array.isArray(cached.card_faces) && cached.card_faces.length > 0) {
+        const cFaceType = (cached.card_faces[0]?.type_line || (cached.card_faces[0] as any)?.type || '').toLowerCase().trim();
+        if (!isInvalidCardType(cFaceType)) {
+          return cFaceType;
+        }
+      }
+      const cType = (cached.type_line || cached.typeLine || cached.type || '').toLowerCase().trim();
+      if (!isInvalidCardType(cType)) {
+        return cType.split(/\s*\/\/\s*/)[0].trim();
+      }
+    }
   }
 
   return '';
@@ -1591,7 +1642,7 @@ export function canCardsPartnerTogether(
  * Creatures -> Planeswalkers -> Battles -> Instants -> Sorceries -> Artifacts -> Enchantments -> Other -> Lands.
  * Lands are always assigned the lowest priority (highest number) so they appear at the bottom.
  */
-export function getCardCategorySortOrder(card: { type_line?: string }): number {
+export function getCardCategorySortOrder(card: { type_line?: string; name?: string }): number {
   const t = getCardFrontTypeLine(card);
   // Lands must be at the bottom of the sort
   if (t.includes('land') || isBasicLandName((card as any).name)) return 99;

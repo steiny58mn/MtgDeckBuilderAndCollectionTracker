@@ -42,9 +42,9 @@ import {
   Scroll
 } from 'lucide-react';
 import { CollectionCard, Deck, CardCondition, ScryfallCard, Binder } from '../types/mtg';
-import { getCardNames } from '../utils/cardNameUtils';
+import { getCardNames, getCanonicalCardName } from '../utils/cardNameUtils';
 import { DeckService } from '../services/deckService';
-import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError } from '../services/api';
+import { getKnownMedianPrice, toHighResImageUrl, handleCardImageError, getCardFromLocalCache } from '../services/api';
 import { scrollToTop } from '../utils/scrollUtils';
 import { getCardColorCategoryRank, getCardEffectiveColors, getCardFrontTypeLine } from '../utils/deckUtils';
 import { ManaCostBadge } from './ManaCostBadge';
@@ -569,7 +569,20 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
     };
 
     for (const c of sortedCards) {
-      const t = getCardFrontTypeLine(c);
+      let t = getCardFrontTypeLine(c);
+      if (!t && c.name) {
+        const cached = getCardFromLocalCache(c.name);
+        if (cached) {
+          t = getCardFrontTypeLine(cached);
+        }
+      }
+      if (!t && c.name) {
+        const canonical = getCanonicalCardName(c.name);
+        const cachedCan = getCardFromLocalCache(canonical);
+        if (cachedCan) {
+          t = getCardFrontTypeLine(cachedCan);
+        }
+      }
       if (t.includes('creature') || t.includes('summon')) groups['Creatures'].push(c);
       else if (t.includes('planeswalker')) groups['Planeswalkers'].push(c);
       else if (t.includes('battle')) groups['Battles'].push(c);

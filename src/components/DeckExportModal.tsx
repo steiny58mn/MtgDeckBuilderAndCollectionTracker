@@ -58,7 +58,9 @@ import {
   parseDeckImport, 
   ParsedDeckImport 
 } from '../utils/deckImport';
-import { fetchBatchCardsCollection } from '../services/api';
+import { fetchBatchCardsCollection, getCardFromLocalCache } from '../services/api';
+import { getCanonicalCardName, isConspiracyCardName, getKnownCardType } from '../utils/cardNameUtils';
+import { getCardFrontTypeLine, isInvalidCardType } from '../utils/deckUtils';
 import { DeckService } from '../services/deckService';
 
 export interface UploadedBatchDeckItem {
@@ -88,6 +90,62 @@ interface DeckExportModalProps {
   initialTab?: 'export' | 'import' | 'proxy' | 'nexus';
 }
 
+const resolveDeckCardEntry = (
+  entry: {
+    name: string;
+    set?: string;
+    set_name?: string;
+    collector_number?: string;
+    category?: any;
+    quantity: number;
+    isFoil?: boolean;
+  },
+  scryfallMap: Map<string, any>,
+  idPrefix: string
+): DeckCard => {
+  const exactLower = entry.name.toLowerCase().trim();
+  const frontLower = exactLower.split(/\s*\/\/\s*/)[0].trim();
+  const canonical = getCanonicalCardName(entry.name).toLowerCase().trim();
+  const canonicalFront = canonical.split(/\s*\/\/\s*/)[0].trim();
+  const matchedScry = scryfallMap.get(exactLower)
+    || scryfallMap.get(frontLower)
+    || scryfallMap.get(canonical)
+    || scryfallMap.get(canonicalFront)
+    || getCardFromLocalCache(entry.name)
+    || getCardFromLocalCache(canonical);
+
+  const isConspiracy = isConspiracyCardName(entry.name);
+  const knownType = getKnownCardType(entry.name);
+  const rawType = matchedScry?.type_line || matchedScry?.card_faces?.[0]?.type_line || '';
+  const isTypeValid = rawType && !isInvalidCardType(rawType);
+  const type_line = isConspiracy ? 'Conspiracy' : (isTypeValid ? rawType : (knownType || getCardFrontTypeLine({ name: entry.name })));
+
+  return {
+    id: `card-${Date.now()}-${idPrefix}-${Math.random().toString(36).substr(2, 5)}`,
+    scryfallId: matchedScry?.id || `custom-${Date.now()}-${idPrefix}`,
+    name: matchedScry?.name || entry.name,
+    set: matchedScry?.set || entry.set,
+    set_name: matchedScry?.set_name,
+    collector_number: matchedScry?.collector_number || entry.collector_number,
+    category: entry.category,
+    quantity: entry.quantity,
+    mana_cost: matchedScry?.mana_cost,
+    cmc: matchedScry?.cmc,
+    type_line,
+    oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
+    keywords: matchedScry?.keywords,
+    colors: matchedScry?.colors,
+    color_identity: matchedScry?.color_identity,
+    rarity: matchedScry?.rarity,
+    imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
+    priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
+    priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
+    isFoil: entry.isFoil,
+    isGamechanger: Boolean(matchedScry?.game_changer),
+    game_changer: Boolean(matchedScry?.game_changer),
+  };
+};
+
 export const DeckExportModal: React.FC<DeckExportModalProps> = ({
   deck,
   isHistorical = false,
@@ -901,36 +959,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
         const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
-        const resolvedCards: DeckCard[] = item.parsedDeck.cards.map((entry, idx) => {
-          const exactLower = entry.name.toLowerCase().trim();
-          const frontLower = exactLower.split(' // ')[0].trim();
-          const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
-
-          return {
-            id: `card-${Date.now()}-${i}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
-            name: matchedScry?.name || entry.name,
-            set: matchedScry?.set || entry.set,
-            set_name: matchedScry?.set_name,
-            collector_number: matchedScry?.collector_number || entry.collector_number,
-            category: entry.category,
-            quantity: entry.quantity,
-            mana_cost: matchedScry?.mana_cost,
-            cmc: matchedScry?.cmc,
-            type_line: matchedScry?.type_line || '',
-            oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-            keywords: matchedScry?.keywords,
-            colors: matchedScry?.colors,
-            color_identity: matchedScry?.color_identity,
-            rarity: matchedScry?.rarity,
-            imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
-            priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
-            priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
-            isFoil: entry.isFoil,
-            isGamechanger: Boolean(matchedScry?.game_changer),
-            game_changer: Boolean(matchedScry?.game_changer),
-          };
-        });
+        const resolvedCards: DeckCard[] = item.parsedDeck.cards.map((entry, idx) => resolveDeckCardEntry(entry, scryfallMap, `${i}-${idx}`));
 
         // Promote sideboard to commander if Commander format and 1-2 sideboard cards
         if (item.deckFormat === 'commander') {
@@ -1031,36 +1060,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
       setResolveProgress('Assembling deck and categories...');
 
-      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => {
-        const exactLower = item.name.toLowerCase().trim();
-        const frontLower = exactLower.split(' // ')[0].trim();
-        const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
-
-        return {
-          id: `card-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-          scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
-          name: matchedScry?.name || item.name,
-          set: matchedScry?.set || item.set,
-          set_name: matchedScry?.set_name,
-          collector_number: matchedScry?.collector_number || item.collector_number,
-          category: item.category,
-          quantity: item.quantity,
-          mana_cost: matchedScry?.mana_cost,
-          cmc: matchedScry?.cmc,
-          type_line: matchedScry?.type_line || '',
-          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-          keywords: matchedScry?.keywords,
-          colors: matchedScry?.colors,
-          color_identity: matchedScry?.color_identity,
-          rarity: matchedScry?.rarity,
-          imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
-          priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
-          priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
-          isFoil: item.isFoil,
-          isGamechanger: Boolean(matchedScry?.game_changer),
-          game_changer: Boolean(matchedScry?.game_changer),
-        };
-      });
+      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => resolveDeckCardEntry(item, scryfallMap, `${idx}`));
 
       if (customDeckFormat === 'commander') {
         const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
@@ -1129,36 +1129,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
 
       const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
-      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => {
-        const exactLower = item.name.toLowerCase().trim();
-        const frontLower = exactLower.split(' // ')[0].trim();
-        const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
-
-        return {
-          id: `card-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-          scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
-          name: matchedScry?.name || item.name,
-          set: matchedScry?.set || item.set,
-          set_name: matchedScry?.set_name,
-          collector_number: matchedScry?.collector_number || item.collector_number,
-          category: item.category,
-          quantity: item.quantity,
-          mana_cost: matchedScry?.mana_cost,
-          cmc: matchedScry?.cmc,
-          type_line: matchedScry?.type_line || '',
-          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-          keywords: matchedScry?.keywords,
-          colors: matchedScry?.colors,
-          color_identity: matchedScry?.color_identity,
-          rarity: matchedScry?.rarity,
-          imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
-          priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
-          priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
-          isFoil: item.isFoil,
-          isGamechanger: Boolean(matchedScry?.game_changer),
-          game_changer: Boolean(matchedScry?.game_changer),
-        };
-      });
+      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => resolveDeckCardEntry(item, scryfallMap, `${idx}`));
 
       if (customDeckFormat === 'commander') {
         const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');
@@ -1221,36 +1192,7 @@ export const DeckExportModal: React.FC<DeckExportModalProps> = ({
       const cardsToFetch = parsedPreview.cards.map((c) => ({ name: c.name, set: c.set }));
       const scryfallMap = await fetchBatchCardsCollection(cardsToFetch);
 
-      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => {
-        const exactLower = item.name.toLowerCase().trim();
-        const frontLower = exactLower.split(' // ')[0].trim();
-        const matchedScry = scryfallMap.get(exactLower) || scryfallMap.get(frontLower);
-
-        return {
-          id: `card-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-          scryfallId: matchedScry?.id || `custom-${Date.now()}-${idx}`,
-          name: matchedScry?.name || item.name,
-          set: matchedScry?.set || item.set,
-          set_name: matchedScry?.set_name,
-          collector_number: matchedScry?.collector_number || item.collector_number,
-          category: item.category,
-          quantity: item.quantity,
-          mana_cost: matchedScry?.mana_cost,
-          cmc: matchedScry?.cmc,
-          type_line: matchedScry?.type_line || '',
-          oracle_text: matchedScry?.oracle_text || matchedScry?.card_faces?.[0]?.oracle_text,
-          keywords: matchedScry?.keywords,
-          colors: matchedScry?.colors,
-          color_identity: matchedScry?.color_identity,
-          rarity: matchedScry?.rarity,
-          imageUrl: matchedScry?.image_uris?.normal || matchedScry?.card_faces?.[0]?.image_uris?.normal,
-          priceUsd: matchedScry?.prices?.usd ? parseFloat(matchedScry.prices.usd) : undefined,
-          priceUsdFoil: matchedScry?.prices?.usd_foil ? parseFloat(matchedScry.prices.usd_foil) : undefined,
-          isFoil: item.isFoil,
-          isGamechanger: Boolean(matchedScry?.game_changer),
-          game_changer: Boolean(matchedScry?.game_changer),
-        };
-      });
+      const resolvedCards: DeckCard[] = parsedPreview.cards.map((item, idx) => resolveDeckCardEntry(item, scryfallMap, `${idx}`));
 
       if (deck && deck.format === 'commander' && !deck.cards.some((c) => c.category === 'commander')) {
         const cmdrCards = resolvedCards.filter((c) => c.category === 'commander');

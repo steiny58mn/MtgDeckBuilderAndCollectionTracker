@@ -21,7 +21,8 @@ import {
   isCardLand,
 } from '../utils/deckUtils';
 import { getTcgplayerMarketPrice } from '../utils/priceUtils';
-import { KNOWN_CONSPIRACY_NAMES, getCanonicalCardName } from '../utils/cardNameUtils';
+import { KNOWN_CONSPIRACY_NAMES, isConspiracyCardName, KNOWN_CARD_TYPES, getKnownCardType, getCanonicalCardName } from '../utils/cardNameUtils';
+import { isInvalidCardType } from '../utils/deckUtils';
 
 // ============================================================================
 // Types & Interfaces
@@ -143,14 +144,13 @@ export function normalizeCard(card: any): DeckCard {
   if (!card || typeof card !== 'object') return card;
   const cached = getCardFromLocalCache(card.name || card.scryfallId || card.id);
   const isBasic = isBasicLandName(card.name);
-  const isInvalidType = (t?: string) => !t || t.trim().toLowerCase() === 'no card type found';
   const rawType = card.type_line || card.typeLine || card.TypeLine || '';
-  const cleanFront = (card.name || '').toLowerCase().trim().split(/\s*\/\/\s*/)[0].trim();
-  const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cleanFront) || KNOWN_CONSPIRACY_NAMES.has((card.name || '').toLowerCase().trim());
+  const isConspiracy = isConspiracyCardName(card.name);
+  const knownType = getKnownCardType(card.name);
 
-  let typeLine = !isInvalidType(rawType)
+  let typeLine = !isInvalidCardType(rawType)
     ? rawType
-    : (!isInvalidType(cached?.type_line) ? cached.type_line : (!isInvalidType(cached?.card_faces?.[0]?.type_line) ? cached.card_faces[0].type_line : (isBasic ? 'Basic Land' : '')));
+    : (!isInvalidCardType(cached?.type_line) ? cached.type_line : (!isInvalidCardType(cached?.card_faces?.[0]?.type_line) ? cached.card_faces[0].type_line : (knownType || (isBasic ? 'Basic Land' : ''))));
   if (isConspiracy) {
     typeLine = 'Conspiracy';
   }
@@ -338,15 +338,14 @@ export function normalizeBinderCard(card: any): CollectionCard {
 export async function enrichDeckCards(deck: Deck): Promise<Deck> {
   if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
 
-  const isInvalidType = (t?: string) => !t || t.trim().toLowerCase() === 'no card type found';
+  const isInvalidType = isInvalidCardType;
 
   const needsEnrichment = deck.cards.some((c) => {
     const rawType = c.type_line || c.typeLine || '';
     const hasType = Boolean(rawType.trim()) && !isInvalidType(rawType);
     const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
     const isLand = isCardLand(c);
-    const cClean = (c.name || '').toLowerCase().trim();
-    const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+    const isConspiracy = isConspiracyCardName(c.name);
     if (isConspiracy && rawType.toLowerCase() !== 'conspiracy') return true;
     return !hasType || (!hasColorOrMana && !isLand);
   });
@@ -390,12 +389,13 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
         || (scryfallId ? null : getCardFromLocalCache(c.name))
         || (scryfallId ? null : getCardFromLocalCache(canonical));
       if (matched) {
-        const cClean = (c.name || '').toLowerCase().trim();
-        const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+        const isConspiracy = isConspiracyCardName(c.name);
+        const knownType = getKnownCardType(c.name);
         let typeLine = (!isInvalidType(matched.type_line) ? matched.type_line : '') ||
           (!isInvalidType(matched.card_faces?.[0]?.type_line) ? matched.card_faces[0].type_line : '') ||
           (!isInvalidType(c.type_line) ? c.type_line : '') ||
-          (!isInvalidType(c.typeLine) ? c.typeLine : '');
+          (!isInvalidType(c.typeLine) ? c.typeLine : '') ||
+          knownType || '';
         if (isConspiracy) {
           typeLine = 'Conspiracy';
         }
@@ -467,8 +467,10 @@ export async function enrichDeckCards(deck: Deck): Promise<Deck> {
       const enrichedDeck: Deck = {
         ...deck,
         cards: updatedCards,
+        updatedAt: Date.now(),
       };
       DeckService.updateDeckMetadataInMemory(enrichedDeck);
+      await DeckService.saveDeck(enrichedDeck);
       return enrichedDeck;
     }
   } catch (err) {
@@ -546,12 +548,13 @@ export async function enrichBinderCards(binderIdOrAll?: string): Promise<{ enric
           || (scryfallId ? null : getCardFromLocalCache(c.name))
           || (scryfallId ? null : getCardFromLocalCache(canonical));
         if (matched) {
-          const cClean = (c.name || '').toLowerCase().trim();
-          const isConspiracy = KNOWN_CONSPIRACY_NAMES.has(cClean) || KNOWN_CONSPIRACY_NAMES.has(cClean.split(/\s*\/\/\s*/)[0].trim());
+          const isConspiracy = isConspiracyCardName(c.name);
+          const knownType = getKnownCardType(c.name);
           let typeLine = (!isInvalidType(matched.type_line) ? matched.type_line : '') ||
             (!isInvalidType(matched.card_faces?.[0]?.type_line) ? matched.card_faces[0].type_line : '') ||
             (!isInvalidType(c.type_line) ? c.type_line : '') ||
-            (!isInvalidType(c.typeLine) ? c.typeLine : '');
+            (!isInvalidType(c.typeLine) ? c.typeLine : '') ||
+            knownType || '';
           if (isConspiracy) {
             typeLine = 'Conspiracy';
           }

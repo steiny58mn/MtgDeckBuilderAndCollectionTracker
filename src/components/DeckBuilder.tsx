@@ -52,7 +52,7 @@ import {
   Scroll
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
-import { getCardNames, getAllCardMatchNames } from '../utils/cardNameUtils';
+import { getCardNames, getAllCardMatchNames, getCanonicalCardName, isConspiracyCardName, getKnownCardType } from '../utils/cardNameUtils';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
 import { 
   calculateDeckStats, 
@@ -75,7 +75,8 @@ import {
   matchesScryfallTextSearch,
   buildCollectionLookup,
   calculateDeckCompletion,
-  isBasicLandName
+  isBasicLandName,
+  isInvalidCardType,
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -702,7 +703,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return;
     const missingCount = deck.cards.filter((c) => {
       const rawType = (c.type_line || c.typeLine || '').trim();
-      const hasType = Boolean(rawType) && rawType.toLowerCase() !== 'no card type found';
+      const hasType = Boolean(rawType) && !isInvalidCardType(rawType);
       const hasColorOrMana = Boolean((c.mana_cost || c.manaCost || '').trim()) || (Array.isArray(c.colors) && c.colors.length > 0);
       const isLand = isCardLand(c);
       return !hasType || (!hasColorOrMana && !isLand);
@@ -1828,6 +1829,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         const cached = getCardFromLocalCache(c.name);
         if (cached) {
           t = getCardFrontTypeLine(cached);
+        }
+      }
+      if (!t && c.name) {
+        const canonical = getCanonicalCardName(c.name);
+        const cachedCan = getCardFromLocalCache(canonical);
+        if (cachedCan) {
+          t = getCardFrontTypeLine(cachedCan);
         }
       }
       if (!t && c.name && isBasicLandName(c.name)) {
@@ -4079,6 +4087,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             t = getCardFrontTypeLine(cached);
           }
         }
+        if (!t && c.name) {
+          const canonical = getCanonicalCardName(c.name);
+          const cachedCan = getCardFromLocalCache(canonical);
+          if (cachedCan) {
+            t = getCardFrontTypeLine(cachedCan);
+          }
+        }
         if (!t && c.name && isBasicLandName(c.name)) {
           t = 'basic land';
         }
@@ -4675,7 +4690,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
               {(() => {
                 const rawType = (card.type_line || card.typeLine || '').trim();
-                const isInvalid = !rawType || rawType.toLowerCase() === 'no card type found';
+                const isInvalid = isInvalidCardType(rawType);
                 const frontT = getCardFrontTypeLine(card);
                 const displayType = (!isInvalid ? rawType : (frontT ? (frontT.charAt(0).toUpperCase() + frontT.slice(1)) : (isBasicLandName(card.name) ? 'Basic Land' : '')));
                 return displayType ? (

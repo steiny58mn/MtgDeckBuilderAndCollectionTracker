@@ -48,6 +48,112 @@ export const KNOWN_CONSPIRACY_NAMES: Set<string> = new Set([
 ]);
 
 /**
+ * Authoritative check if a card name corresponds to an official MTG Conspiracy.
+ * Tolerates quotes, brackets, set codes, split card naming, and whitespace.
+ */
+export function isConspiracyCardName(name?: string): boolean {
+  if (!name || typeof name !== 'string') return false;
+  const raw = name.toLowerCase().trim();
+  const front = raw.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+  const stripQuotesRaw = raw.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  return (
+    KNOWN_CONSPIRACY_NAMES.has(front) ||
+    KNOWN_CONSPIRACY_NAMES.has(raw) ||
+    KNOWN_CONSPIRACY_NAMES.has(stripQuotesFront) ||
+    KNOWN_CONSPIRACY_NAMES.has(stripQuotesRaw)
+  );
+}
+
+/**
+ * Known front-face card types for reversible double-faced cards and special promotional printings
+ * where backend Scryfall/Turso databases lack or lose the top-level type line.
+ */
+export const KNOWN_CARD_TYPES: Record<string, string> = {
+  // Commander 2018 / Secret Lair Reversible / Promo dual-named cards
+  'estrid, the masked': 'Legendary Planeswalker — Estrid',
+  'tuvasa the sunlit': 'Legendary Creature — Merfolk Shaman',
+  'steely resolve': 'Enchantment',
+  "estrid's invocation": 'Enchantment',
+  "estrids invocation": 'Enchantment',
+  'jetmir, nexus of revels': 'Legendary Creature — Demon Cat',
+  "jinnie fay, jetmir's second": 'Legendary Creature — Elf Druid',
+  "jinnie fay, jetmirs second": 'Legendary Creature — Elf Druid',
+  'balthor the defiled': 'Legendary Creature — Zombie Dwarf',
+  'lord of the undead': 'Creature — Zombie',
+  'gravecrawler': 'Creature — Zombie',
+  'erebos, god of the dead': 'Legendary Enchantment Creature — God',
+  'toxrill, the corrosive': 'Legendary Creature — Slug Horror',
+  'elesh norn, grand cenobite': 'Legendary Creature — Phyrexian Praetor',
+  'jin-gitaxias, core augur': 'Legendary Creature — Phyrexian Praetor',
+  'sheoldred, whispering one': 'Legendary Creature — Phyrexian Praetor',
+  'urabrask the hidden': 'Legendary Creature — Phyrexian Praetor',
+  'vorinclex, voice of hunger': 'Legendary Creature — Phyrexian Praetor',
+  'malfegor': 'Legendary Creature — Demon Dragon',
+  'chromium, the mutable': 'Legendary Creature — Elder Dragon',
+  'arcades, the strategist': 'Legendary Creature — Elder Dragon',
+  'nicol bolas, the ravager': 'Legendary Creature — Elder Dragon',
+  'vaevictis asmadi, the dire': 'Legendary Creature — Elder Dragon',
+  'palladia-mors, the ruiner': 'Legendary Creature — Elder Dragon',
+  'liesa, forgotten archangel': 'Legendary Creature — Angel',
+  'danitha capashen, paragon': 'Legendary Creature — Human Knight',
+  'brago, king eternal': 'Legendary Creature — Spirit Noble',
+  'ezuri, claw of progress': 'Legendary Creature — Elf Warrior',
+  'karametra, god of harvests': 'Legendary Enchantment Creature — God',
+  'phenax, god of deception': 'Legendary Enchantment Creature — God',
+  'xenagos, god of revels': 'Legendary Enchantment Creature — God',
+  'athreos, god of passage': 'Legendary Enchantment Creature — God',
+  'iroas, god of victory': 'Legendary Enchantment Creature — God',
+  'keranos, god of storms': 'Legendary Enchantment Creature — God',
+  'pharika, god of affliction': 'Legendary Enchantment Creature — God',
+  'kruphix, god of horizons': 'Legendary Enchantment Creature — God',
+  'mogis, god of slaughter': 'Legendary Enchantment Creature — God',
+  'propaganda': 'Enchantment',
+  'rest in peace': 'Enchantment',
+  'rhystic study': 'Enchantment',
+  'smothering tithe': 'Enchantment',
+  'sylvan library': 'Enchantment',
+  'mystic remora': 'Enchantment',
+  'phyrexian arena': 'Enchantment',
+  'anointed procession': 'Enchantment',
+  'doubling season': 'Enchantment',
+  'parallel lives': 'Enchantment',
+  'cyclonic rift': 'Instant',
+  "teferi's protection": 'Instant',
+  "teferis protection": 'Instant',
+  'vampiric tutor': 'Instant',
+  'demonic tutor': 'Sorcery',
+  'wrath of god': 'Sorcery',
+  'damnation': 'Sorcery',
+  'blasphemous act': 'Sorcery',
+  'sol ring': 'Artifact',
+  'mana crypt': 'Artifact',
+  'arcane signet': 'Artifact',
+  'lightning greaves': 'Artifact',
+  'swiftfoot boots': 'Artifact',
+};
+
+/**
+ * Returns the authoritative front-face card type line for any known card name
+ * (including conspiracies, reversible double-faced cards, and promos).
+ */
+export function getKnownCardType(name?: string): string | undefined {
+  if (!name || typeof name !== 'string') return undefined;
+  if (isConspiracyCardName(name)) return 'Conspiracy';
+  const raw = name.toLowerCase().trim();
+  const front = raw.split(/\s*\/\/\s*/)[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+  const stripQuotesFront = front.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+  const stripQuotesRaw = raw.replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim();
+
+  return (
+    KNOWN_CARD_TYPES[front] ||
+    KNOWN_CARD_TYPES[stripQuotesFront] ||
+    KNOWN_CARD_TYPES[raw] ||
+    KNOWN_CARD_TYPES[stripQuotesRaw]
+  );
+}
+
+/**
  * Canonical dictionary of card name aliases, correcting common quotation marks,
  * punctuation variations, ellipses, typos, and reversible double-faced cards.
  */
@@ -78,6 +184,10 @@ export const CANONICAL_CARD_NAME_ALIASES: Record<string, string> = {
   '\'rumors of my death . . .\'': '"Rumors of My Death . . ."',
 
   // Reversible double-faced cards (Secret Lair / Special Promos where both faces are the same)
+  'estrid, the masked // estrid, the masked': 'Estrid, the Masked',
+  'tuvasa the sunlit // tuvasa the sunlit': 'Tuvasa the Sunlit',
+  'steely resolve // steely resolve': 'Steely Resolve',
+  "estrid's invocation // estrid's invocation": "Estrid's Invocation",
   'jetmir, nexus of revels // jetmir, nexus of revels': 'Jetmir, Nexus of Revels',
   'jetmir, nexus of revels': 'Jetmir, Nexus of Revels',
   "jinnie fay, jetmir's second // jinnie fay, jetmir's second": "Jinnie Fay, Jetmir's Second",
@@ -438,30 +548,23 @@ export const CardNameDisplay: React.FC<{
   title?: string;
 }> = ({
   card,
-  className = 'text-xs font-semibold text-slate-200 hover:text-emerald-400 cursor-pointer break-words leading-tight',
-  subtitleClassName = 'text-[10px] text-slate-400 italic truncate block mt-0.5',
+  className = '',
+  subtitleClassName = '',
   onClick,
   title,
 }) => {
   const names = getCardNames(card);
-  const hoverTitle = title || (names.hasAlternateName
-    ? `${names.actualName} (Official Oracle name: ${names.oracleName})`
-    : names.actualName);
 
   return (
-    <div className="min-w-0">
+    <div className="flex flex-col min-w-0" title={title}>
       <span
         onClick={onClick}
         className={className}
-        title={hoverTitle}
       >
         {names.actualName}
       </span>
       {names.hasAlternateName && names.subtitle && (
-        <span
-          className={subtitleClassName}
-          title={`Official Oracle name: ${names.oracleName}`}
-        >
+        <span className={`text-[10px] text-slate-400 italic truncate block leading-tight ${subtitleClassName}`}>
           {names.subtitle}
         </span>
       )}
