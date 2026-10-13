@@ -3,15 +3,17 @@ import { Printer } from 'lucide-react';
 
 export interface ChecklistPrintButtonGroupProps {
   onPrint: (columns: 1 | 2 | 3 | 4) => void;
+  onColumnsChange?: (columns: 1 | 2 | 3 | 4) => void;
+  columns?: 1 | 2 | 3 | 4;
   size?: 'compact' | 'normal';
 }
 
-const STORAGE_KEY = 'mtg_checklist_print_cols';
-const SYNC_EVENT = 'mtg_checklist_cols_sync';
+export const CHECKLIST_COLS_STORAGE_KEY = 'mtg_checklist_print_cols';
+export const CHECKLIST_COLS_SYNC_EVENT = 'mtg_checklist_cols_sync';
 
 export const getSavedPrintColumns = (): 1 | 2 | 3 | 4 => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(CHECKLIST_COLS_STORAGE_KEY);
     if (saved === '1' || saved === '2' || saved === '3' || saved === '4') {
       return Number(saved) as 1 | 2 | 3 | 4;
     }
@@ -21,36 +23,40 @@ export const getSavedPrintColumns = (): 1 | 2 | 3 | 4 => {
 
 export const ChecklistPrintButtonGroup: React.FC<ChecklistPrintButtonGroupProps> = React.memo(({
   onPrint,
+  onColumnsChange,
+  columns: controlledColumns,
   size = 'normal',
 }) => {
-  const [columns, setColumns] = useState<1 | 2 | 3 | 4>(getSavedPrintColumns);
+  const [internalColumns, setInternalColumns] = useState<1 | 2 | 3 | 4>(getSavedPrintColumns);
+  const columns = controlledColumns !== undefined ? controlledColumns : internalColumns;
 
   // Sync across instances (e.g. DeckBuilder toolbar and Checklist modal)
   useEffect(() => {
     const handleSync = (e: Event) => {
       const customEvent = e as CustomEvent<1 | 2 | 3 | 4>;
-      if (customEvent.detail && [1, 2, 3, 4].includes(customEvent.detail)) {
-        setColumns(customEvent.detail);
-      } else {
-        setColumns(getSavedPrintColumns());
-      }
+      const newCols = customEvent.detail && [1, 2, 3, 4].includes(customEvent.detail)
+        ? customEvent.detail
+        : getSavedPrintColumns();
+      setInternalColumns(newCols);
+      onColumnsChange?.(newCols);
     };
 
-    window.addEventListener(SYNC_EVENT, handleSync);
+    window.addEventListener(CHECKLIST_COLS_SYNC_EVENT, handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
-      window.removeEventListener(SYNC_EVENT, handleSync);
+      window.removeEventListener(CHECKLIST_COLS_SYNC_EVENT, handleSync);
       window.removeEventListener('storage', handleSync);
     };
-  }, []);
+  }, [onColumnsChange]);
 
   const handleSelectColumns = useCallback((cols: 1 | 2 | 3 | 4) => {
-    setColumns(cols);
+    setInternalColumns(cols);
+    onColumnsChange?.(cols);
     try {
-      localStorage.setItem(STORAGE_KEY, String(cols));
-      window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: cols }));
+      localStorage.setItem(CHECKLIST_COLS_STORAGE_KEY, String(cols));
+      window.dispatchEvent(new CustomEvent(CHECKLIST_COLS_SYNC_EVENT, { detail: cols }));
     } catch (_) {}
-  }, []);
+  }, [onColumnsChange]);
 
   const handlePrintClick = useCallback(() => {
     onPrint(columns);
@@ -77,12 +83,12 @@ export const ChecklistPrintButtonGroup: React.FC<ChecklistPrintButtonGroupProps>
           onClick={() => handleSelectColumns(cols)}
           className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-colors ${
             columns === cols
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-emerald-600 text-white shadow-xs'
               : isCompact
               ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
           }`}
-          title={`Print in ${cols} column${cols > 1 ? 's (saves paper)' : ''}`}
+          title={`Show checklist & print in ${cols} column${cols > 1 ? 's' : ''}`}
         >
           {`${cols}C`}
         </button>
