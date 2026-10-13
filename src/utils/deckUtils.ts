@@ -79,7 +79,8 @@ import {
   isConspiracyCardName,
   KNOWN_CARD_TYPES,
   getKnownCardType,
-  getCanonicalCardName
+  getCanonicalCardName,
+  normalizeCardQuotes
 } from './cardNameUtils';
 
 var cardCacheLookup: ((nameOrId: string) => any) | null = null;
@@ -257,11 +258,12 @@ export function buildCrossDeckUsageMap(decks: Deck[]): Map<string, CrossDeckUsag
       // Basic lands have unlimited availability and should not trigger in-use warnings
       if (canHaveAnyNumberOfCopies(c)) return;
 
-      const cleanName = (typeof c?.name === 'string' ? c.name : '')
-        .split(' // ')[0]
-        .replace(/\s*[\(\[].*?[\)\]]/g, '')
-        .trim()
-        .toLowerCase();
+      const canonicalName = getCardNames(c).oracleName || c.name;
+      const cleanName = normalizeCardQuotes(
+        (typeof canonicalName === 'string' ? canonicalName : '')
+          .split(' // ')[0]
+          .replace(/\s*[\(\[].*?[\)\]]/g, '')
+      ).trim().toLowerCase();
       if (!cleanName) return;
 
       const qty = c.quantity || 1;
@@ -290,7 +292,10 @@ export interface CollectionLookup {
   idMap: Map<string, number>;
   setNumberMap?: Map<string, number>;
   nameMap: Map<string, number>;
-  getQuantity: (card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined) => number;
+  getQuantity: (
+    card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined,
+    options?: { exactVersion?: boolean }
+  ) => number;
 }
 
 /**
@@ -323,7 +328,11 @@ export function buildCollectionLookup(
       const setKey = `${setCode}:${colNum}`;
       setNumberMap.set(setKey, (setNumberMap.get(setKey) || 0) + qty);
     }
-    const rawName = (c.name || '').toLowerCase().trim();
+    let rawName = (c.name || (c as any).printed_name || (c as any).card_name || '').toLowerCase().trim();
+    if (!rawName && c.scryfallId && cardCacheLookup) {
+      const cached = cardCacheLookup(c.scryfallId);
+      if (cached?.name) rawName = cached.name.toLowerCase().trim();
+    }
     if (!rawName) return;
 
     const keys = new Set<string>();
@@ -335,11 +344,11 @@ export function buildCollectionLookup(
     if (cleanFront) keys.add(cleanFront);
 
     // Normalized quotes / apostrophes
-    const normalizedQuotes = rawName.replace(/['’`"]/g, "'");
+    const normalizedQuotes = normalizeCardQuotes(rawName).toLowerCase();
     if (normalizedQuotes) keys.add(normalizedQuotes);
 
     // Front face without quotes
-    const cleanFrontNoQuotes = cleanFront ? cleanFront.replace(/['’`"]/g, "'") : '';
+    const cleanFrontNoQuotes = cleanFront ? normalizeCardQuotes(cleanFront).toLowerCase() : '';
     if (cleanFrontNoQuotes) keys.add(cleanFrontNoQuotes);
 
     // Front face without numbers/collector codes (e.g. "Urza 75" or "Urza #75")
@@ -351,9 +360,14 @@ export function buildCollectionLookup(
     });
   });
 
-  const getQuantity = (card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined): number => {
+  const getQuantity = (
+    card: { name?: string; scryfallId?: string; set?: string; collector_number?: string; collectorNumber?: string } | string | null | undefined,
+    options?: { exactVersion?: boolean }
+  ): number => {
     if (!card) return 0;
-    if (typeof card === 'object') {
+
+    // Strict version-specific mode only when explicitly requested
+    if (typeof card === 'object' && options?.exactVersion) {
       const cardId = card.scryfallId || (card as any).id;
       if (cardId && idMap.has(cardId)) {
         return idMap.get(cardId)!;
@@ -366,35 +380,72 @@ export function buildCollectionLookup(
           return setNumberMap.get(setKey)!;
         }
       }
-      // If card specifies a version (scryfallId OR set+collectorNumber), only count that specific version!
-      if (cardId || (setCode && colNum)) {
-        return 0;
+      return 0;
+    }
+
+    // Version-agnostic lookup: check total copies across all printings by name/tokens
+    let maxFound = 0;
+
+    let cardName = typeof card === 'string' ? card : (card.name || (card as any).printed_name || (card as any).card_name || '');
+    if (!cardName && typeof card === 'object') {
+      const cardId = card.scryfallId || (card as any).id;
+      if (cardId && cardCacheLookup) {
+        const cached = cardCacheLookup(cardId);
+        if (cached?.name) cardName = cached.name;
       }
     }
-    const cardName = typeof card === 'string' ? card : (card.name || '');
-    if (!cardName) return 0;
 
-    const tokens = getAllCardMatchNames(card);
-    for (const token of tokens) {
-      if (nameMap.has(token)) return nameMap.get(token)!;
+    if (cardName) {
+      const tokens = getAllCardMatchNames(typeof card === 'object' ? card : { name: cardName });
+      for (const token of tokens) {
+        if (nameMap.has(token)) {
+          maxFound = Math.max(maxFound, nameMap.get(token)!);
+        }
+      }
+
+      const lower = cardName.toLowerCase().trim();
+      if (nameMap.has(lower)) {
+        maxFound = Math.max(maxFound, nameMap.get(lower)!);
+      }
+
+      const normQuotes = normalizeCardQuotes(lower).toLowerCase();
+      if (nameMap.has(normQuotes)) {
+        maxFound = Math.max(maxFound, nameMap.get(normQuotes)!);
+      }
+
+      const cleanFront = lower.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+      if (nameMap.has(cleanFront)) {
+        maxFound = Math.max(maxFound, nameMap.get(cleanFront)!);
+      }
+
+      const cleanFrontNoQuotes = cleanFront ? normalizeCardQuotes(cleanFront).toLowerCase() : '';
+      if (cleanFrontNoQuotes && nameMap.has(cleanFrontNoQuotes)) {
+        maxFound = Math.max(maxFound, nameMap.get(cleanFrontNoQuotes)!);
+      }
+
+      const cleanNoNum = cleanFrontNoQuotes ? cleanFrontNoQuotes.replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').trim() : '';
+      if (cleanNoNum && nameMap.has(cleanNoNum)) {
+        maxFound = Math.max(maxFound, nameMap.get(cleanNoNum)!);
+      }
     }
 
-    const lower = cardName.toLowerCase().trim();
-    if (nameMap.has(lower)) return nameMap.get(lower)!;
+    // Fallback: If name matching found 0, check idMap or setNumberMap (in case collection item lacked name)
+    if (maxFound === 0 && typeof card === 'object') {
+      const cardId = card.scryfallId || (card as any).id;
+      if (cardId && idMap.has(cardId)) {
+        maxFound = Math.max(maxFound, idMap.get(cardId)!);
+      }
+      const setCode = (card.set || '').toLowerCase().trim();
+      const colNum = (card.collectorNumber || card.collector_number || '').toString().trim().toLowerCase();
+      if (setCode && colNum) {
+        const setKey = `${setCode}:${colNum}`;
+        if (setNumberMap.has(setKey)) {
+          maxFound = Math.max(maxFound, setNumberMap.get(setKey)!);
+        }
+      }
+    }
 
-    const normQuotes = lower.replace(/['’`"]/g, "'");
-    if (nameMap.has(normQuotes)) return nameMap.get(normQuotes)!;
-
-    const cleanFront = lower.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-    if (nameMap.has(cleanFront)) return nameMap.get(cleanFront)!;
-
-    const cleanFrontNoQuotes = cleanFront.replace(/['’`"]/g, "'");
-    if (nameMap.has(cleanFrontNoQuotes)) return nameMap.get(cleanFrontNoQuotes)!;
-
-    const cleanNoNum = cleanFrontNoQuotes.replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').trim();
-    if (nameMap.has(cleanNoNum)) return nameMap.get(cleanNoNum)!;
-
-    return 0;
+    return maxFound;
   };
 
   return { idMap, setNumberMap, nameMap, getQuantity };
@@ -438,16 +489,17 @@ export function calculateDeckCompletion(
   // Track if any commander cards are present in the cards array
   let foundCommanderCard = false;
   let mainAndCmdrTotal = 0;
+  const allocatedCopiesMap = new Map<string, number>();
 
   cards.forEach((c) => {
     const cat = (c.category || 'main').toLowerCase();
     const cName = (c.name || '').trim().toLowerCase();
-    const cleanCName = cName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
-    const cleanCmdrName = commanderName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
+    const cleanCName = normalizeCardQuotes(cName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '')).trim().toLowerCase();
+    const cleanCmdrName = normalizeCardQuotes(commanderName.split('//')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '')).trim().toLowerCase();
 
     // Check if this card matches any part of partner commanders
     const matchesPartnerPart = commanderParts.some((p) => {
-      const cleanP = p.replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '').replace(/['’`"]/g, "'").trim();
+      const cleanP = normalizeCardQuotes(p.replace(/\s*[\(\[].*?[\)\]]/g, '').replace(/#?\s*\b\d+[a-z]?\b.*$/i, '')).trim().toLowerCase();
       return cName === p || cleanCName === cleanP;
     });
 
@@ -471,7 +523,12 @@ export function calculateDeckCompletion(
     total += qty;
     mainAndCmdrTotal += qty;
     const inCol = getOwnedQty(c);
-    const ownedCopies = Math.min(qty, inCol);
+    const cardKey = (getCardNames(c).oracleName || c.name || '').trim().toLowerCase();
+    const alreadyAllocated = allocatedCopiesMap.get(cardKey) || 0;
+    const available = Math.max(0, inCol - alreadyAllocated);
+    const ownedCopies = Math.min(qty, available);
+    allocatedCopiesMap.set(cardKey, alreadyAllocated + ownedCopies);
+
     owned += ownedCopies;
     if (ownedCopies < qty) {
       const missingQty = qty - ownedCopies;
@@ -487,8 +544,13 @@ export function calculateDeckCompletion(
   if (!foundCommanderCard && (deck.format === 'commander' || commanderName || commanderId)) {
     if ((commanderName || commanderId) && mainAndCmdrTotal < 100) {
       total += 1;
-      const cmdrInCol = getOwnedQty({ name: deck.commanderName, scryfallId: deck.commanderId });
-      const cmdrOwned = Math.min(1, cmdrInCol);
+      const cmdrCard = { name: deck.commanderName, scryfallId: deck.commanderId };
+      const cmdrKey = (getCardNames(cmdrCard).oracleName || deck.commanderName || '').trim().toLowerCase();
+      const cmdrInCol = getOwnedQty(cmdrCard);
+      const alreadyAllocated = allocatedCopiesMap.get(cmdrKey) || 0;
+      const cmdrAvailable = Math.max(0, cmdrInCol - alreadyAllocated);
+      const cmdrOwned = Math.min(1, cmdrAvailable);
+      allocatedCopiesMap.set(cmdrKey, alreadyAllocated + cmdrOwned);
       owned += cmdrOwned;
       if (cmdrOwned < 1) {
         unownedCardsCount += 1;

@@ -52,7 +52,7 @@ import {
   Scroll
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
-import { getCardNames, getAllCardMatchNames, getCanonicalCardName, isConspiracyCardName, getKnownCardType } from '../utils/cardNameUtils';
+import { getCardNames, getAllCardMatchNames, getCanonicalCardName, isConspiracyCardName, getKnownCardType, normalizeCardQuotes } from '../utils/cardNameUtils';
 import { Deck, DeckCard, MTGFormat, DeckCategory, ScryfallCard, DeckHistoryItem, CollectionCard } from '../types/mtg';
 import { 
   calculateDeckStats, 
@@ -512,7 +512,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         // Basic lands have unlimited availability and should not trigger in-use warnings
         if (canHaveAnyNumberOfCopies(c)) return;
 
-        const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        const canonicalName = getCardNames(c).oracleName || c.name;
+        const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
         if (!cleanName) return;
 
         const qty = c.quantity || 1;
@@ -556,7 +557,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       if (cat === 'maybeboard') return;
       if (canHaveAnyNumberOfCopies(c)) return;
 
-      const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const canonicalName = getCardNames(c).oracleName || c.name;
+      const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
       if (!cleanName || seen.has(cleanName)) return;
 
       const inCol = getCardOwnedQuantity(c);
@@ -594,7 +596,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     const effectiveCols = colsOverride || getSavedPrintColumns();
 
     const printItems: ChecklistPrintItem[] = (activeDeck.cards || []).map((card) => {
-      const cleanName = (card.name || '').split(' // ')[0].replace(/\s*[(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const canonicalName = getCardNames(card).oracleName || card.name;
+      const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
       const inCollection = getCardOwnedQuantity(card);
       const neededQty = card.quantity || 1;
       const isOwned = inCollection >= neededQty;
@@ -1780,7 +1783,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     }
 
     if (ownershipFilter === 'in-use') {
-      const cleanName = (typeof c?.name === 'string' ? c.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+      const canonicalName = getCardNames(c).oracleName || c.name;
+      const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
       const inCol = getCardOwnedQuantity(c);
       const cross = crossDeckUsageMap.get(cleanName);
       return !canHaveAnyNumberOfCopies(c) && inCol > 0 && Boolean(cross && cross.totalUsed > inCol);
@@ -4779,7 +4783,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
               )}
               {(() => {
                 const inCol = getCardOwnedQuantity(card);
-                const cleanName = (typeof card?.name === 'string' ? card.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+                const canonicalName = getCardNames(card).oracleName || card.name;
+                const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
                 const cross = crossDeckUsageMap.get(cleanName);
                 const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
@@ -5083,7 +5088,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
           <div className="absolute bottom-1.5 right-1.5 z-10">
             {(() => {
               const inCol = getCardOwnedQuantity(card);
-              const cleanName = (typeof card?.name === 'string' ? card.name : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+              const canonicalName = getCardNames(card).oracleName || card.name;
+              const cleanName = normalizeCardQuotes((typeof canonicalName === 'string' ? canonicalName : '').split(' // ')[0].replace(/\s*[\(\[].*?[\)\]]/g, '')).trim().toLowerCase();
               const cross = crossDeckUsageMap.get(cleanName);
               const isOvercommitted = !canHaveAnyNumberOfCopies(card) && inCol > 0 && cross && cross.totalUsed > inCol;
 
