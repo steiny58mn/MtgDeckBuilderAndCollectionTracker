@@ -73,6 +73,7 @@ import {
 } from '../services/deckService';
 import { Deck, DeckCard, DeckStats, MTGFormat, DeckHistoryItem, DeckDiff, DeckDiffItem, CollectionCard, ScryfallCard } from '../types/mtg';
 import {
+  getCardNames,
   getAllCardMatchNames,
   KNOWN_CONSPIRACY_NAMES,
   isConspiracyCardName,
@@ -1059,8 +1060,10 @@ export function compareCardsByColor(
   const rankA = getCardColorCategoryRank(a);
   const rankB = getCardColorCategoryRank(b);
   if (rankA !== rankB) return rankA - rankB;
-  const nameDiff = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true }) ||
-    (a.name || '').localeCompare(b.name || '');
+  const nameA = getCardNames(a).actualName || a.name || '';
+  const nameB = getCardNames(b).actualName || b.name || '';
+  const nameDiff = nameA.localeCompare(nameB, undefined, { sensitivity: 'base', numeric: true }) ||
+    nameA.localeCompare(nameB);
   if (nameDiff !== 0) return nameDiff;
   const collA = a.collectorNumber || a.collector_number || (a as any).CollectorNumber || '';
   const collB = b.collectorNumber || b.collector_number || (b as any).CollectorNumber || '';

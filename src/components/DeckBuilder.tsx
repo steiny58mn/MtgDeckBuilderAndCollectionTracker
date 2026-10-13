@@ -77,6 +77,8 @@ import {
   calculateDeckCompletion,
   isBasicLandName,
   isInvalidCardType,
+  cardCanBeFoil,
+  cardCanBeNonfoil,
 } from '../utils/deckUtils';
 import { GamechangerService } from '../services/gamechangerService';
 import { scrollToTop } from '../utils/scrollUtils';
@@ -1726,18 +1728,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
   // Group cards for the current view
   const sortCards = (cards: DeckCard[]) => {
     return [...cards].sort((a, b) => {
+      const nameA = getCardNames(a).actualName || a.printed_name || a.name || '';
+      const nameB = getCardNames(b).actualName || b.printed_name || b.name || '';
+
       if (sortCardsBy === 'category') {
         const catA = getCardCategorySortOrder(a);
         const catB = getCardCategorySortOrder(b);
         if (catA !== catB) return catA - catB;
-        // When sorting by category, sort them by name within the category
-        return a.name.localeCompare(b.name);
+        // When sorting by category, sort them by actual name within the category
+        return nameA.localeCompare(nameB);
       }
       if (sortCardsBy === 'price') {
         const priceA = getCardUnitPrice(a);
         const priceB = getCardUnitPrice(b);
         if (priceA !== priceB) return priceB - priceA; // Highest price first
-        return a.name.localeCompare(b.name);
+        return nameA.localeCompare(nameB);
       }
       if (sortCardsBy === 'cmc') {
         const cmcA = a.cmc || 0;
@@ -1747,13 +1752,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         const rankA = getCardColorCategoryRank(a);
         const rankB = getCardColorCategoryRank(b);
         if (rankA !== rankB) return rankA - rankB;
-        // Tertiary sort by name
-        return a.name.localeCompare(b.name);
+        // Tertiary sort by actual name
+        return nameA.localeCompare(nameB);
       }
       if (sortCardsBy === 'color') {
         return compareCardsByColor(a, b);
       }
-      return a.name.localeCompare(b.name);
+      return nameA.localeCompare(nameB);
     });
   };
 
@@ -1854,9 +1859,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
       else groups['Other'].push(c);
     });
 
-    // Ensure all cards within each type category are sorted by name
+    // Ensure all cards within each type category are sorted by actual name
     Object.keys(groups).forEach((key) => {
-      groups[key].sort((a, b) => a.name.localeCompare(b.name));
+      groups[key].sort((a, b) => {
+        const nameA = getCardNames(a).actualName || a.printed_name || a.name || '';
+        const nameB = getCardNames(b).actualName || b.printed_name || b.name || '';
+        return nameA.localeCompare(nameB);
+      });
     });
 
     return groups;
@@ -1977,8 +1986,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     id: card.scryfallId,
     deckCardId: card.id,
     name: card.name,
+    printed_name: card.printed_name || card.printedName,
+    flavor_name: card.flavor_name || card.flavorName,
     set: card.set,
-    collector_number: card.collector_number || '',
+    collector_number: card.collector_number || card.collectorNumber || '',
     cmc: card.cmc,
     mana_cost: card.mana_cost,
     type_line: card.type_line,
@@ -1995,6 +2006,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     imageUrl: card.imageUrl,
     scryfallId: card.scryfallId,
     set_name: card.set_name || '',
+    finishes: card.finishes,
+    frame_effects: card.frame_effects,
+    promo_types: card.promo_types,
+    foil: card.foil,
+    nonfoil: card.nonfoil,
+    isFoil: card.isFoil,
   } as any);
 
   const renderCommanderPanel = () => {
@@ -4144,7 +4161,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     alphaBuckets.forEach((b) => alphaMap.set(b.key, []));
 
     cards.forEach((c) => {
-      const bucket = alphaBuckets.find((b) => b.regex.test(c.name.trim())) || alphaBuckets[alphaBuckets.length - 1];
+      const names = getCardNames(c);
+      const effectiveName = (names.actualName || c.printed_name || c.name || '').trim();
+      const bucket = alphaBuckets.find((b) => b.regex.test(effectiveName)) || alphaBuckets[alphaBuckets.length - 1];
       alphaMap.get(bucket.key)!.push(c);
     });
 
@@ -4152,7 +4171,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
     alphaBuckets.forEach((b) => {
       const pileCards = alphaMap.get(b.key) || [];
       if (pileCards.length > 0) {
-        pileCards.sort((a, b) => a.name.localeCompare(b.name));
+        pileCards.sort((a, b) => {
+          const nameA = getCardNames(a).actualName || a.printed_name || a.name || '';
+          const nameB = getCardNames(b).actualName || b.printed_name || b.name || '';
+          return nameA.localeCompare(nameB);
+        });
         piles.push({
           id: `alpha-${b.key}`,
           title: b.key,
@@ -4847,6 +4870,54 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                   </button>
                 </div>
 
+                {/* Foil Toggle Button */}
+                {(() => {
+                  const canFoil = cardCanBeFoil(card as any);
+                  const canNonfoil = cardCanBeNonfoil(card as any);
+                  const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+                  const isEtched = Boolean(
+                    card.finishes?.includes('etched') ||
+                    card.frame_effects?.includes('etched') ||
+                    card.promo_types?.includes('etched')
+                  );
+                  const foilLabel = isEtched && !card.foil && !card.finishes?.includes('foil') ? 'Etched' : 'Foil';
+                  const btnTitle = !canFoil
+                    ? "This version is not available in foil"
+                    : !canNonfoil
+                      ? `This version is only available in ${foilLabel.toLowerCase()}`
+                      : card.isFoil
+                        ? "Click to switch to Regular (non-foil)"
+                        : `Click to switch to ${foilLabel}`;
+
+                  return (
+                    <button
+                      type="button"
+                      disabled={isLocked}
+                      onClick={() => handleToggleCardFoil(card.id)}
+                      title={btnTitle}
+                      className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
+                        isLocked
+                          ? "opacity-60 cursor-not-allowed " + (card.isFoil ? "bg-fuchsia-950/80 border-amber-600/60 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                          : card.isFoil
+                            ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                            : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                      }`}
+                    >
+                      {card.isFoil ? (
+                        <>
+                          <Sparkles className="w-3 h-3 text-amber-300" />
+                          <span>{foilLabel}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                          <span>Reg</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })()}
+
                 {/* Category Quick Move Buttons (EXCLUDED from Commander and current section) */}
                 {!isThisCommander && (
                   <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden divide-x divide-slate-800 shrink-0 font-medium shadow-sm">
@@ -5109,6 +5180,54 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
                     <Plus className="w-2.5 h-2.5" />
                   </button>
                 </div>
+
+                {/* Foil Toggle in Grid View */}
+                {(() => {
+                  const canFoil = cardCanBeFoil(card as any);
+                  const canNonfoil = cardCanBeNonfoil(card as any);
+                  const isLocked = (!canFoil && !card.isFoil) || (!canNonfoil && card.isFoil);
+                  const isEtched = Boolean(
+                    card.finishes?.includes('etched') ||
+                    card.frame_effects?.includes('etched') ||
+                    card.promo_types?.includes('etched')
+                  );
+                  const foilLabel = isEtched && !card.foil && !card.finishes?.includes('foil') ? 'Etched' : 'Foil';
+                  const btnTitle = !canFoil
+                    ? "This version is not available in foil"
+                    : !canNonfoil
+                      ? `This version is only available in ${foilLabel.toLowerCase()}`
+                      : card.isFoil
+                        ? "Click to switch to Regular (non-foil)"
+                        : `Click to switch to ${foilLabel}`;
+
+                  return (
+                    <button
+                      type="button"
+                      disabled={isLocked}
+                      onClick={() => handleToggleCardFoil(card.id)}
+                      title={btnTitle}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all border ${
+                        isLocked
+                          ? "opacity-60 cursor-not-allowed " + (card.isFoil ? "bg-fuchsia-950/80 border-amber-600/60 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                          : card.isFoil
+                            ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                            : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                      }`}
+                    >
+                      {card.isFoil ? (
+                        <>
+                          <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                          <span>{foilLabel}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                          <span>Reg</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })()}
 
                 <button
                   type="button"

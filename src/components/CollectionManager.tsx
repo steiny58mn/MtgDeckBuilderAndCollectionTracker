@@ -335,13 +335,14 @@ export const CollectionManager: React.FC<CollectionManagerProps> = ({
       const pInfo = cardPriceMap.get(c.id) || { price: 0, isMedian: false };
       const price = pInfo.price;
       const acq = c.acquiredPrice !== undefined ? c.acquiredPrice : price;
+      const names = getCardNames(c);
       map.set(c.id, {
         price,
         value: price * c.quantity,
         profit: (price - acq) * c.quantity,
         cmc: c.cmc || 0,
         colorRank: getCardColorCategoryRank(c),
-        nameLower: c.name.toLowerCase(),
+        nameLower: (names.actualName || c.printed_name || c.name || '').toLowerCase(),
       });
     }
     return map;

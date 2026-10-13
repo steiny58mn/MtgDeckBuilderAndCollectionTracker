@@ -29,7 +29,7 @@ import { LoginPage } from './components/LoginPage';
 import { getCardImageUrl, getCardBackImageUrl } from './services/api';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
-import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG } from './utils/deckUtils';
+import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG, cardCanBeFoil, cardCanBeNonfoil } from './utils/deckUtils';
 import { getTcgplayerMarketPrice } from './utils/priceUtils';
 
 export default function App() {
@@ -1087,11 +1087,21 @@ export default function App() {
         return {
           ...c,
           scryfallId: newPrinting.id,
+          name: newPrinting.name,
+          printed_name: newPrinting.printed_name,
+          printedName: newPrinting.printed_name,
+          flavor_name: newPrinting.flavor_name,
+          flavorName: newPrinting.flavor_name,
           set: newPrinting.set,
           set_name: newPrinting.set_name,
           setName: newPrinting.set_name,
           collector_number: newPrinting.collector_number,
           collectorNumber: newPrinting.collector_number,
+          finishes: newPrinting.finishes,
+          frame_effects: newPrinting.frame_effects,
+          promo_types: newPrinting.promo_types,
+          foil: newPrinting.foil,
+          nonfoil: newPrinting.nonfoil,
           rarity: newPrinting.rarity || c.rarity,
           imageUrl: newImageUrl || c.imageUrl,
           backImageUrl: newBackImageUrl || c.backImageUrl,
@@ -1408,7 +1418,12 @@ export default function App() {
             onSelectBinder={(b) => setActiveBinder(b)}
             onCreateBinder={handleCreateBinder}
             onSelectCard={(c) => setInspectedCard(c)}
-            onQuickAddToDeck={(card, category) => handleAddCardToDeck(card, category, 1, false)}
+            onQuickAddToDeck={(card, category, isFoil) => {
+              const effectiveFoil = isFoil !== undefined
+                ? isFoil
+                : (!cardCanBeNonfoil(card) && cardCanBeFoil(card));
+              handleAddCardToDeck(card, category, 1, effectiveFoil);
+            }}
             onQuickAddToCollection={(card, isFoil) => handleAddCardToCollection(card, 1, isFoil || false, 'NM')}
             onReturnToDeck={() => setActiveTab('decks')}
             onReturnToBinder={() => setActiveTab('collection')}

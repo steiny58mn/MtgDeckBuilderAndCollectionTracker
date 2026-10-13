@@ -479,6 +479,14 @@ const ORACLE_TO_UNOFFICIAL: Record<string, string> = {
 /**
  * Set codes and collector numbers for specific crossover printings.
  */
+/**
+ * Specific Scryfall IDs for crossover printings where Scryfall card.name is the Oracle name.
+ */
+const SPECIFIC_SCRYFALL_ID_MAP: Record<string, { actualName: string; oracleName: string }> = {
+  // Rick, Steadfast Leader (SLD #143)
+  '0a8e78b3-3232-4d48-9d6c-540951a0330e': { actualName: 'Rick, Steadfast Leader', oracleName: "Greymond, Avacyn's Stalwart" },
+};
+
 const SPECIFIC_PRINTING_MAP: Record<string, { actualName: string; oracleName: string }> = {
   'sld:1237': { actualName: 'Xenk, Paladin Unbroken', oracleName: 'Rashel, Fist of Torm' },
   'sld:432': { actualName: 'Chun-Li, Countless Kicks', oracleName: 'Zethi, Arcane Blademaster' },
@@ -496,6 +504,14 @@ const SPECIFIC_PRINTING_MAP: Record<string, { actualName: string; oracleName: st
   'sld:345': { actualName: 'Chief Jim Hopper', oracleName: 'Sophina, Spearsage Deserter' },
   'sld:346': { actualName: 'Max, the Daredevil', oracleName: 'Elmar, Wyrm Enforcer' },
   'sld:347': { actualName: 'Mind Flayer, the Shadow', oracleName: 'Arvinox, the Mind Flail' },
+  // The Walking Dead (SLD)
+  'sld:143': { actualName: 'Rick, Steadfast Leader', oracleName: "Greymond, Avacyn's Stalwart" },
+  'sld:144': { actualName: 'Daryl, Hunter of Walkers', oracleName: 'Hans, Wilderness Guide' },
+  'sld:145': { actualName: 'Glenn, the Voice of Calm', oracleName: 'Bjorna, Nightfall Alchemist' },
+  'sld:146': { actualName: 'Michonne, Ruthless Survivor', oracleName: 'Ruthless Survivor' },
+  'sld:147': { actualName: 'Negan, the Cold-Blooded', oracleName: 'Malik, Grim Bauble' },
+  'sld:148': { actualName: 'Lucille', oracleName: "Gisa's Favorite Shovel" },
+
 };
 
 /**
@@ -515,6 +531,20 @@ export function getCardNames(card: any): CardNames {
   const rawName = (card.name || card.Name || '').trim();
   const setCode = (card.set || card.Set || card.set_code || '').trim().toLowerCase();
   const collectorNum = String(card.collectorNumber || card.collector_number || card.CollectorNumber || '').trim();
+
+  // Check specific Scryfall ID
+  const scryId = String(card.scryfallId || card.scryfall_id || card.id || '').trim().toLowerCase();
+  if (scryId && SPECIFIC_SCRYFALL_ID_MAP[scryId]) {
+    const specific = SPECIFIC_SCRYFALL_ID_MAP[scryId];
+    return {
+      actualName: specific.actualName,
+      displayName: specific.actualName,
+      oracleName: specific.oracleName,
+      unofficialName: specific.actualName,
+      hasAlternateName: true,
+      subtitle: `as ${specific.oracleName}`,
+    };
+  }
 
   // Check specific set + collector number match (e.g. SLD #1237)
   if (setCode && collectorNum) {

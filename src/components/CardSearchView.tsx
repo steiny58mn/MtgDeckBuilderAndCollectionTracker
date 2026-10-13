@@ -62,7 +62,7 @@ interface CardSearchViewProps {
   onSelectBinder?: (binder: Binder) => void;
   onCreateBinder?: (name: string, description?: string) => void;
   onSelectCard: (card: ScryfallCard) => void;
-  onQuickAddToDeck?: (card: ScryfallCard, category: DeckCategory) => void;
+  onQuickAddToDeck?: (card: ScryfallCard, category: DeckCategory, isFoil?: boolean) => void;
   onQuickAddToCollection?: (card: ScryfallCard, isFoil?: boolean) => void;
   onReturnToDeck?: () => void;
   onReturnToBinder?: () => void;
@@ -520,6 +520,7 @@ export const CardSearchView: React.FC<CardSearchViewProps> = ({
   }, []);
 
   const [recentBinderAdded, setRecentBinderAdded] = useState<Record<string, { isFoil: boolean; count: number }>>({});
+  const [deckFoilOverrides, setDeckFoilOverrides] = useState<Record<string, boolean>>({});
   const [binderAddToast, setBinderAddToast] = useState<{ message: string } | null>(null);
 
   const getBinderCopies = (card: ScryfallCard): { total: number; normal: number; foil: number } => {
@@ -2610,12 +2611,71 @@ const displayedCards = useMemo(() => {
                           const maybeCopies = getDeckCopiesByCategory(card, 'maybeboard');
                           const canAlsoAssignAsCommander = isCommanderDeck && !hasCommander && canBePrimaryCommander(card) && !isAtLimit;
 
+                          const canFoil = cardCanBeFoil(card);
+                          const canNonfoil = cardCanBeNonfoil(card);
+                          const isEtched = Boolean(
+                            card.finishes?.includes('etched') ||
+                            card.frame_effects?.includes('etched') ||
+                            card.promo_types?.includes('etched')
+                          );
+                          const foilLabel = isEtched && !card.foil && !card.finishes?.includes('foil') ? 'Etched' : 'Foil';
+                          const cardFoilSetting = deckFoilOverrides[card.id] !== undefined
+                            ? deckFoilOverrides[card.id]
+                            : (!canNonfoil && canFoil);
+                          const isFinishLocked = (!canFoil && !cardFoilSetting) || (!canNonfoil && cardFoilSetting);
+
                           return (
                             <div className="flex flex-col gap-1.5 w-full">
+                              <div className="flex items-center justify-between gap-1">
+                                <button
+                                  type="button"
+                                  disabled={isFinishLocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isFinishLocked) {
+                                      setDeckFoilOverrides((prev) => ({ ...prev, [card.id]: !cardFoilSetting }));
+                                    }
+                                  }}
+                                  title={
+                                    !canFoil
+                                      ? "This version is not available in foil"
+                                      : !canNonfoil
+                                        ? `This version is only available in ${foilLabel.toLowerCase()}`
+                                        : cardFoilSetting
+                                          ? "Click to switch quick-add to Regular"
+                                          : `Click to switch quick-add to ${foilLabel}`
+                                  }
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all border ${
+                                    isFinishLocked
+                                      ? "opacity-60 cursor-not-allowed " + (cardFoilSetting ? "bg-fuchsia-950/80 border-amber-600/60 text-fuchsia-300" : "bg-slate-900 border-slate-800 text-slate-500")
+                                      : cardFoilSetting
+                                        ? "bg-fuchsia-950/80 hover:bg-fuchsia-900 border-amber-600/60 text-fuchsia-300 hover:text-white shadow-xs cursor-pointer active:scale-95"
+                                        : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 cursor-pointer active:scale-95"
+                                  }`}
+                                >
+                                  {cardFoilSetting ? (
+                                    <>
+                                      <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                      <span>{foilLabel}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                      <span>Regular</span>
+                                    </>
+                                  )}
+                                </button>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {cardFoilSetting
+                                    ? (card.prices?.usd_foil ? `${Number(card.prices.usd_foil).toFixed(2)}` : (card.prices?.usd_etched ? `${Number(card.prices.usd_etched).toFixed(2)}` : 'Foil'))
+                                    : (card.prices?.usd ? `${Number(card.prices.usd).toFixed(2)}` : 'Reg')}
+                                </span>
+                              </div>
+
                               <div className="flex items-center gap-1 w-full">
                               <button
                                 type="button"
-                                onClick={() => onQuickAddToDeck(card, 'main')}
+                                onClick={() => onQuickAddToDeck(card, 'main', cardFoilSetting)}
                                 disabled={isAtLimit}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   isAtLimit
@@ -2624,7 +2684,7 @@ const displayedCards = useMemo(() => {
                                       ? 'bg-violet-600/30 border border-violet-500/60 hover:bg-violet-500 hover:text-white text-violet-200 cursor-pointer shadow-sm active:scale-95'
                                       : 'bg-slate-800 hover:bg-violet-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
-                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Mainboard${mainCopies > 0 ? ` (Currently: ${mainCopies})` : ''}`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 ${cardFoilSetting ? foilLabel : 'regular'} copy to Mainboard${mainCopies > 0 ? ` (Currently: ${mainCopies})` : ''}`}
                               >
                                 <Layers className="w-3.5 h-3.5 shrink-0" />
                                 {mainCopies > 0 && (
@@ -2634,7 +2694,7 @@ const displayedCards = useMemo(() => {
 
                               <button
                                 type="button"
-                                onClick={() => onQuickAddToDeck(card, 'sideboard')}
+                                onClick={() => onQuickAddToDeck(card, 'sideboard', cardFoilSetting)}
                                 disabled={isAtLimit}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   isAtLimit
@@ -2643,7 +2703,7 @@ const displayedCards = useMemo(() => {
                                       ? 'bg-sky-600/30 border border-sky-500/60 hover:bg-sky-500 hover:text-white text-sky-200 cursor-pointer shadow-sm active:scale-95'
                                       : 'bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
-                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Sideboard${sideCopies > 0 ? ` (Currently: ${sideCopies})` : ''}`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 ${cardFoilSetting ? foilLabel : 'regular'} copy to Sideboard${sideCopies > 0 ? ` (Currently: ${sideCopies})` : ''}`}
                               >
                                 <Shield className="w-3.5 h-3.5 shrink-0" />
                                 {sideCopies > 0 && (
@@ -2653,7 +2713,7 @@ const displayedCards = useMemo(() => {
 
                               <button
                                 type="button"
-                                onClick={() => onQuickAddToDeck(card, 'maybeboard')}
+                                onClick={() => onQuickAddToDeck(card, 'maybeboard', cardFoilSetting)}
                                 disabled={isAtLimit}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-bold transition-all ${
                                   isAtLimit
@@ -2662,7 +2722,7 @@ const displayedCards = useMemo(() => {
                                       ? 'bg-violet-600/30 border border-violet-500/60 hover:bg-violet-500 hover:text-white text-violet-200 cursor-pointer shadow-sm active:scale-95'
                                       : 'bg-slate-800 hover:bg-violet-600 hover:text-white text-slate-200 border border-slate-700/60 cursor-pointer shadow-sm active:scale-95'
                                 }`}
-                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
+                                title={isAtLimit ? `Format limit reached (${deckCopies}/${deckLimit})` : `Add 1 ${cardFoilSetting ? foilLabel : 'regular'} copy to Maybeboard${maybeCopies > 0 ? ` (Currently: ${maybeCopies})` : ''}`}
                               >
                                 <HelpCircle className="w-3.5 h-3.5 shrink-0" />
                                 {maybeCopies > 0 && (

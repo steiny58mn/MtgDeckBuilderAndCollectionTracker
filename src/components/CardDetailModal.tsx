@@ -18,6 +18,7 @@ import { ScryfallCard, Deck, DeckCard, CollectionCard, CardCondition, DeckCatego
 import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError, getCardFromLocalCache, localCardCache } from '../services/api';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
+import { getCardNames } from '../utils/cardNameUtils';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardLegalInCommander, getCardEffectiveColors, cardCanBeFoil, cardCanBeNonfoil } from '../utils/deckUtils';
 
 interface CardDetailModalProps {
@@ -137,7 +138,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
     try {
       setIsLoadingPrintings(true);
-      const cleanName = displayCard.name.split(' // ')[0].trim();
+      const names = getCardNames(displayCard);
+      const cleanName = (names.oracleName || displayCard.name).split(' // ')[0].trim();
       const prints = await fetchCardPrints(cleanName);
       if (Array.isArray(prints) && prints.length > 0) {
         setPrintingsList(prints);
@@ -453,9 +455,21 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             {/* Header info */}
             <div>
               <div className="flex items-start justify-between gap-2">
-                <h2 className="text-2xl font-bold tracking-tight text-white">
-                  {displayCard.name}
-                </h2>
+                {(() => {
+                  const names = getCardNames(displayCard);
+                  return (
+                    <div className="flex flex-col min-w-0">
+                      <h2 className="text-2xl font-bold tracking-tight text-white">
+                        {names.actualName || displayCard.name}
+                      </h2>
+                      {names.hasAlternateName && names.subtitle && (
+                        <span className="text-xs text-slate-400 italic mt-0.5" title={`Official Oracle MTG rules name: ${names.oracleName}`}>
+                          {names.subtitle}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
                 <ManaCostBadge manaCost={activeFace?.mana_cost || displayCard.mana_cost} size="lg" />
               </div>
               <p className="text-sm font-medium text-slate-400 mt-1">
@@ -584,14 +598,26 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                             onError={(e) => handleCardImageError(e, p)}
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="font-bold text-xs text-white truncate" title={p.set_name || p.set.toUpperCase()}>
-                                {p.set_name || p.set.toUpperCase()}
-                              </span>
-                              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase shrink-0">
-                                #{p.collector_number}
-                              </span>
-                            </div>
+                            {(() => {
+                              const pNames = getCardNames(p);
+                              return (
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-bold text-xs text-white truncate" title={pNames.hasAlternateName ? `${pNames.actualName} (${p.set_name || p.set.toUpperCase()})` : (p.set_name || p.set.toUpperCase())}>
+                                      {pNames.hasAlternateName ? pNames.actualName : (p.set_name || p.set.toUpperCase())}
+                                    </span>
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase shrink-0">
+                                      #{p.collector_number}
+                                    </span>
+                                  </div>
+                                  {pNames.hasAlternateName && (
+                                    <div className="text-[10px] text-slate-400 truncate">
+                                      {p.set_name || p.set.toUpperCase()}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
                               <span className="capitalize">{p.rarity}</span>
                               {pPriceUsd !== null && (
