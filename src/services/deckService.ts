@@ -2380,6 +2380,7 @@ export class DeckService {
     } else {
       this.inMemoryBinders.unshift(updated);
     }
+    this.persistBindersToCache(this.inMemoryBinders);
     this.notifyBinders();
 
     this.setStatus('syncing');
@@ -2412,6 +2413,7 @@ export class DeckService {
    */
   static async deleteBinder(binderId: string): Promise<void> {
     this.inMemoryBinders = this.inMemoryBinders.filter((b) => b.id !== binderId);
+    this.persistBindersToCache(this.inMemoryBinders);
     this.notifyBinders();
 
     this.setStatus('syncing');

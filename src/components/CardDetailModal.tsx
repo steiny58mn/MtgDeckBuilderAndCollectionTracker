@@ -15,7 +15,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { ScryfallCard, Deck, DeckCard, CollectionCard, CardCondition, DeckCategory, Binder } from '../types/mtg';
-import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError, getCardFromLocalCache, localCardCache } from '../services/api';
+import { getCardImageUrl, getCardBackImageUrl, getCardById, fetchCardPrints, handleCardImageError, getCardFromLocalCache, localCardCache, cardByIdCache } from '../services/api';
 import { DeckService } from '../services/deckService';
 import { ManaCostBadge } from './ManaCostBadge';
 import { getCardNames } from '../utils/cardNameUtils';
@@ -214,17 +214,28 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
       const applyFullData = (fullData: ScryfallCard) => {
         setDisplayCard((prev) => (prev ? {
-          ...prev,
           ...fullData,
+          ...prev,
+          oracle_text: prev.oracle_text || fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text,
+          oracleText: (prev as any).oracleText || fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text,
+          type_line: prev.type_line || fullData.type_line || fullData.card_faces?.[0]?.type_line,
+          typeLine: (prev as any).typeLine || fullData.type_line || fullData.card_faces?.[0]?.type_line,
+          mana_cost: prev.mana_cost || fullData.mana_cost || fullData.card_faces?.[0]?.mana_cost,
+          manaCost: (prev as any).manaCost || fullData.mana_cost || fullData.card_faces?.[0]?.mana_cost,
+          colors: (prev.colors && prev.colors.length > 0) ? prev.colors : fullData.colors,
+          color_identity: (prev.color_identity && prev.color_identity.length > 0) ? prev.color_identity : fullData.color_identity,
+          card_faces: prev.card_faces || fullData.card_faces,
+          legalities: prev.legalities && Object.keys(prev.legalities).length > 0 ? prev.legalities : fullData.legalities,
           collectionCardId: (prev as any).collectionCardId || (card as any).collectionCardId,
           binderId: (prev as any).binderId || (card as any).binderId,
+          isFoil: (prev as any).isFoil !== undefined ? (prev as any).isFoil : (card as any)?.isFoil,
           deckCardId: (prev as any).deckCardId || (card as any).deckCardId,
         } : fullData));
 
         const exact = cleanName.toLowerCase().trim();
         const front = exact.split(' // ')[0].trim();
-        localCardCache.set(exact, fullData);
-        localCardCache.set(front, fullData);
+        if (!localCardCache.has(exact)) localCardCache.set(exact, fullData);
+        if (!localCardCache.has(front)) localCardCache.set(front, fullData);
 
         const typeLine = fullData.type_line || fullData.card_faces?.[0]?.type_line || '';
         const manaCost = fullData.mana_cost || fullData.card_faces?.[0]?.mana_cost || '';
@@ -234,7 +245,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             ? fullData.card_faces[0].colors
             : getCardEffectiveColors(fullData);
 
-        // Update card in activeDeck if matching
+        // Update card in activeDeck if matching (ONLY missing fields, NEVER overwrite scryfallId, set, or imageUrl!)
         if (activeDeck && Array.isArray(activeDeck.cards)) {
           const deckCardId = (card as any).deckCardId || card.id;
           const matchingIndex = activeDeck.cards.findIndex((c) => c.id === deckCardId || c.name.toLowerCase().trim() === exact);
@@ -242,18 +253,18 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             const oldC = activeDeck.cards[matchingIndex];
             const updatedC: DeckCard = {
               ...oldC,
-              scryfallId: fullData.id || oldC.scryfallId,
-              type_line: typeLine || oldC.type_line,
-              typeLine: typeLine || oldC.typeLine,
-              mana_cost: manaCost || oldC.mana_cost,
-              manaCost: manaCost || oldC.manaCost,
-              oracle_text: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || oldC.oracle_text,
-              colors: colors.length > 0 ? colors : oldC.colors,
-              color_identity: fullData.color_identity || oldC.color_identity,
-              colorIdentity: fullData.color_identity || oldC.colorIdentity,
-              cmc: fullData.cmc ?? oldC.cmc,
-              rarity: fullData.rarity || oldC.rarity,
-              imageUrl: fullData.image_uris?.normal || oldC.imageUrl,
+              scryfallId: oldC.scryfallId || fullData.id,
+              type_line: oldC.type_line || typeLine,
+              typeLine: oldC.typeLine || typeLine,
+              mana_cost: oldC.mana_cost || manaCost,
+              manaCost: oldC.manaCost || manaCost,
+              oracle_text: oldC.oracle_text || fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text,
+              colors: (oldC.colors && oldC.colors.length > 0) ? oldC.colors : colors,
+              color_identity: (oldC.color_identity && oldC.color_identity.length > 0) ? oldC.color_identity : fullData.color_identity,
+              colorIdentity: (oldC.colorIdentity && oldC.colorIdentity.length > 0) ? oldC.colorIdentity : fullData.color_identity,
+              cmc: oldC.cmc ?? fullData.cmc,
+              rarity: oldC.rarity || fullData.rarity,
+              imageUrl: oldC.imageUrl || fullData.image_uris?.normal,
             };
             const updatedCards = [...activeDeck.cards];
             updatedCards[matchingIndex] = updatedC;
@@ -261,32 +272,37 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           }
         }
 
-        // Update card in collection / binder if matching
+        // Update card in collection / binder if matching (ONLY missing fields, NEVER overwrite scryfallId, set, or imageUrl!)
         const collectionCardId = (card as any).collectionCardId || card.id;
         const allCollection = DeckService.getLocalCollection();
         const matchingCol = allCollection.find((c) => c.id === collectionCardId || c.name.toLowerCase().trim() === exact);
         if (matchingCol) {
           const updatedCol: CollectionCard = {
             ...matchingCol,
-            scryfallId: fullData.id || matchingCol.scryfallId,
-            type_line: typeLine || matchingCol.type_line,
-            typeLine: typeLine || matchingCol.typeLine,
-            mana_cost: manaCost || matchingCol.mana_cost,
-            manaCost: manaCost || matchingCol.manaCost,
-            oracle_text: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracle_text,
-            oracleText: fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracleText,
-            colors: colors.length > 0 ? colors : matchingCol.colors,
-            color_identity: fullData.color_identity || matchingCol.color_identity,
-            colorIdentity: fullData.color_identity || matchingCol.colorIdentity,
-            cmc: fullData.cmc ?? matchingCol.cmc,
-            rarity: fullData.rarity || matchingCol.rarity,
-            imageUrl: fullData.image_uris?.normal || matchingCol.imageUrl,
+            scryfallId: matchingCol.scryfallId || fullData.id,
+            type_line: matchingCol.type_line || typeLine,
+            typeLine: matchingCol.typeLine || typeLine,
+            mana_cost: matchingCol.mana_cost || manaCost,
+            manaCost: matchingCol.manaCost || manaCost,
+            oracle_text: matchingCol.oracle_text || fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracleText,
+            oracleText: matchingCol.oracleText || fullData.oracle_text || fullData.card_faces?.[0]?.oracle_text || matchingCol.oracle_text,
+            colors: (matchingCol.colors && matchingCol.colors.length > 0) ? matchingCol.colors : colors,
+            color_identity: (matchingCol.color_identity && matchingCol.color_identity.length > 0) ? matchingCol.color_identity : fullData.color_identity,
+            colorIdentity: (matchingCol.colorIdentity && matchingCol.colorIdentity.length > 0) ? matchingCol.colorIdentity : fullData.color_identity,
+            cmc: matchingCol.cmc ?? fullData.cmc,
+            rarity: matchingCol.rarity || fullData.rarity,
+            imageUrl: matchingCol.imageUrl || fullData.image_uris?.normal,
           };
-          DeckService.saveCollectionCard(updatedCol).catch(() => {});
+          // Only save if missing metadata was actually populated
+          if (!matchingCol.type_line || !matchingCol.oracle_text || !matchingCol.scryfallId) {
+            DeckService.saveCollectionCard(updatedCol).catch(() => {});
+          }
         }
       };
 
-      const cached = getCardFromLocalCache(cleanName);
+      const cached = (scryId && uuidRegex.test(scryId)
+        ? (cardByIdCache.get(scryId.toLowerCase()) || localCardCache.get(scryId.toLowerCase()))
+        : null) || getCardFromLocalCache(cleanName);
       if (cached && cached.type_line && (cached.colors?.length || cached.mana_cost)) {
         applyFullData(cached);
         setIsLoadingFull(false);

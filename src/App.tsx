@@ -26,7 +26,7 @@ import { CardScannerModal } from './components/CardScannerModal';
 import { BinderList } from './components/BinderList';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
-import { getCardImageUrl, getCardBackImageUrl } from './services/api';
+import { getCardImageUrl, getCardBackImageUrl, cardByIdCache } from './services/api';
 import { GamechangerService } from './services/gamechangerService';
 import { scrollToTop } from './utils/scrollUtils';
 import { canHaveAnyNumberOfCopies, getDeckCommander, isCardGamechanger, isCardLegalInCommander, sortWUBRG, cardCanBeFoil, cardCanBeNonfoil } from './utils/deckUtils';
@@ -1074,7 +1074,9 @@ export default function App() {
     let updatedAnyBinder = false;
 
     // 1. Check if card should be updated in active deck
-    const shouldUpdateDeck = (Boolean(targetDeckCardId) || searchContext === 'deck' || activeTab === 'decks') && Boolean(activeDeck);
+    const isExplicitDeckCard = Boolean(targetDeckCardId);
+    const isBinderCard = searchContext === 'binder' || (Boolean(targetCollectionCardId) && !targetDeckCardId);
+    const shouldUpdateDeck = (isExplicitDeckCard || (!isBinderCard && (searchContext === 'deck' || activeTab === 'decks'))) && Boolean(activeDeck);
     if (shouldUpdateDeck && activeDeck) {
       const updatedCards = (activeDeck.cards || []).map((c) => {
         const isMatch = targetDeckCardId
@@ -1135,7 +1137,7 @@ export default function App() {
     }
 
     // 2. Check if card should be updated in a collection binder
-    const shouldUpdateBinder = Boolean(targetCollectionCardId) || searchContext === 'binder' || activeTab === 'collection' || (!shouldUpdateDeck && Boolean(activeBinder));
+    const shouldUpdateBinder = Boolean(targetCollectionCardId) || isBinderCard || activeTab === 'collection' || (!shouldUpdateDeck && Boolean(activeBinder));
     if (shouldUpdateBinder) {
       const allBinders = DeckService.getLocalBinders();
       let targetBinder: Binder | undefined = undefined;
@@ -1249,6 +1251,18 @@ export default function App() {
         `Updated printing in ${destination} for "${targetCard.name}" to ${(newPrinting.set || '').toUpperCase()} #${newPrinting.collector_number}`,
         'success'
       );
+
+      setInspectedCard({
+        ...newPrinting,
+        deckCardId: targetDeckCardId,
+        collectionCardId: targetCollectionCardId,
+        binderId: targetBinderId,
+        imageUrl: newImageUrl || (targetCard as any).imageUrl,
+      } as any);
+
+      if (newPrinting.id) {
+        cardByIdCache.set(newPrinting.id.toLowerCase(), newPrinting);
+      }
     }
   };
 
@@ -1329,8 +1343,8 @@ export default function App() {
                 }
                 setActiveTab('search');
               }}
-              onSelectCard={(c) => {
-                setSearchContext('deck');
+              onSelectCard={(c, ctx) => {
+                setSearchContext(ctx || 'deck');
                 setInspectedCard(c);
               }}
               onCreateNewDeck={handleCreateNewDeckFromExisting}

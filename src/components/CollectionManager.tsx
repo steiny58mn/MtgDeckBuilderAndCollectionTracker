@@ -81,30 +81,36 @@ export function cardToScryfallCard(card: CollectionCard): ScryfallCard {
   const frame_effects = card.frame_effects || cached?.frame_effects;
   const promo_types = card.promo_types || cached?.promo_types;
 
+  const rawImg = card.imageUrl || getCardDisplayImageUrl(card);
+  const largeImg = getCardLargeImageUrl(card) || rawImg;
+
   return {
     id: card.scryfallId,
     name: card.name,
     printed_name: card.printed_name || card.printedName,
     flavor_name: card.flavor_name || card.flavorName,
     set: card.set,
-    collector_number: card.collectorNumber,
-    cmc: card.cmc,
-    mana_cost: card.mana_cost,
-    type_line: card.type_line,
+    collector_number: card.collectorNumber || (card as any).collector_number,
+    collectorNumber: card.collectorNumber || (card as any).collector_number,
+    cmc: card.cmc ?? cached?.cmc,
+    mana_cost: card.mana_cost || (card as any).manaCost || cached?.mana_cost,
+    type_line: card.type_line || (card as any).typeLine || cached?.type_line,
+    oracle_text: card.oracle_text || (card as any).oracleText || cached?.oracle_text,
     rarity: card.rarity,
     colors: effectiveColors,
     color_identity: (Array.isArray(card.color_identity) && card.color_identity.length > 0) ? card.color_identity : effectiveColors,
     legalities: cached?.legalities || {},
     prices: cached?.prices || { usd: card.currentPriceUsd?.toString() },
     image_uris: {
-      small: card.imageUrl,
-      normal: card.imageUrl,
-      large: card.imageUrl,
-      art_crop: card.imageUrl,
+      small: rawImg,
+      normal: rawImg,
+      large: largeImg,
+      art_crop: rawImg,
     },
-    imageUrl: card.imageUrl,
+    imageUrl: rawImg,
     scryfallId: card.scryfallId,
-    set_name: card.setName,
+    set_name: card.setName || (card as any).set_name,
+    setName: card.setName || (card as any).set_name,
     isFoil: card.isFoil,
     foil,
     nonfoil,

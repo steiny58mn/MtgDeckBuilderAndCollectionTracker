@@ -112,7 +112,7 @@ interface DeckBuilderProps {
   onSaveDeck?: (deckToSave: Deck) => Promise<void> | void;
   onDeleteDeck: (deckId: string) => void;
   onOpenSearch: (category?: DeckCategory | 'partner') => void;
-  onSelectCard: (card: ScryfallCard) => void;
+  onSelectCard: (card: ScryfallCard, context?: 'deck' | 'binder') => void;
   onCreateNewDeck?: (currentDeckToSave: Deck) => Promise<void> | void;
   onImportAsNewDeck?: (newDeck: Deck, shouldSaveCurrentDeck: boolean) => Promise<void>;
   onBatchImportCompleted?: (count: number) => void;
@@ -3271,7 +3271,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
             selectedBinderId={activeDeck.binderId || 'all'}
             onSelectBinderId={handleSelectBinderId}
             onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
-            onSelectCard={(c) => onSelectCard(cardToScryfallCard(c))}
+            onSelectCard={(c) => onSelectCard(cardToScryfallCard(c), 'binder')}
             activeDeck={activeDeck}
           />
         </div>
@@ -3877,7 +3877,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({
         selectedBinderId={activeDeck.binderId || 'all'}
         onSelectBinderId={handleSelectBinderId}
         onUpdateCollectionCard={handleUpdateCollectionCardFromModal}
-        onSelectCard={(c) => onSelectCard(cardToScryfallCard(c))}
+        onSelectCard={(c) => onSelectCard(cardToScryfallCard(c), 'binder')}
         activeDeck={activeDeck}
       />
 
