@@ -256,6 +256,7 @@ export function parseTappedOut(content: string): ParsedDeckImport {
     if (match) {
       qty = parseInt(match[1], 10);
       cardName = match[2];
+      if (!isNaN(qty) && qty <= 0) continue;
     }
 
     // Extract set code, e.g. (C16) or (2XM:12)
@@ -559,17 +560,21 @@ export function parseCSV(content: string): ParsedDeckImport {
   };
 
   const headerCells = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
-  const qtyIdx = headerCells.findIndex((h) => h.includes('quant') || h.includes('count') || h === 'qty');
+  const normalIdx = headerCells.findIndex((h) => h === 'normal' || h === 'regular' || h === 'paper' || h === 'nonfoil' || h.includes('regular') || h.includes('normal') || h.includes('paper'));
+  const etchedIdx = headerCells.findIndex((h) => h.includes('etched'));
+  const foilIdx = headerCells.findIndex((h) => (h.includes('foil') && !h.includes('etched')) || h === 'foil');
+  const qtyIdx = headerCells.findIndex((h) => h.includes('quant') || h.includes('count') || h === 'qty' || h === 'amount');
+  const finishIdx = headerCells.findIndex((h) => h.includes('finish') || h.includes('printing') || h.includes('treatment'));
   const nameIdx = headerCells.findIndex((h) => h.includes('name') || h.includes('card'));
   const catIdx = headerCells.findIndex((h) => h.includes('category') || h.includes('board') || h.includes('section'));
   const setIdx = headerCells.findIndex((h) => h.includes('set') || h.includes('edition'));
-  const foilIdx = headerCells.findIndex((h) => h.includes('foil'));
   const scryfallIdx = headerCells.findIndex((h) => h.includes('scryfall') || h === 'id');
   const numberIdx = headerCells.findIndex((h) => h.includes('collector') || h.includes('number') || h === 'cn');
 
-  const startIndex = (qtyIdx !== -1 || nameIdx !== -1) ? 1 : 0;
-  const actualQtyIdx = qtyIdx !== -1 ? qtyIdx : 0;
-  const actualNameIdx = nameIdx !== -1 ? nameIdx : 1;
+  const hasSpecificFinishColumns = normalIdx !== -1 || etchedIdx !== -1;
+  const hasQtyCol = qtyIdx !== -1 || hasSpecificFinishColumns || foilIdx !== -1;
+  const startIndex = (hasQtyCol || nameIdx !== -1) ? 1 : 0;
+  const actualNameIdx = nameIdx !== -1 ? nameIdx : (qtyIdx === 0 ? 1 : 0);
 
   const cards: ParsedImportCard[] = [];
 
@@ -577,8 +582,6 @@ export function parseCSV(content: string): ParsedDeckImport {
     const cells = parseCsvLine(lines[i]);
     if (cells.length === 0 || !cells[actualNameIdx]) continue;
 
-    const rawQty = parseInt(cells[actualQtyIdx], 10);
-    const qty = isNaN(rawQty) || rawQty < 1 ? 1 : rawQty;
     const name = cells[actualNameIdx].trim();
     if (!name) continue;
 
@@ -591,21 +594,63 @@ export function parseCSV(content: string): ParsedDeckImport {
     }
 
     const set = setIdx !== -1 && cells[setIdx] ? cells[setIdx].toLowerCase() : undefined;
-    const isFoil = foilIdx !== -1 && cells[foilIdx] ? /^(yes|true|foil|1)$/i.test(cells[foilIdx]) : undefined;
     const rawScryfallId = scryfallIdx !== -1 && cells[scryfallIdx] ? cells[scryfallIdx].trim() : undefined;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const scryfallId = (rawScryfallId && uuidRegex.test(rawScryfallId)) ? rawScryfallId.toLowerCase() : undefined;
     const collectorNumber = numberIdx !== -1 && cells[numberIdx] ? cells[numberIdx].trim() : undefined;
 
-    cards.push({
-      quantity: qty,
-      name,
-      category,
-      set,
-      collector_number: collectorNumber,
-      isFoil,
-      scryfallId,
-    });
+    if (hasSpecificFinishColumns) {
+      const normQty = normalIdx !== -1 ? (parseInt(cells[normalIdx], 10) || 0) : 0;
+      const fQty = foilIdx !== -1 ? (parseInt(cells[foilIdx], 10) || 0) : 0;
+      const etchQty = etchedIdx !== -1 ? (parseInt(cells[etchedIdx], 10) || 0) : 0;
+      const totalFoil = fQty + etchQty;
+
+      // If a card has 0 in all quantities in the file, don't import it!
+      if (normQty <= 0 && totalFoil <= 0) continue;
+
+      if (normQty > 0) {
+        cards.push({
+          quantity: normQty,
+          name,
+          category,
+          set,
+          collector_number: collectorNumber,
+          isFoil: false,
+          scryfallId,
+        });
+      }
+      if (totalFoil > 0) {
+        cards.push({
+          quantity: totalFoil,
+          name,
+          category,
+          set,
+          collector_number: collectorNumber,
+          isFoil: true,
+          scryfallId,
+        });
+      }
+    } else {
+      const actualQtyIdx = qtyIdx !== -1 ? qtyIdx : 0;
+      const rawQty = qtyIdx !== -1 ? parseInt(cells[actualQtyIdx], 10) : 1;
+
+      // If quantity column exists and quantity is 0 or less, don't import it!
+      if (qtyIdx !== -1 && !isNaN(rawQty) && rawQty <= 0) continue;
+
+      const qty = isNaN(rawQty) || rawQty < 1 ? 1 : rawQty;
+      const finishVal = ((finishIdx !== -1 ? cells[finishIdx] : (foilIdx !== -1 ? cells[foilIdx] : '')) || '').trim().toLowerCase();
+      const isFoil = finishVal.includes('foil') || finishVal.includes('etched') || finishVal === 'true' || finishVal === 'yes' || finishVal === '1';
+
+      cards.push({
+        quantity: qty,
+        name,
+        category,
+        set,
+        collector_number: collectorNumber,
+        isFoil: isFoil ? true : (foilIdx !== -1 ? false : undefined),
+        scryfallId,
+      });
+    }
   }
 
   const hasCommander = cards.some((c) => c.category === 'commander');
@@ -713,6 +758,7 @@ export function parseExcelTSV(content: string): ParsedDeckImport {
     if (cells.length === 0 || !cells[actualNameIdx]) continue;
 
     const rawQty = parseInt(cells[actualQtyIdx], 10);
+    if (qtyIdx !== -1 && !isNaN(rawQty) && rawQty <= 0) continue;
     const qty = isNaN(rawQty) || rawQty < 1 ? 1 : rawQty;
     const name = cells[actualNameIdx].trim();
     if (!name) continue;

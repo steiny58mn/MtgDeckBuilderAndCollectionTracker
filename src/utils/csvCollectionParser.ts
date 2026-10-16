@@ -71,10 +71,61 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
   const setNameIdx = colIndexMap.get('setname') ?? colIndexMap.get('editionname') ?? colIndexMap.get('expansion') ?? -1;
   const collectorIdx = colIndexMap.get('collectornumber') ?? colIndexMap.get('cardnumber') ?? colIndexMap.get('number') ?? colIndexMap.get('cn') ?? -1;
   const scryfallSetIdIdx = colIndexMap.get('setscryfallsetid') ?? colIndexMap.get('scryfallsetid') ?? -1;
-  const paperIdx = colIndexMap.get('havespaper') ?? colIndexMap.get('paper') ?? colIndexMap.get('quantity') ?? colIndexMap.get('regular') ?? colIndexMap.get('count') ?? colIndexMap.get('qty') ?? -1;
-  const foilIdx = colIndexMap.get('havesfoil') ?? colIndexMap.get('foil') ?? -1;
-  const etchedIdx = colIndexMap.get('havesetched') ?? colIndexMap.get('etched') ?? -1;
   const rarityIdx = colIndexMap.get('rarity') ?? colIndexMap.get('cardrarity') ?? colIndexMap.get('r') ?? -1;
+
+  // Specific finish quantity columns
+  const normalIdx = colIndexMap.get('normal')
+    ?? colIndexMap.get('nonfoil')
+    ?? colIndexMap.get('regular')
+    ?? colIndexMap.get('paper')
+    ?? colIndexMap.get('havespaper')
+    ?? colIndexMap.get('havenormal')
+    ?? colIndexMap.get('haveregular')
+    ?? colIndexMap.get('regularquantity')
+    ?? colIndexMap.get('normalquantity')
+    ?? colIndexMap.get('quantitynormal')
+    ?? colIndexMap.get('quantityregular')
+    ?? colIndexMap.get('regularcount')
+    ?? colIndexMap.get('normalcount')
+    ?? -1;
+
+  const etchedIdx = colIndexMap.get('etched')
+    ?? colIndexMap.get('foiletched')
+    ?? colIndexMap.get('etchedfoil')
+    ?? colIndexMap.get('havesetched')
+    ?? colIndexMap.get('haveetched')
+    ?? colIndexMap.get('etchedquantity')
+    ?? colIndexMap.get('quantityetched')
+    ?? colIndexMap.get('etchedcount')
+    ?? -1;
+
+  const foilIdx = colIndexMap.get('havesfoil')
+    ?? colIndexMap.get('havefoil')
+    ?? colIndexMap.get('foilquantity')
+    ?? colIndexMap.get('quantityfoil')
+    ?? colIndexMap.get('foilcount')
+    ?? colIndexMap.get('foils')
+    ?? (colIndexMap.has('foil') && colIndexMap.get('foil') !== normalIdx && colIndexMap.get('foil') !== etchedIdx ? colIndexMap.get('foil')! : -1);
+
+  // Standalone generic quantity column (e.g. "Quantity", "Count", "Qty")
+  const genericQtyIdx = colIndexMap.get('quantity')
+    ?? colIndexMap.get('count')
+    ?? colIndexMap.get('qty')
+    ?? colIndexMap.get('amount')
+    ?? colIndexMap.get('total')
+    ?? colIndexMap.get('haves')
+    ?? colIndexMap.get('have')
+    ?? -1;
+
+  // Standalone finish / treatment column (e.g. "Finish", "Printing", "Treatment")
+  const finishIdx = colIndexMap.get('finish')
+    ?? colIndexMap.get('printing')
+    ?? colIndexMap.get('treatment')
+    ?? colIndexMap.get('finishes')
+    ?? -1;
+
+  const hasSpecificFinishColumns = normalIdx >= 0 || etchedIdx >= 0 || (foilIdx >= 0 && foilIdx !== genericQtyIdx);
+  const hasGenericQty = genericQtyIdx >= 0;
 
   const results: ParsedCsvCard[] = [];
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -119,30 +170,94 @@ export function parseCollectionCsv(csvText: string): ParsedCsvCard[] {
     }
 
     let paperQty = 0;
-    if (paperIdx >= 0) {
-      paperQty = parseInt(cols[paperIdx] || '0', 10) || 0;
+    let foilQty = 0;
+    let etchedQty = 0;
+
+    if (hasSpecificFinishColumns) {
+      if (normalIdx >= 0) {
+        const raw = parseInt(cols[normalIdx] || '0', 10);
+        paperQty = isNaN(raw) ? 0 : Math.max(0, raw);
+      } else if (!hasGenericQty) {
+        paperQty = 0;
+      }
+
+      if (etchedIdx >= 0) {
+        const raw = parseInt(cols[etchedIdx] || '0', 10);
+        etchedQty = isNaN(raw) ? 0 : Math.max(0, raw);
+      }
+
+      if (foilIdx >= 0 && foilIdx !== normalIdx && foilIdx !== etchedIdx) {
+        const rawStr = (cols[foilIdx] || '').trim().toLowerCase();
+        const raw = parseInt(rawStr || '0', 10);
+        if (!isNaN(raw) && !rawStr.includes('etched') && !rawStr.includes('foil')) {
+          foilQty = Math.max(0, raw);
+        } else if (rawStr.includes('etched')) {
+          if (etchedIdx < 0) {
+            etchedQty = hasGenericQty ? (parseInt(cols[genericQtyIdx] || '0', 10) || 1) : 1;
+          }
+        } else if (rawStr.includes('foil') || rawStr === 'true' || rawStr === 'yes' || rawStr === '1') {
+          foilQty = hasGenericQty ? (parseInt(cols[genericQtyIdx] || '0', 10) || 1) : 1;
+        }
+      }
+
+      if (hasGenericQty && normalIdx < 0 && etchedQty === 0 && foilQty === 0) {
+        const raw = parseInt(cols[genericQtyIdx] || '0', 10);
+        const qty = isNaN(raw) ? 0 : Math.max(0, raw);
+        const effectiveFinishCol = finishIdx >= 0 ? finishIdx : foilIdx;
+        const finishVal = (effectiveFinishCol >= 0 ? (cols[effectiveFinishCol] || '') : '').trim().toLowerCase();
+        if (finishVal.includes('etched')) {
+          etchedQty = qty;
+        } else if (finishVal.includes('foil') || finishVal === 'true' || finishVal === 'yes') {
+          foilQty = qty;
+        } else {
+          paperQty = qty;
+        }
+      }
+    } else if (hasGenericQty) {
+      const raw = parseInt(cols[genericQtyIdx] || '0', 10);
+      const qty = isNaN(raw) ? 0 : Math.max(0, raw);
+
+      if (qty > 0) {
+        const effectiveFinishCol = finishIdx >= 0 ? finishIdx : (colIndexMap.get('foil') ?? -1);
+        const finishVal = (effectiveFinishCol >= 0 ? (cols[effectiveFinishCol] || '') : '').trim().toLowerCase();
+        const isEtched = finishVal.includes('etched');
+        const isFoil = !isEtched && (
+          finishVal.includes('foil') ||
+          finishVal === 'true' ||
+          finishVal === 'yes' ||
+          finishVal === '1'
+        );
+
+        if (isEtched) {
+          etchedQty = qty;
+        } else if (isFoil) {
+          foilQty = qty;
+        } else {
+          paperQty = qty;
+        }
+      }
     } else {
       paperQty = 1;
     }
 
-    const foilQty = foilIdx >= 0 ? (parseInt(cols[foilIdx] || '0', 10) || 0) : 0;
-    const etchedQty = etchedIdx >= 0 ? (parseInt(cols[etchedIdx] || '0', 10) || 0) : 0;
-    // Treat Etched as Foil quantity
     const totalFoil = foilQty + etchedQty;
 
-    if (paperQty > 0 || totalFoil > 0) {
-      results.push({
-        name,
-        scryfallId,
-        set,
-        setName,
-        collectorNumber,
-        scryfallSetId,
-        rarity: parsedRarity,
-        quantityRegular: paperQty,
-        quantityFoil: totalFoil,
-      });
+    // If a card has 0 in all quantities in the file, don't import it!
+    if (paperQty <= 0 && totalFoil <= 0) {
+      continue;
     }
+
+    results.push({
+      name,
+      scryfallId,
+      set,
+      setName,
+      collectorNumber,
+      scryfallSetId,
+      rarity: parsedRarity,
+      quantityRegular: paperQty,
+      quantityFoil: totalFoil,
+    });
   }
 
   return results;
